@@ -1,0 +1,16 @@
+node_modules
+dist
+*.local
+.DS_Store
+*.test
+*.rar
+*.7z
+*.tar
+*.gz
+*.bz2
+*.wim
+*.iso
+*.img
+*.vhdx
+*.vhdl
+*.vhd

@@ -1,0 +1,170 @@
+---
+description: 代码生成规范：类型注释、最小改动、复用现有能力、schema.sql 追加策略
+alwaysApply: true
+---
+
+# 代码生成规范
+
+每次生成或修改代码时，必须遵守以下四条原则。
+
+## 1. 完善的类型注释
+
+### 前端（ai-video-web）
+
+- 新增/修改的函数、组件、computed、watch添加注释说明业务含义；复杂业务逻辑要在关键节点处加注释说明。
+- 新增/修改的函数、组件 props、emits、API 参数与返回值必须有明确 TypeScript 类型，禁止裸 `any`（无法推断时优先用 `unknown` 再收窄）。
+- 跨模块复用的类型放在 `src/@types/`，字段用 JSDoc 说明业务含义，参考现有 `UserInfoType` 写法。
+- Vue 组件使用 `<script setup lang="ts">`，`defineProps` / `defineEmits` 必须带泛型或类型声明。
+- 生成或修改前端代码时，必须严格遵循项目根目录 prettier.config.cjs 中定义的格式化规则，包括但不限于缩进、引号风格、尾随逗号、分号、换行、对象与数组格式等。
+- 输出代码前应按 prettier.config.cjs 规范进行格式整理，不得使用与项目配置冲突的代码风格。
+- 若生成示例代码、组件代码或补丁代码，同样需符合 prettier.config.cjs 的格式要求。
+
+```typescript
+// ✅ GOOD
+interface QueryParams {
+  /** 页码，从 1 开始 */
+  pageNum: number;
+  /** 每页条数 */
+  pageSize: number;
+}
+
+// ❌ BAD
+const fetchList = (params: any) => { ... }
+```
+
+### 后端（ai-video）
+
+- 新增/修改的 public 方法、DTO/VO/Bean 字段、Controller 入参出参需补 JavaDoc（类、字段、方法说明）。
+- 枚举、常量、函数需注释业务含义；复杂业务逻辑要关键节点处加注释说明。
+- 异常与错误码必须遵循 `.cursor/rules/backend-error-handling.mdc`：业务异常用 `BizException(ErrorCode.xxx)`，禁止直接返回裸中文错误文案或硬编码错误码。
+
+```java
+/** 成员登录账号（6-11 位字母数字） */
+private String username;
+```
+
+## 2. 最小化修改范围
+
+- 只改实现当前需求所必需的文件；不做无关重构、格式化、重命名或「顺手优化」。
+- 不新增未被使用的工具类、抽象层或配置文件。
+- 若现有代码已能满足需求，优先在原有文件/函数内扩展，而非复制一份类似逻辑。
+- 变更完成后，简要说明「改了哪些文件、为什么必须改」。
+
+## 3. 复用项目已有能力
+
+改动前先搜索并优先复用：
+
+| 层级 | 前端                                         | 后端                       |
+| ---- | -------------------------------------------- | -------------------------- |
+| API  | `src/@api/`                                  | `controller/` + `service/` |
+| 类型 | `src/@types/`                                | `pojo/dto/` `pojo/vo/`     |
+| 工具 | `src/service/` + `src/utils/` + `src/hooks/` | `common/utils/`            |
+| 组件 | `src/components/`                            | —                          |
+| 样式 | Element Plus `var(--el-*)`、现有 scss        | —                          |
+
+- 禁止硬编码颜色/间距，优先使用 Element Plus CSS 变量或项目已有 scss 变量。
+- 禁止重复实现已有 HTTP 封装、Token 处理、异常处理、分页、文件上传等逻辑。
+
+## 4. 架构设计规范
+
+### 单一职责原则（SRP）
+
+所有新增代码必须遵循单一职责原则（Single Responsibility Principle），每个模块、类、函数、组件只负责一个明确业务职责。
+
+#### 后端规范
+
+- Controller 仅负责请求接收、参数校验、权限校验和响应封装。
+- 禁止在 Controller 中编写业务逻辑。
+- Service 仅负责单一业务领域逻辑。
+- 当 Service 方法承担多个业务职责时，必须拆分为多个 Service 或 Domain Service。
+- 公共逻辑必须抽取为独立组件，禁止复制粘贴代码。
+
+#### 前端规范
+
+- Vue 组件应保持职责单一。
+- 单个 Vue 文件原则上不超过 500 行。
+- 当页面同时承担以下多个职责时，必须拆分：
+  - 页面布局
+  - 业务逻辑
+  - 表单处理
+  - 数据请求
+  - 状态管理
+  - 图表渲染
+
+- 公共业务逻辑必须抽取至：
+  - components/
+  - hooks/
+  - utils/
+  - services/
+
+- 禁止在 Vue 页面中直接编写大量业务逻辑。
+- 禁止在页面中直接调用多个后端接口并进行复杂数据组装，应封装到 Service 或 Hook 中。
+
+#### 函数规范
+
+- 单个函数应只完成一个业务动作。
+- 函数长度原则上不超过 80 行。
+- 出现超过 3 层嵌套时应考虑重构。
+- 出现重复逻辑时必须抽取公共方法。
+
+#### AI 代码生成要求
+
+生成代码时优先考虑：
+
+1. 职责划分是否清晰
+2. 是否存在可复用逻辑
+3. 是否需要抽象公共组件
+4. 是否需要抽象 Hook/Composable
+5. 是否需要拆分 Service
+6. 是否需要拆分 Controller
+
+禁止生成：
+
+- 巨型 Controller（God Controller）
+- 巨型 Service（God Service）
+- 巨型 Vue 页面（God Component）
+- 超长方法（Long Method）
+- 大量重复代码（Duplicate Code）
+- 多职责混合模块（Multi Responsibility Module）
+
+## 5. schema.sql 变更规则
+
+文件路径：`ai-video/schema.sql`
+
+**硬性约束：**
+
+1. **禁止修改**文件中已有的 SQL 语句（含 CREATE / ALTER / INSERT / COMMENT 等）。
+2. 所有新增 SQL **只能追加在文件末尾**。
+3. 新增块必须以分隔注释开头，格式：
+
+```sql
+-- ============================================================================
+-- YYYY-MM-DD 作者/功能简述：本次变更说明（一句话）
+-- 补充说明（幂等策略、关联常量/枚举、注意事项等，可选）
+-- ============================================================================
+```
+
+4. 优先使用幂等写法（`IF NOT EXISTS`、`WHERE NOT EXISTS`），参考文件末尾已有追加块（如 `2026-06-11` 积分规则种子数据）。
+5. 每张表/每条语句前的 `--` 单行注释说明用途。
+
+```sql
+-- ❌ BAD：修改已有 CREATE TABLE 或 UPDATE 历史 INSERT
+-- ✅ GOOD：在文件末尾追加
+-- ============================================================================
+-- 2026-06-12 张三：nw_xxx 表新增 status 字段
+-- 使用 ADD COLUMN IF NOT EXISTS，重复执行幂等
+-- ============================================================================
+ALTER TABLE nw_xxx ADD COLUMN IF NOT EXISTS status INTEGER DEFAULT 1;
+COMMENT ON COLUMN nw_xxx.status IS '状态：0禁用 1启用';
+```
+
+## 自检清单（完成前过一遍）
+
+- [ ] 类型/注释是否完整，无多余 `any`
+- [ ] 是否只改了必要文件
+- [ ] 是否复用了现有 API、组件、工具、设计 Token
+- [ ] 前端代码是否符合 prettier.config.cjs 规范
+- [ ] 是否遵循单一职责原则（SRP）
+- [ ] 是否抽取了可复用组件、Hook、工具类
+- [ ] 是否存在过大的 Controller、Service、Vue 组件
+- [ ] schema.sql 是否仅末尾追加、未动历史语句、含日期与功能注释

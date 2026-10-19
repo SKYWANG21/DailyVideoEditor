@@ -1,0 +1,409 @@
+@import 'tailwindcss' source(none);
+@source '../**/*.{vue,js,ts,jsx,tsx}';
+
+@custom-variant dark (&:is(.dark *));
+@custom-variant light (&:is(.light *));
+
+/* ===== 浅色主题（默认 + .light 块，以 UI 项目为准） ===== */
+:root {
+  --font-size: 16px;
+  --background: #f8f7ff;
+  --foreground: #1a1130;
+  --card: #ffffff;
+  --card-foreground: #1a1130;
+  --popover: #ffffff;
+  --popover-foreground: #1a1130;
+  --primary: #8E51FF;
+  --primary-foreground: #ffffff;
+  --secondary: #ede9fe;
+  --secondary-foreground: #4c1d95;
+  --muted: #f3f0ff;
+  --muted-foreground: #6b6b8a;
+  --accent: #ede9fe;
+  --accent-foreground: #4c1d95;
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --border: #ddd6fe;
+  --input: #ddd6fe;
+  --input-background: #f3f0ff;
+  --switch-background: #e2dcff;
+  --font-weight-medium: 500;
+  --font-weight-normal: 400;
+  --ring: #8E51FF;
+  --chart-1: oklch(0.646 0.222 41.116);
+  --chart-2: oklch(0.6 0.118 184.704);
+  --chart-3: oklch(0.398 0.07 227.392);
+  --chart-4: oklch(0.828 0.189 84.429);
+  --chart-5: oklch(0.769 0.188 70.08);
+  --radius: 0.625rem;
+  --sidebar: #f0eeff;
+  --sidebar-foreground: #1a1130;
+  --sidebar-primary: #8E51FF;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #ede9fe;
+  --sidebar-accent-foreground: #4c1d95;
+  --sidebar-border: #ddd6fe;
+  --sidebar-ring: #8E51FF;
+  --card-hover: rgba(142, 81, 255, 0.08);
+}
+
+.light {
+  --background: #f8f7ff;
+  --foreground: #1a1130;
+  --card: #ffffff;
+  --card-foreground: #1a1130;
+  --popover: #ffffff;
+  --popover-foreground: #1a1130;
+  --primary: #8E51FF;
+  --primary-foreground: #ffffff;
+  --secondary: #ede9fe;
+  --secondary-foreground: #4c1d95;
+  --muted: #f3f0ff;
+  --muted-foreground: #6b6b8a;
+  --accent: #ede9fe;
+  --accent-foreground: #4c1d95;
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --border: #ddd6fe;
+  --input: #ddd6fe;
+  --input-background: #f3f0ff;
+  --switch-background: #e2dcff;
+  --ring: #8E51FF;
+  --sidebar: #f0eeff;
+  --sidebar-foreground: #1a1130;
+  --sidebar-primary: #8E51FF;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #ede9fe;
+  --sidebar-accent-foreground: #4c1d95;
+  --sidebar-border: #ddd6fe;
+  --sidebar-ring: #8E51FF;
+  --card-hover: rgba(142, 81, 255, 0.08);
+}
+
+/* ===== 暗色主题 ===== */
+.dark {
+  --background: #0d0d12;
+  --foreground: #ededf1;
+  --card: #16161d;
+  --card-foreground: #ededf1;
+  --popover: #16161d;
+  --popover-foreground: #ededf1;
+  --primary: #8E51FF;
+  --primary-foreground: #ffffff;
+  --secondary: #24242d;
+  --secondary-foreground: #ededf1;
+  --muted: #24242d;
+  --muted-foreground: #a1a1aa;
+  --accent: #24242d;
+  --accent-foreground: #ededf1;
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --border: #2a2a35;
+  --input: #2a2a35;
+  --input-background: #24242d;
+  --switch-background: #2a2a35;
+  --ring: #8E51FF;
+  --font-weight-medium: 500;
+  --font-weight-normal: 400;
+  --chart-1: oklch(0.488 0.243 264.376);
+  --chart-2: oklch(0.696 0.17 162.48);
+  --chart-3: oklch(0.769 0.188 70.08);
+  --chart-4: oklch(0.627 0.265 303.9);
+  --chart-5: oklch(0.645 0.246 16.439);
+  --sidebar: #0d0d12;
+  --sidebar-foreground: #ededf1;
+  --sidebar-primary: #8E51FF;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #24242d;
+  --sidebar-accent-foreground: #ededf1;
+  --sidebar-border: #2a2a35;
+  --sidebar-ring: #8E51FF;
+  --card-hover: rgba(255, 255, 255, 0.05);
+}
+
+/* ===== Tailwind 主题映射（完全复制） ===== */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-input-background: var(--input-background);
+  --color-switch-background: var(--switch-background);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: var(--radius);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --text-2xl: var(--text-2xl);
+  --text-xl: var(--text-xl);
+  --text-lg: var(--text-lg);
+  --text-base: var(--text-base);
+  --text-sm: var(--text-sm);
+  --text-xs: var(--text-xs);
+}
+
+/* ===== 基础样式层（完全复制） ===== */
+@layer base {
+  * {
+    border-color: var(--border);
+    outline-color: var(--ring);
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  html {
+    font-size: var(--font-size);
+  }
+
+  h1 {
+    font-size: var(--text-2xl);
+    font-weight: var(--font-weight-medium);
+    line-height: 1.5;
+  }
+
+  h2 {
+    font-size: var(--text-xl);
+    font-weight: var(--font-weight-medium);
+    line-height: 1.5;
+  }
+
+  h3 {
+    font-size: var(--text-lg);
+    font-weight: var(--font-weight-medium);
+    line-height: 1.5;
+  }
+
+  h4 {
+    font-size: var(--text-base);
+    font-weight: var(--font-weight-medium);
+    line-height: 1.5;
+  }
+
+  label {
+    font-size: var(--text-base);
+    font-weight: var(--font-weight-medium);
+    line-height: 1.5;
+  }
+
+  button {
+    font-size: var(--text-base);
+    font-weight: var(--font-weight-medium);
+    line-height: 1.5;
+  }
+
+  input {
+    font-size: var(--text-base);
+    font-weight: var(--font-weight-normal);
+    line-height: 1.5;
+  }
+
+  /* 隐藏滚动条（已注释：恢复全局原生滚动条显示，见 global-base.scss 默认样式） */
+  /*
+  * {
+    -ms-overflow-style: none !important;
+    scrollbar-width: none !important;
+  }
+
+  *::-webkit-scrollbar,
+  .overflow-auto::-webkit-scrollbar,
+  .overflow-y-auto::-webkit-scrollbar,
+  .overflow-x-auto::-webkit-scrollbar {
+    display: none !important;
+    width: 0 !important;
+  }
+  */
+
+  /* 排除规则：片段编辑卡片需要显示滚动条（样式参考素材库-拉片结果表格） */
+  .segment-edit-scroll.overflow-y-auto {
+    -ms-overflow-style: auto !important;
+    scrollbar-width: thin !important;
+    scrollbar-color: #8E51FF transparent !important;
+  }
+
+  .segment-edit-scroll.overflow-y-auto::-webkit-scrollbar {
+    display: block !important;
+    width: 6px !important;
+  }
+
+  .segment-edit-scroll.overflow-y-auto::-webkit-scrollbar-button {
+    display: none !important;
+  }
+
+  .segment-edit-scroll.overflow-y-auto::-webkit-scrollbar-track {
+    background: transparent !important;
+  }
+
+  .segment-edit-scroll.overflow-y-auto::-webkit-scrollbar-thumb {
+    display: block !important;
+    background: #8E51FF !important;
+    border-radius: 3px !important;
+  }
+
+  .segment-edit-scroll.overflow-y-auto::-webkit-scrollbar-thumb:hover {
+    background: #9f6fff !important;
+  }
+
+  .dark .segment-edit-scroll.overflow-y-auto {
+    scrollbar-color: #8E51FF transparent !important;
+  }
+}
+
+/* ===== 首页 Banner 图片阵列滚动动画 ===== */
+@keyframes scrollUp {
+  0% {
+    transform: translateY(0);
+  }
+  100% {
+    transform: translateY(-33.333%);
+  }
+}
+
+@keyframes scrollDown {
+  0% {
+    transform: translateY(-33.333%);
+  }
+  100% {
+    transform: translateY(0);
+  }
+}
+
+/* 资产库下拉/右键菜单：对齐 UI 项目 shadcn DropdownMenu / ContextMenu */
+.asset-lib-menu {
+  position: fixed;
+  z-index: 2000;
+  padding: 4px;
+  background: var(--card);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+}
+
+.asset-lib-menu--filter {
+  width: 11rem;
+}
+
+.asset-lib-menu--menu {
+  width: 12rem;
+}
+
+.asset-lib-menu-label {
+  padding: 6px 8px 4px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted-foreground);
+}
+
+.asset-lib-menu-label--after-sep {
+  padding-top: 4px;
+}
+
+.asset-lib-menu-sep {
+  height: 1px;
+  margin: 4px -4px;
+  background: var(--border);
+}
+
+.asset-lib-menu-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 6px 8px;
+  font-size: 14px;
+  font-weight: 400;
+  font-family: inherit;
+  line-height: 1.25;
+  border: 0;
+  border-radius: 2px;
+  text-align: left;
+  color: var(--foreground);
+  background: transparent;
+  cursor: pointer;
+  outline: none;
+  user-select: none;
+}
+
+.asset-lib-menu-item:hover:not(:disabled) {
+  background: var(--muted);
+}
+
+.asset-lib-menu-item:disabled {
+  opacity: 0.5;
+  cursor: default;
+  pointer-events: none;
+}
+
+.asset-lib-menu-item__icon {
+  width: 16px;
+  height: 16px;
+  margin-right: 8px;
+  flex-shrink: 0;
+  color: var(--muted-foreground);
+  pointer-events: none;
+  stroke-width: 1.5;
+}
+
+.asset-lib-menu-item--danger {
+  color: #f87171;
+}
+
+.asset-lib-menu-item--danger .asset-lib-menu-item__icon {
+  color: #f87171;
+}
+
+.asset-lib-menu-item--danger:hover:not(:disabled) {
+  background: rgb(239 68 68 / 0.1);
+  color: #f87171;
+}
+
+.asset-lib-menu-item--accent {
+  color: #8e51ff;
+}
+
+.asset-lib-menu-item--accent .asset-lib-menu-item__icon {
+  color: #8e51ff;
+}
+
+.asset-lib-menu-check {
+  margin-left: auto;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: #8e51ff;
+  pointer-events: none;
+}

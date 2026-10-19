@@ -1,0 +1,27 @@
+{
+  "name": "video-clips",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "typecheck": "vue-tsc --noEmit"
+  },
+  "dependencies": {
+    "@lucide/vue": "^1.58.0",
+    "@webav/av-cliper": "^1.2.8",
+    "element-plus": "^2.14.7",
+    "pinia": "^2.3.1",
+    "vue": "^3.5.44"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@vitejs/plugin-vue": "^5.2.4",
+    "sass-embedded": "^1.105.2",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.3",
+    "vite": "^6.4.4",
+    "vue-tsc": "^3.3.13"
+  }
+}
