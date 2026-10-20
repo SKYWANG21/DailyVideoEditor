@@ -1,21 +1,14 @@
 /**
  * 模块 Worker 没有 importScripts。
- * MediaPipe 会用它同步执行 wasm 胶水，这里用同步 XHR 补上。
+ * MediaPipe 把「存在 importScripts」当成 Worker：同步调用若抛 TypeError，才会动态 import 模块版胶水。
+ * 没有这个函数时，库会改走 document 插脚本，在 Worker 里直接失败。
  */
 export function installImportScripts(): void {
   const scope = globalThis as typeof globalThis & {
     importScripts?: (...urls: string[]) => void;
   };
   if (typeof scope.importScripts === "function") return;
-  scope.importScripts = (...urls: string[]) => {
-    for (const url of urls) {
-      const xhr = new XMLHttpRequest();
-      xhr.open("GET", url, false);
-      xhr.send();
-      if (xhr.status !== 0 && (xhr.status < 200 || xhr.status >= 300)) {
-        throw new Error(`无法加载 ${url}`);
-      }
-      (0, eval)(xhr.responseText);
-    }
+  scope.importScripts = () => {
+    throw new TypeError("模块 Worker 不支持 importScripts");
   };
 }

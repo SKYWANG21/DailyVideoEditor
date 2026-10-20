@@ -71,7 +71,8 @@ export class FacePass {
     if (!options) throw new Error("人脸检测尚未配置");
     this.landmarker?.close();
     this.landmarker = null;
-    const fileset = await FilesetResolver.forVisionTasks(options.wasmBaseUrl);
+    // 模块 Worker 必须加载会挂上 globalThis.ModuleFactory 的模块版胶水
+    const fileset = await FilesetResolver.forVisionTasks(options.wasmBaseUrl, true);
     this.landmarker = await FaceLandmarker.createFromOptions(fileset, {
       baseOptions: {
         modelAssetPath: options.modelUrl,

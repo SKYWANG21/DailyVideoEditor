@@ -81,6 +81,19 @@ function loadCreateGpuPixelModule(): Promise<CreateGpuPixelModule> {
 }
 
 /**
+ * MediaPipe 的 y 以头顶为 0。
+ * GPUPixel 内部还会做一次 1-y，那是给未翻行纹理用的。画面像素已经翻正，这里先翻回来。
+ */
+function landmarksForGpuPixel(landmarks: Float32Array<ArrayBufferLike>): number[] {
+  const flipped = new Array<number>(landmarks.length);
+  for (let i = 0; i < landmarks.length; i += 2) {
+    flipped[i] = landmarks[i];
+    flipped[i + 1] = 1 - landmarks[i + 1];
+  }
+  return flipped;
+}
+
+/**
  * 主线程美颜绘制。
  * 模块的 WebGL 上下文只会绑到第一次 create 的那块 canvas。
  */
@@ -115,7 +128,7 @@ export class GpuPixelPreview {
     pipeline.setSlim(levels.slim);
     pipeline.setEye(levels.eye);
     const useFace = beautyNeedsFace(beauty) && landmarks.length >= 910;
-    pipeline.setMediaPipeLandmarks(useFace ? Array.from(landmarks) : []);
+    pipeline.setMediaPipeLandmarks(useFace ? landmarksForGpuPixel(landmarks) : []);
     const ptr = this.upload(module, rgba);
     pipeline.process(ptr, width, height);
   }

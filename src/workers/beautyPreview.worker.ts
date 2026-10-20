@@ -66,9 +66,9 @@ async function runRender(request: Extract<BeautyWorkerRequest, { type: "render" 
       try {
         await ensureFace();
         landmarks = await facePass.detect(frame, request.sourceTimeUs);
-      } catch (e) {
+      } catch (error: unknown) {
         landmarks = new Float32Array(0);
-        console.log(e, e.message);
+        console.log(error instanceof Error ? error.message : error);
       }
     }
     if (latestRender && latestRender.requestId > request.requestId) return;
