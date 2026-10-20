@@ -6,8 +6,8 @@ import type { VideoClipItem } from "@/types/videoCompose";
  */
 export const USE_MOCK_VIDEO_CLIPS = true;
 
-/** ! 调试用 mock 视频地址。独立工程不预置远程链接，片段由本地上传提供 */
-const MOCK_VIDEO_URLS: string[] = ["https://media.vimo.io/upload/video/2026/10/16/20261016165521_59389.mp4"];
+/** 调试样片。同源 mp4，Worker 才能取到像素；远程地址解析失败时预览会一直空。 */
+const MOCK_VIDEO_URLS: string[] = ["/algorithm/test.mp4"];
 
 /** 是否启用 mock 片段（供 VideoComposeEditor 加载逻辑使用） */
 export function isVideoComposeMockEnabled(): boolean {

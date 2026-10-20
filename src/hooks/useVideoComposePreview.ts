@@ -6,10 +6,10 @@ import { applyPreviewGain, primePreviewAudioContext } from "@/hooks/previewMedia
 import { clampGain } from "@/editor/volumeDb";
 
 interface UseVideoComposePreviewOptions {
-  /** 双缓冲 video A */
-  videoA: Ref<HTMLVideoElement | null>;
-  /** 双缓冲 video B */
-  videoB: Ref<HTMLVideoElement | null>;
+  /** 双缓冲原声 A。画面改由 WebCodecs 绘制，这里只负责时钟和内嵌原声 */
+  videoA: Ref<HTMLMediaElement | null>;
+  /** 双缓冲原声 B */
+  videoB: Ref<HTMLMediaElement | null>;
   /** 模板 legacy BGM audio；timeline 多轨由 previewAudioMixer 池播放 */
   bgmEl: Ref<HTMLAudioElement | null>;
   /** 视频片段列表（按 startTime 排序） */
@@ -112,12 +112,12 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
   /** 无视频 clip、仅有音轨/BGM 时的纯音频预览 */
   const isAudioOnlyPreview = computed(() => !clips.value.length && maxAudioTimelineEndSec() > 0);
 
-  const activeVideoEl: ComputedRef<HTMLVideoElement | null> = computed(() => (activeSlot.value === 0 ? videoA.value : videoB.value));
+  const activeVideoEl: ComputedRef<HTMLMediaElement | null> = computed(() => (activeSlot.value === 0 ? videoA.value : videoB.value));
 
-  const standbyVideoEl: ComputedRef<HTMLVideoElement | null> = computed(() => (activeSlot.value === 0 ? videoB.value : videoA.value));
+  const standbyVideoEl: ComputedRef<HTMLMediaElement | null> = computed(() => (activeSlot.value === 0 ? videoB.value : videoA.value));
 
   let rafId = 0;
-  let boundVideoEl: HTMLVideoElement | null = null;
+  let boundVideoEl: HTMLMediaElement | null = null;
   /** 切换片段 / 程序化 seek 时忽略原生 play/pause，避免状态抖动 */
   let suppressMediaEvents = false;
   /** 待命层已准备好的片段索引；-1 表示未就绪 */
@@ -130,6 +130,12 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
   let gapWallStartMs = 0;
   /** 进入空隙时的全局时间 */
   let gapGlobalStart = 0;
+  /** 内嵌 audio 没有可播放音轨时，用墙钟代替 currentTime */
+  let wallClockActive = false;
+  /** 墙钟锚点 */
+  let wallAnchorMs = 0;
+  /** 墙钟锚点对应的全局时间（秒） */
+  let wallAnchorGlobal = 0;
 
   /** 顺序累加起点（无绝对时间时的回退） */
   function prevDuration(idx: number): number {
@@ -184,6 +190,30 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
     return clipRate(clip) * (globalPlaybackRate.value > 0 ? globalPlaybackRate.value : 1);
   }
 
+  /**
+   * 内嵌 audio 能否当时钟。
+   * 还在等元数据时先当作可以，避免无声视频在加载完成前被墙钟抢走。
+   */
+  function mediaElementCanClock(el: HTMLMediaElement): boolean {
+    if (el.error) return false;
+    if (el.readyState < HTMLMediaElement.HAVE_METADATA) return true;
+    return Number.isFinite(el.duration) && el.duration > 0;
+  }
+
+  /** 从给定全局时间重新开始墙钟 */
+  function engageWallClock(atGlobal: number): void {
+    wallClockActive = true;
+    wallAnchorMs = performance.now();
+    wallAnchorGlobal = atGlobal;
+  }
+
+  /** 按墙钟推进当前片段的全局时间 */
+  function advanceWallClock(clip: VideoClipItem | undefined): void {
+    if (!wallClockActive) engageWallClock(globalTime.value);
+    const elapsed = ((performance.now() - wallAnchorMs) / 1000) * effectiveRate(clip);
+    globalTime.value = wallAnchorGlobal + elapsed;
+  }
+
   /** 源时间 → 片段内时间轴偏移 */
   function sourceToTimelineOffset(clip: VideoClipItem | undefined, sourceSec: number): number {
     const rate = clipRate(clip);
@@ -197,12 +227,12 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
   }
 
   /** 当前活动层源时间推算全局时间轴时间 */
-  function computeGlobalFromVideo(v: HTMLVideoElement, idx: number): number {
+  function computeGlobalFromVideo(v: HTMLMediaElement, idx: number): number {
     const clip = clips.value[idx];
     return clipAbsStart(clip, idx) + sourceToTimelineOffset(clip, v.currentTime || 0);
   }
 
-  function waitForPlayable(v: HTMLVideoElement, timeoutMs = VIDEO_READY_TIMEOUT_MS): Promise<void> {
+  function waitForPlayable(v: HTMLMediaElement, timeoutMs = VIDEO_READY_TIMEOUT_MS): Promise<void> {
     if (v.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) return Promise.resolve();
     return new Promise((resolve) => {
       let settled = false;
@@ -225,7 +255,7 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
     });
   }
 
-  function waitForMetadata(v: HTMLVideoElement, timeoutMs = VIDEO_READY_TIMEOUT_MS): Promise<void> {
+  function waitForMetadata(v: HTMLMediaElement, timeoutMs = VIDEO_READY_TIMEOUT_MS): Promise<void> {
     if (v.readyState >= HTMLMediaElement.HAVE_METADATA) return Promise.resolve();
     return new Promise((resolve) => {
       let settled = false;
@@ -254,15 +284,14 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
     }
   }
 
-  function urlMatches(v: HTMLVideoElement, url: string): boolean {
+  function urlMatches(v: HTMLMediaElement, url: string): boolean {
     return mediaUrlMatches(v, url);
   }
 
   /** 设置 video 源；跨域 OSS 需 anonymous 以便 canvas 预览抽帧 */
-  function applyVideoElementSrc(v: HTMLVideoElement, url: string): boolean {
+  function applyVideoElementSrc(v: HTMLMediaElement, url: string): boolean {
     const srcChanged = !urlMatches(v, url);
     if (srcChanged) {
-      v.crossOrigin = "anonymous";
       v.src = url;
     }
     return srcChanged;
@@ -278,7 +307,7 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
     boundVideoEl = null;
   }
 
-  function bindVideoEvents(v: HTMLVideoElement | null): void {
+  function bindVideoEvents(v: HTMLMediaElement | null): void {
     if (!v || boundVideoEl === v) return;
     unbindVideoEvents();
     v.addEventListener("ended", onEnded);
@@ -295,7 +324,7 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
   }
 
   /** 应用当前片段音量与有效倍速到指定 video */
-  function applyClipMediaParams(v: HTMLVideoElement, clip: VideoClipItem | undefined): void {
+  function applyClipMediaParams(v: HTMLMediaElement, clip: VideoClipItem | undefined): void {
     const fallbackVol = clampGain(composeConfig.value.videoVolume);
     const vol = clip?.volume != null && Number.isFinite(clip.volume) ? clampGain(clip.volume) : fallbackVol;
     const muteEmbedded = shouldMuteVideoEmbeddedAudio(clip, vol);
@@ -381,7 +410,12 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
 
       activeSlot.value = newSlot;
       currentIdx.value = nextIdx;
-      globalTime.value = computeGlobalFromVideo(next, nextIdx);
+      if (mediaElementCanClock(next)) {
+        wallClockActive = false;
+        globalTime.value = computeGlobalFromVideo(next, nextIdx);
+      } else {
+        engageWallClock(globalTime.value);
+      }
 
       if (prev) {
         prev.pause();
@@ -434,6 +468,8 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
       await waitForPlayable(v);
       currentIdx.value = idx;
       globalTime.value = clipAbsStart(clip, idx) + localTimeSec;
+      if (!mediaElementCanClock(v)) engageWallClock(globalTime.value);
+      else wallClockActive = false;
       if (autoplay) await v.play().catch(() => undefined);
     } finally {
       suppressMediaEvents = false;
@@ -532,7 +568,7 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
   }
 
   /** 是否已到达当前片段源出点或时间轴终点 */
-  function reachedClipEnd(v: HTMLVideoElement, clip: VideoClipItem | undefined, idx: number): boolean {
+  function reachedClipEnd(v: HTMLMediaElement, clip: VideoClipItem | undefined, idx: number): boolean {
     if (!clip) return false;
     const absEnd = clipAbsEnd(clip, idx);
     if (globalTime.value >= absEnd - 0.04) return true;
@@ -586,7 +622,7 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
   }
 
   /** RAF：更新全局时间 + 提前 prepare/软切 + 空隙推进 */
-  function tickSoftCut(v: HTMLVideoElement): void {
+  function tickSoftCut(v: HTMLMediaElement): void {
     const clip = clips.value[currentIdx.value];
     if (!clip || inGap.value) return;
 
@@ -655,7 +691,13 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
     } else {
       const v = activeVideoEl.value;
       if (v) {
-        globalTime.value = computeGlobalFromVideo(v, currentIdx.value);
+        const clip = clips.value[currentIdx.value];
+        if (!mediaElementCanClock(v)) {
+          if (isPlaying.value) advanceWallClock(clip);
+        } else {
+          wallClockActive = false;
+          globalTime.value = computeGlobalFromVideo(v, currentIdx.value);
+        }
         tickSoftCut(v);
       }
     }
@@ -719,6 +761,7 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
       await waitForPlayable(v);
       if (gen !== playGeneration) return;
       await v.play().catch(() => undefined);
+      if (!mediaElementCanClock(v)) engageWallClock(globalTime.value);
     }
     if (gen !== playGeneration) {
       activeVideoEl.value?.pause();
@@ -733,7 +776,7 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
     // 先记下视频真实时间，再停播，避免暂停后 timeupdate/关键帧把光标拽走
     if (!inGap.value && !isAudioOnlyPreview.value) {
       const v = activeVideoEl.value;
-      if (v) globalTime.value = computeGlobalFromVideo(v, currentIdx.value);
+      if (v && mediaElementCanClock(v)) globalTime.value = computeGlobalFromVideo(v, currentIdx.value);
     }
     isPlaying.value = false;
     activeVideoEl.value?.pause();
@@ -813,6 +856,8 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
     const localTime = Math.max(0, t - clipAbsStart(clip, idx));
     await switchToClip(idx, isPlaying.value, localTime);
     globalTime.value = t;
+    const clock = activeVideoEl.value;
+    if (clock && !mediaElementCanClock(clock)) engageWallClock(t);
     syncBgm();
   }
 
@@ -821,6 +866,8 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
     if (!clip) return;
     await switchToClip(idx, isPlaying.value, 0);
     globalTime.value = clipAbsStart(clip, idx);
+    const clock = activeVideoEl.value;
+    if (clock && !mediaElementCanClock(clock)) engageWallClock(globalTime.value);
     syncBgm();
   }
 

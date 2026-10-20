@@ -15,3 +15,8 @@ declare module "*.svg?raw" {
   const raw: string;
   export default raw;
 }
+
+declare module "@/algorithm/wasm/gpupixel.js" {
+  const createGpuPixelModule: unknown;
+  export default createGpuPixelModule;
+}

@@ -37,6 +37,7 @@
           ref="sidebarRef"
           class="h-full min-h-0"
           :video-volume="videoVolume"
+          :beauty="beauty"
           :video-volume-label="videoVolumeLabel"
           :audio-volume-label="audioVolumeLabel"
           :bgm-volume="bgmVolume"
@@ -65,6 +66,7 @@
           @add-clip-to-timeline="onCatalogAddToTimeline"
           @remove-catalog-clip="onRemoveCatalogVariant"
           @update:video-volume="onVideoVolumeChange"
+          @update:beauty="onBeautyChange"
           @update:bgm-volume="onBgmVolumeChange"
           @update:subtitle-style="onSubtitleStyleChange"
           @update:subtitle-visible="onSubtitleVisibleChange"
@@ -141,6 +143,7 @@ import type {
   ComposeSegmentClipGroup,
   ComposeSegmentClipVariant,
   ComposeTextOverlayClip,
+  BeautyParams,
 } from "@/types/videoCompose";
 import {
   hasTimelineSubtitles,
@@ -152,6 +155,8 @@ import {
   getDefaultSubtitleStyleSnapshot,
   pickSubtitleStyleFromClip,
   createDefaultSubtitleStyle,
+  createDefaultBeautyParams,
+  readBeautyParams,
   readClipConfig,
   readTextClipConfig,
   normalizeComposeTimelineScale,
@@ -519,6 +524,8 @@ const subtitleStyle = reactive<SubtitleStyleConfig>(getDefaultSubtitleStyleSnaps
 const subtitleVisible = ref(true);
 /** 侧栏视频音量（dB）；null 为静音。默认对应线性增益 0.8 */
 const videoVolume = ref<number | null>(gainToDb(0.8));
+/** 侧栏美颜。写入当前视频 clip 的 config.beauty */
+const beauty = ref<BeautyParams>(createDefaultBeautyParams());
 /** 侧栏音轨音量（dB）；null 为静音。默认对应线性增益 0.5 */
 const bgmVolume = ref<number | null>(gainToDb(0.5));
 
@@ -683,6 +690,7 @@ function syncSidebarFromTracks(): void {
   const subClip = (findClipById(activeSubtitleId.value) || firstClipOfType("subtitle")) as ComposeSubtitleClip | undefined;
 
   videoVolume.value = volumeToDb(videoClip?.volume, 0.8);
+  beauty.value = readBeautyParams(readClipConfig(videoClip?.config).beauty);
   // 无音轨 clip 时保留用户侧栏已调值，避免 tracks 同步时用默认 -6 dB 覆盖
   if (audioClip) {
     bgmVolume.value = volumeToDb(audioClip.volume, 0.5);
@@ -708,6 +716,12 @@ function patchClips(type: PatchableClipType, patch: Record<string, unknown>, cli
 function onVideoVolumeChange(db: number | null): void {
   videoVolume.value = db;
   patchClips("video", { volume: dbToGain(db) }, activeVideoId.value);
+}
+
+/** 侧栏美颜写回当前视频 clip。未选中时与音量一样写到全部视频片段 */
+function onBeautyChange(next: BeautyParams): void {
+  beauty.value = next;
+  patchClips("video", { config: { beauty: { ...next } } }, activeVideoId.value);
 }
 
 /** 侧栏音轨分贝写回当前音频 clip 的线性增益 */
@@ -769,7 +783,10 @@ function onApplyGlobal(scope: ComposeApplyGlobalScope): void {
     return;
   }
   if (scope === "video") {
-    patchClips("video", { volume: dbToGain(videoVolume.value) });
+    patchClips("video", {
+      volume: dbToGain(videoVolume.value),
+      config: { beauty: { ...beauty.value } },
+    });
     return;
   }
   patchClips("subtitle", {
@@ -1396,9 +1413,10 @@ async function loadClips(): Promise<void> {
 
   let clips: VideoClipItem[];
 
-  // mock：忽略 props.clips / 持久化轨，始终 bootstrap 主轨
+  // mock：忽略 props.clips / 持久化轨，先探真实时长再 bootstrap，避免 0.1 秒细线
   if (isVideoComposeMockEnabled()) {
     clips = buildMockVideoClips();
+    await probeClipDurationsWithRetry(clips);
     timelineRef.value?.bootstrapMainFromClips(clips);
   } else {
     clips = await resolveComposeClips(props.clips);
@@ -1442,11 +1460,17 @@ async function loadClips(): Promise<void> {
   }, DURATION_PROBE_RETRY_MS);
 }
 
+/** 等到时间轴挂载清空结束再上轴，避免 reset 抹掉刚写入的主轨 */
 function waitForTimeline(): Promise<void> {
   return new Promise((resolve) => {
     let tries = 0;
     const tick = () => {
-      if (timelineRef.value?.bootstrapMainFromClips || tries > 40) {
+      const ready = timelineRef.value?.whenReady?.();
+      if (ready) {
+        void ready.then(() => resolve());
+        return;
+      }
+      if (tries > 40) {
         resolve();
         return;
       }

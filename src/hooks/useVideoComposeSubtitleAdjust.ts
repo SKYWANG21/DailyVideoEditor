@@ -1,4 +1,5 @@
 import { ref, computed, nextTick, watch, onMounted, onBeforeUnmount, type Ref, type CSSProperties } from "vue";
+import type { PreviewVideoSize } from "@/types/beautyPreview";
 import type { SubtitleStyleConfig, SubtitleBoxDraft } from "@/types/videoCompose";
 import { computeVideoNativeFontSize, computeScreenFontSize, DEFAULT_SUBTITLE_SCREEN_FONT_PX } from "@/types/composeMedia";
 
@@ -13,9 +14,13 @@ interface VideoContentRect {
 }
 
 interface UseVideoComposeSubtitleAdjustOptions {
-  videoEl: Ref<HTMLVideoElement | null>;
+  /** WebCodecs 回报的视频像素尺寸 */
+  videoSize: Ref<PreviewVideoSize | null>;
+  /** 预览容器，用来量 object-contain 的显示区域 */
   containerEl: Ref<HTMLElement | null>;
+  /** 字幕样式。调整结束时就地写回边距和字号 */
   style: SubtitleStyleConfig;
+  /** 进入调整前暂停播放 */
   onEnter?: () => void;
 }
 
@@ -28,44 +33,21 @@ const ACCENT = "#8e51ff";
 
 /** 字幕位置调整：object-contain 坐标换算、draft 框 drag/resize、写回 marginL/R/V */
 export function useVideoComposeSubtitleAdjust(options: UseVideoComposeSubtitleAdjustOptions) {
-  const { videoEl, containerEl, style, onEnter } = options;
+  const { videoSize, containerEl, style, onEnter } = options;
 
   const isAdjusting = ref(false);
   const draft = ref<SubtitleBoxDraft | null>(null);
   const contentRect = ref<VideoContentRect | null>(null);
   const videoReady = ref(false);
-  let boundVideo: HTMLVideoElement | null = null;
 
+  /** 有视频像素尺寸后才允许调整字幕位置 */
   function syncVideoMetaReady(): void {
-    const v = videoEl.value;
-    videoReady.value = !!v && v.videoWidth > 0 && v.videoHeight > 0;
-  }
-
-  function onVideoMetaChange(): void {
-    syncVideoMetaReady();
-    measure();
+    const size = videoSize.value;
+    videoReady.value = !!size && size.width > 0 && size.height > 0;
   }
 
   function onWindowResize(): void {
     measure();
-  }
-
-  function bindVideoEl(el: HTMLVideoElement | null): void {
-    if (boundVideo) {
-      boundVideo.removeEventListener("loadedmetadata", onVideoMetaChange);
-      boundVideo.removeEventListener("emptied", onVideoMetaChange);
-      boundVideo = null;
-    }
-    videoReady.value = false;
-    if (!el) return;
-    el.addEventListener("loadedmetadata", onVideoMetaChange);
-    el.addEventListener("emptied", onVideoMetaChange);
-    boundVideo = el;
-    syncVideoMetaReady();
-    // 双缓冲切层时 metadata 往往已就绪，loadedmetadata 不会再触发，需立即测量
-    if (el.videoWidth > 0 && el.videoHeight > 0) {
-      measure();
-    }
   }
 
   let containerObserver: ResizeObserver | null = null;
@@ -84,7 +66,14 @@ export function useVideoComposeSubtitleAdjust(options: UseVideoComposeSubtitleAd
     measure();
   }
 
-  watch(videoEl, bindVideoEl, { immediate: true });
+  watch(
+    videoSize,
+    () => {
+      syncVideoMetaReady();
+      measure();
+    },
+    { immediate: true },
+  );
   watch(containerEl, bindContainerEl, { immediate: true });
   /** fontSize=0 表示待按屏幕默认 CSS 字号反推 ASS；scale 已知时立即换算 */
   watch(
@@ -102,20 +91,19 @@ export function useVideoComposeSubtitleAdjust(options: UseVideoComposeSubtitleAd
     window.removeEventListener("resize", onWindowResize);
     containerObserver?.disconnect();
     containerObserver = null;
-    bindVideoEl(null);
   });
 
   function measure(): void {
-    const v = videoEl.value;
+    const size = videoSize.value;
     const c = containerEl.value;
     const cw = c?.clientWidth ?? 0;
     const ch = c?.clientHeight ?? 0;
-    if (!v || !c || v.videoWidth <= 0 || v.videoHeight <= 0 || cw <= 0 || ch <= 0) {
+    if (!size || !c || size.width <= 0 || size.height <= 0 || cw <= 0 || ch <= 0) {
       contentRect.value = null;
       return;
     }
-    const vw = v.videoWidth;
-    const vh = v.videoHeight;
+    const vw = size.width;
+    const vh = size.height;
     const scale = Math.min(cw / vw, ch / vh);
     const displayW = vw * scale;
     const displayH = vh * scale;

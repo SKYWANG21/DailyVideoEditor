@@ -2139,6 +2139,23 @@ function removeMainClipsByUrl(url: string): void {
   onDataChanged();
 }
 
+/** 挂载清空结束后 resolve，编辑器须等它再 bootstrap */
+let resolveTimelineReady: (() => void) | null = null;
+const timelineReady: Promise<void> = new Promise((resolve) => {
+  resolveTimelineReady = resolve;
+});
+
+/** 只放行一次，卸载时也要解开，避免 loadClips 一直等 */
+function settleTimelineReady(): void {
+  resolveTimelineReady?.();
+  resolveTimelineReady = null;
+}
+
+/** 时间轴完成首次清空后可上轴 */
+function whenReady(): Promise<void> {
+  return timelineReady;
+}
+
 onMounted(async () => {
   isDark.value = document.documentElement.classList.contains("dark");
   themeObserver = new MutationObserver(() => {
@@ -2155,16 +2172,24 @@ onMounted(async () => {
   // capture + 非 passive：才能拦住 Ctrl+滚轮的浏览器页缩放
   timelineRootRef.value?.addEventListener("wheel", onTimelineWheel, { capture: true, passive: false });
 
-  await nextTick();
-  if (!videoTrackRef.value) return;
-  suppressEmit = true;
-  resetTimelineKeepingScale();
-  suppressEmit = false;
-  await nextTick();
-  startHScrollbarAlign();
+  try {
+    await nextTick();
+    if (!videoTrackRef.value) return;
+    // 编辑器可能已抢先 bootstrap；再 reset 会静默抹掉主轨，预览仍留着旧片段
+    if (!bootstrapped) {
+      suppressEmit = true;
+      resetTimelineKeepingScale();
+      suppressEmit = false;
+    }
+    await nextTick();
+    startHScrollbarAlign();
+  } finally {
+    settleTimelineReady();
+  }
 });
 
 onBeforeUnmount(() => {
+  settleTimelineReady();
   themeObserver?.disconnect();
   themeObserver = null;
   stopHScrollbarAlign();
@@ -2206,6 +2231,7 @@ defineExpose({
   exportTracks,
   importTracks,
   bootstrapMainFromClips,
+  whenReady,
   getMainVideoUrlsInOrder,
   getMainVideoClips,
   ensureSubtitleTrack,

@@ -13,4 +13,10 @@ export default defineConfig({
   server: {
     port: 7010,
   },
+  worker: {
+    format: "es",
+  },
+  optimizeDeps: {
+    exclude: ["@mediapipe/tasks-vision"],
+  },
 });

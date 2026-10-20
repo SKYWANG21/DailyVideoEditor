@@ -40,6 +40,8 @@
             <VolumeDbControl :db="videoVolume" @update:db="emit('update:videoVolume', $event)" />
           </div>
 
+          <VideoComposeBeautyControls :beauty="beauty" @update:beauty="emit('update:beauty', $event)" />
+
           <button
             type="button"
             class="w-full text-xs h-10 rounded-md border border-border bg-background hover:bg-muted transition-colors"
@@ -240,7 +242,8 @@
 import { computed, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
 import { ChevronDown, Eye, EyeOff, Film, Move, Music, Sticker, Type, UploadCloud, Volume2 } from "@lucide/vue";
-import type { ComposeSegmentClipGroup, ComposeSegmentClipVariant, SubtitleStyleConfig } from "@/types/videoCompose";
+import type { BeautyParams, ComposeSegmentClipGroup, ComposeSegmentClipVariant, SubtitleStyleConfig } from "@/types/videoCompose";
+import VideoComposeBeautyControls from "./VideoComposeBeautyControls.vue";
 import VideoComposeClipCatalog from "./VideoComposeClipCatalog.vue";
 import VideoComposeTextTemplateCatalog from "./VideoComposeTextTemplateCatalog.vue";
 import VideoComposeTextTemplateProps from "./VideoComposeTextTemplateProps.vue";
@@ -274,6 +277,8 @@ export interface SubtitleTextEditPayload {
 const props = defineProps<{
   /** 原视频/原声音量（dB）；null 为静音 */
   videoVolume: number | null;
+  /** 当前视频片段的美颜参数 */
+  beauty: BeautyParams;
   /** 视频 Tab 音量文案 */
   videoVolumeLabel?: string;
   /** 音轨 Tab 音量文案 */
@@ -322,6 +327,8 @@ const emit = defineEmits<{
   "regenerate-subtitles": [];
   "add-subtitle": [];
   "update:videoVolume": [value: number | null];
+  /** 美颜开关或滑杆变化 */
+  "update:beauty": [value: BeautyParams];
   "update:bgmVolume": [value: number | null];
   "update:subtitleStyle": [value: SubtitleStyleConfig];
   "update:subtitleVisible": [value: boolean];

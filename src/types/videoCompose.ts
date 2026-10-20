@@ -1,7 +1,7 @@
 import type { MediaClip, RectConfig, SubtitleClip, TextClip, TrackType } from "@/clip-track";
 import { generateId } from "@/clip-track";
-import type { ComposeConfig, PreviewAudioClip, SubtitleItem, SubtitleStyleConfig, VideoClipItem } from "@/types/composeMedia";
-import { createDefaultComposeConfig, createDefaultSubtitleStyle } from "@/types/composeMedia";
+import type { BeautyParams, ComposeConfig, PreviewAudioClip, SubtitleItem, SubtitleStyleConfig, VideoClipItem } from "@/types/composeMedia";
+import { createDefaultComposeConfig, createDefaultSubtitleStyle, readBeautyParams } from "@/types/composeMedia";
 import { clampGain } from "@/editor/volumeDb";
 
 /** 媒体业务类型（本地声明，不请求签名接口） */
@@ -18,6 +18,7 @@ export type MediaBizType =
   | "slice_fission";
 
 export type {
+  BeautyParams,
   ComposeConfig,
   SubtitleItem,
   SubtitleStyleConfig,
@@ -28,8 +29,11 @@ export type {
 } from "@/types/composeMedia";
 
 export {
+  clampBeautyLevel,
+  createDefaultBeautyParams,
   createDefaultComposeConfig,
   createDefaultSubtitleStyle,
+  readBeautyParams,
   computeVideoNativeFontSize,
   computeScreenFontSize,
   DEFAULT_SUBTITLE_SCREEN_FONT_PX,
@@ -84,6 +88,8 @@ export interface DetachAudioConfig {
 export type ComposeMediaClipConfig = DetachAudioConfig & {
   /** Step3 视频生成任务 ID */
   taskId?: string;
+  /** 预览美颜。只对视频 clip 有意义 */
+  beauty?: BeautyParams;
 };
 
 /** 安全读取 clip.config */
@@ -511,6 +517,7 @@ export function mapMediaClipToVideoClipItem(c: MediaClip, index: number): VideoC
     startTime: c.startTime,
     endTime: c.endTime,
     audioDetached: config.audioDetached === true,
+    beauty: readBeautyParams(config.beauty),
   };
 }
 

@@ -28,6 +28,47 @@ export interface VideoClipItem {
   endTime?: number;
   /** 原声已分离：预览只播画面 */
   audioDetached?: boolean;
+  /** 预览美颜。缺省为关闭 */
+  beauty?: BeautyParams;
+}
+
+/** 预览美颜参数。关闭时四项强度仍保留，方便再次打开 */
+export interface BeautyParams {
+  /** 总开关 */
+  enabled: boolean;
+  /** 磨皮，0–10 */
+  smooth: number;
+  /** 美白，0–10 */
+  whiten: number;
+  /** 瘦脸，0–10 */
+  slim: number;
+  /** 大眼，0–10 */
+  eye: number;
+}
+
+/** 默认关闭美颜，强度为 0 */
+export function createDefaultBeautyParams(): BeautyParams {
+  return { enabled: false, smooth: 0, whiten: 0, slim: 0, eye: 0 };
+}
+
+/** 把滑杆值收进 0–10 */
+export function clampBeautyLevel(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.min(10, Math.max(0, value));
+}
+
+/** 从 clip.config 读取美颜。缺字段或类型不对时用默认值 */
+export function readBeautyParams(value: unknown): BeautyParams {
+  const defaults = createDefaultBeautyParams();
+  if (!value || typeof value !== "object") return defaults;
+  const raw = value as Partial<BeautyParams>;
+  return {
+    enabled: raw.enabled === true,
+    smooth: clampBeautyLevel(Number(raw.smooth ?? 0)),
+    whiten: clampBeautyLevel(Number(raw.whiten ?? 0)),
+    slim: clampBeautyLevel(Number(raw.slim ?? 0)),
+    eye: clampBeautyLevel(Number(raw.eye ?? 0)),
+  };
 }
 
 /** 预览用音频片段（按全局时间命中后混音） */
