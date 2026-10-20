@@ -13,17 +13,25 @@ interface UseComposePreviewFrameOptions {
   clips: Ref<VideoClipItem[]>;
   /** 当前片段下标 */
   currentIdx: Ref<number>;
-  /** 时间轴时间（秒） */
-  globalTime: Ref<number>;
+  /** 取帧目标（秒）。暂停时等于游标，播放时由预览钩子往前推 */
+  sampleTime: Ref<number>;
+  /** 取帧目标没变时仍要再解一次。播放重试靠它 */
+  renderGeneration: Ref<number>;
+  /** 正在播放时立即取帧，暂停时合并连续跳转 */
+  isPlaying: Ref<boolean>;
   /** 空隙时不取帧，画面隐藏 */
   inGap: Ref<boolean>;
+  /** 一帧已经画到 canvas 上。参数是该帧源时间（微秒） */
+  onFramePresented: (sourceTimeUs: number) => void;
+  /** 这一时刻没有画面。参数是请求的源时间（微秒） */
+  onFrameMissed: (sourceTimeUs: number) => void;
 }
 
 /**
  * 把时间轴时钟交给预览 Worker，再用主线程 GPUPixel 把返回的 RGBA 画到 canvas。
  */
 export function useComposePreviewFrame(options: UseComposePreviewFrameOptions) {
-  const { canvas, clips, currentIdx, globalTime, inGap } = options;
+  const { canvas, clips, currentIdx, sampleTime, renderGeneration, isPlaying, inGap, onFramePresented, onFrameMissed } = options;
   const videoSize = ref<PreviewVideoSize | null>(null);
   const frameReady = ref(false);
   const previewError = ref("");
@@ -33,8 +41,12 @@ export function useComposePreviewFrame(options: UseComposePreviewFrameOptions) {
   let gpuReady: Promise<void> | null = null;
   let requestId = 0;
   let appliedId = 0;
+  /** 已经画上 canvas 的请求序号。同一帧重画不再回调 */
+  let presentedRequestId = 0;
   let queued = false;
   let disposed = false;
+  /** 暂停取帧的定时器。0 表示没有在等 */
+  let pausedRenderTimer = 0;
   let latestFrame: BeautyFrameEvent | null = null;
   let prefetchedId = "";
 
@@ -73,6 +85,12 @@ export function useComposePreviewFrame(options: UseComposePreviewFrameOptions) {
       previewError.value = event.message;
       return;
     }
+    if (event.type === "miss") {
+      if (event.requestId < appliedId) return;
+      appliedId = event.requestId;
+      onFrameMissed(event.sourceTimeUs);
+      return;
+    }
     if (event.requestId < appliedId) return;
     appliedId = event.requestId;
     latestFrame = event;
@@ -92,9 +110,12 @@ export function useComposePreviewFrame(options: UseComposePreviewFrameOptions) {
     } catch {
       return;
     }
-    if (latestFrame !== frame || !gpu) return;
+    if (disposed || latestFrame !== frame || !gpu) return;
     const beauty = currentBeauty();
     gpu.draw(new Uint8Array(frame.buffer), frame.width, frame.height, beauty, frame.landmarks);
+    if (frame.requestId === presentedRequestId) return;
+    presentedRequestId = frame.requestId;
+    onFramePresented(frame.sourceTimeUs);
   }
 
   /** 当前片段的美颜。没有片段时用关闭 */
@@ -102,14 +123,36 @@ export function useComposePreviewFrame(options: UseComposePreviewFrameOptions) {
     return readBeautyParams(clips.value[currentIdx.value]?.beauty);
   }
 
-  /** 同一轮响应里多次改动只发一次取帧 */
+  /** 暂停拖动时合并取帧的等待（毫秒）。只解最后一次 */
+  const PAUSED_RENDER_DELAY_MS = 80;
+
+  /** 取消暂停期间还没发出的取帧 */
+  function clearPausedRender(): void {
+    window.clearTimeout(pausedRenderTimer);
+    pausedRenderTimer = 0;
+  }
+
+  /**
+   * 安排一次取帧。
+   * 播放中用微任务立刻发；暂停时等 80 毫秒，期间又改时间就只保留最后一次。
+   */
   function schedule(): void {
-    if (queued || disposed) return;
-    queued = true;
-    queueMicrotask(() => {
-      queued = false;
+    if (disposed) return;
+    if (isPlaying.value) {
+      clearPausedRender();
+      if (queued) return;
+      queued = true;
+      queueMicrotask(() => {
+        queued = false;
+        postRender();
+      });
+      return;
+    }
+    clearPausedRender();
+    pausedRenderTimer = window.setTimeout(() => {
+      pausedRenderTimer = 0;
       postRender();
-    });
+    }, PAUSED_RENDER_DELAY_MS);
   }
 
   /** 把当前源时间和是否检测人脸发给 Worker */
@@ -126,7 +169,7 @@ export function useComposePreviewFrame(options: UseComposePreviewFrameOptions) {
       requestId,
       clipId: clip.id,
       url: clip.url,
-      sourceTimeUs: previewSourceTimeUs(list, index, globalTime.value),
+      sourceTimeUs: previewSourceTimeUs(list, index, sampleTime.value),
       detectFace: beautyNeedsFace(beauty),
     });
     const next = list[index + 1];
@@ -143,7 +186,8 @@ export function useComposePreviewFrame(options: UseComposePreviewFrameOptions) {
       return [
         clip?.id ?? "",
         clip?.url ?? "",
-        globalTime.value,
+        sampleTime.value,
+        renderGeneration.value,
         inGap.value,
         beauty?.enabled ?? false,
         beauty?.smooth ?? 0,
@@ -165,6 +209,7 @@ export function useComposePreviewFrame(options: UseComposePreviewFrameOptions) {
 
   onUnmounted(() => {
     disposed = true;
+    clearPausedRender();
     worker?.postMessage({ type: "dispose" });
     worker?.terminate();
     worker = null;

@@ -1,4 +1,4 @@
-import type { BeautyFrameEvent, BeautyWorkerEvent, BeautyWorkerRequest } from "@/types/beautyPreview";
+import type { BeautyFrameEvent, BeautyMissEvent, BeautyWorkerEvent, BeautyWorkerRequest } from "@/types/beautyPreview";
 import { copyFrameRgba } from "./beauty/copyFrameRgba";
 import { DecodeSession } from "./beauty/decodeSession";
 import { installImportScripts } from "./beauty/installImportScripts";
@@ -55,9 +55,18 @@ function ensureFace(): Promise<void> {
 /** 解一帧、按需检测，再把 RGBA 和关键点转交主线程 */
 async function runRender(request: Extract<BeautyWorkerRequest, { type: "render" }>): Promise<void> {
   const frame = await decodeSession.tick(request.clipId, request.url, request.sourceTimeUs);
-  if (!frame) return;
   if (latestRender && latestRender.requestId > request.requestId) {
-    frame.close();
+    frame?.close();
+    return;
+  }
+  if (!frame) {
+    const miss: BeautyMissEvent = {
+      type: "miss",
+      requestId: request.requestId,
+      clipId: request.clipId,
+      sourceTimeUs: request.sourceTimeUs,
+    };
+    scope.postMessage(miss);
     return;
   }
   try {

@@ -4,9 +4,10 @@ import { findPreviewVideoAtTime } from "@/types/videoCompose";
 import { createPreviewAudioMixer, type PreviewAudioMixerSyncState } from "@/hooks/previewAudioMixer";
 import { applyPreviewGain, primePreviewAudioContext } from "@/hooks/previewMediaGain";
 import { clampGain } from "@/editor/volumeDb";
+import { previewSourceTimeUs, previewTimelineSec } from "@/hooks/previewSourceTime";
 
 interface UseVideoComposePreviewOptions {
-  /** 双缓冲原声 A。画面改由 WebCodecs 绘制，这里只负责时钟和内嵌原声 */
+  /** 双缓冲原声 A。游标跟已画出的帧走，这里只播内嵌原声 */
   videoA: Ref<HTMLMediaElement | null>;
   /** 双缓冲原声 B */
   videoB: Ref<HTMLMediaElement | null>;
@@ -36,6 +37,12 @@ const TIMELINE_END_EPSILON = 0.04;
 
 /** 暂停后恢复：与媒体已对齐则不再 seek，避免关键帧吸附拖动光标 */
 const PLAY_RESUME_SEEK_EPSILON = 0.05;
+
+/** 原声允许超前游标的时间（秒）。超过就先停住，等画面 */
+const AUDIO_LEAD_SEC = 0.05;
+
+/** 播放中一帧在时间轴上的步长（秒）。1 倍速对应 30fps */
+const FRAME_STEP_SEC = 1 / 30;
 
 /** 片段倍速，兜底 1 */
 function clipRate(clip: VideoClipItem | undefined): number {
@@ -70,6 +77,10 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
   let playGeneration = 0;
   const currentIdx = ref(0);
   const globalTime = ref(0);
+  /** 取帧目标（秒）。暂停时等于游标；播放中比已画出的帧超前一个步长 */
+  const sampleTime = ref(0);
+  /** sampleTime 没变时仍强制再解一帧 */
+  const renderGeneration = ref(0);
   /** 工具栏全局倍速（与 clip.playbackRate 相乘） */
   const globalPlaybackRate = ref(1);
   /** 当前可见层：0 = videoA，1 = videoB */
@@ -120,6 +131,14 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
   let boundVideoEl: HTMLMediaElement | null = null;
   /** 切换片段 / 程序化 seek 时忽略原生 play/pause，避免状态抖动 */
   let suppressMediaEvents = false;
+  /** 活动层程序化 currentTime 尚未被 seeked 消费的次数。这些回写不改预览时间 */
+  let pendingProgrammaticSeeks = 0;
+  /** 空帧后推迟要下一帧的定时器。0 表示没有在等 */
+  let missStepTimer = 0;
+  /** 为了等画面而暂停原声的次数。这些 pause 不应当成用户暂停 */
+  let pendingProgrammaticPauses = 0;
+  /** 出帧后把原声拉回游标的 play 次数。不当成用户按下播放 */
+  let pendingProgrammaticPlays = 0;
   /** 待命层已准备好的片段索引；-1 表示未就绪 */
   let standbyReadyIdx = -1;
   /** 正在 prepare 的片段索引，避免重复触发 */
@@ -130,12 +149,6 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
   let gapWallStartMs = 0;
   /** 进入空隙时的全局时间 */
   let gapGlobalStart = 0;
-  /** 内嵌 audio 没有可播放音轨时，用墙钟代替 currentTime */
-  let wallClockActive = false;
-  /** 墙钟锚点 */
-  let wallAnchorMs = 0;
-  /** 墙钟锚点对应的全局时间（秒） */
-  let wallAnchorGlobal = 0;
 
   /** 顺序累加起点（无绝对时间时的回退） */
   function prevDuration(idx: number): number {
@@ -200,18 +213,134 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
     return Number.isFinite(el.duration) && el.duration > 0;
   }
 
-  /** 从给定全局时间重新开始墙钟 */
-  function engageWallClock(atGlobal: number): void {
-    wallClockActive = true;
-    wallAnchorMs = performance.now();
-    wallAnchorGlobal = atGlobal;
+  /** 有视频且正在播放：游标只跟已画出的帧，不跟原声或墙钟 */
+  function framePacedPlayback(): boolean {
+    return isPlaying.value && !inGap.value && !isAudioOnlyPreview.value && clips.value.length > 0;
   }
 
-  /** 按墙钟推进当前片段的全局时间 */
-  function advanceWallClock(clip: VideoClipItem | undefined): void {
-    if (!wallClockActive) engageWallClock(globalTime.value);
-    const elapsed = ((performance.now() - wallAnchorMs) / 1000) * effectiveRate(clip);
-    globalTime.value = wallAnchorGlobal + elapsed;
+  /** 下一帧的时间轴步长。工具栏倍速按同样比例放大，1 倍速仍是 1/30 秒 */
+  function frameStepSec(): number {
+    const rate = globalPlaybackRate.value > 0 ? globalPlaybackRate.value : 1;
+    return FRAME_STEP_SEC * rate;
+  }
+
+  /** 取消还没发出的空帧续播 */
+  function clearMissStep(): void {
+    window.clearTimeout(missStepTimer);
+    missStepTimer = 0;
+  }
+
+  /** 设置取帧目标。时间没变时也加一代，让预览再解一次 */
+  function requestSample(timeSec: number): void {
+    if (timeSec === sampleTime.value) renderGeneration.value += 1;
+    else sampleTime.value = timeSec;
+  }
+
+  /** 游标和取帧目标一起放到这个时间轴时刻 */
+  function placePlayhead(timeSec: number): void {
+    clearMissStep();
+    globalTime.value = timeSec;
+    requestSample(timeSec);
+  }
+
+  /**
+   * 再往前一帧的源时间是否仍被夹在同一微秒。
+   * 是的话这段已经没有更多画面。
+   */
+  function clipSourceExhausted(index: number, sourceTimeUs: number): boolean {
+    const list = clips.value;
+    const timeline = previewTimelineSec(list, index, sourceTimeUs);
+    return previewSourceTimeUs(list, index, timeline + frameStepSec()) === sourceTimeUs;
+  }
+
+  /** 原声时间轴位置减去游标（秒）。正数表示原声超前 */
+  function embeddedAudioLeadSec(): number {
+    const media = activeVideoEl.value;
+    if (!media) return 0;
+    return computeGlobalFromVideo(media, currentIdx.value) - globalTime.value;
+  }
+
+  /** 原声超前超过阈值就暂停，等画面追上 */
+  function holdEmbeddedAudioIfAhead(): void {
+    const media = activeVideoEl.value;
+    if (!media || media.paused) return;
+    if (embeddedAudioLeadSec() <= AUDIO_LEAD_SEC) return;
+    pendingProgrammaticPauses += 1;
+    media.pause();
+  }
+
+  /** 新帧画上后，原声从游标继续。偏差超过阈值时先对齐再播 */
+  function syncEmbeddedAudioToPicture(): void {
+    const media = activeVideoEl.value;
+    const clip = clips.value[currentIdx.value];
+    if (!media || !clip || !framePacedPlayback()) return;
+    if (Math.abs(embeddedAudioLeadSec()) > AUDIO_LEAD_SEC) {
+      const local = Math.max(0, globalTime.value - clipAbsStart(clip, currentIdx.value));
+      try {
+        assignActiveCurrentTime(media, timelineOffsetToSource(clip, local));
+      } catch {
+        /* ignore */
+      }
+    }
+    if (!media.paused) return;
+    pendingProgrammaticPlays += 1;
+    void media.play().catch(() => {
+      pendingProgrammaticPlays = Math.max(0, pendingProgrammaticPlays - 1);
+    });
+  }
+
+  /**
+   * 一帧已经画上。播放中把游标改成这一帧的时间，并再要下一帧。
+   * 暂停时的跳转不在这里改游标。
+   */
+  function onFramePresented(sourceTimeUs: number): void {
+    if (!framePacedPlayback()) return;
+    clearMissStep();
+    const list = clips.value;
+    const index = currentIdx.value;
+    if (sourceTimeUs !== previewSourceTimeUs(list, index, sampleTime.value)) return;
+    const timeline = previewTimelineSec(list, index, sourceTimeUs);
+    globalTime.value = timeline;
+    if (clipSourceExhausted(index, sourceTimeUs)) {
+      advancePastClip(index);
+      return;
+    }
+    requestSample(timeline + frameStepSec());
+    syncEmbeddedAudioToPicture();
+  }
+
+  /**
+   * 这一时刻没有画面。播放中过一帧再要，避免游标停住。
+   * 源时间已经到片段末尾时切下一段。
+   */
+  function onFrameMissed(sourceTimeUs: number): void {
+    if (!framePacedPlayback()) return;
+    const list = clips.value;
+    const index = currentIdx.value;
+    if (sourceTimeUs !== previewSourceTimeUs(list, index, sampleTime.value)) return;
+    const timeline = previewTimelineSec(list, index, sourceTimeUs);
+    if (clipSourceExhausted(index, sourceTimeUs)) {
+      clearMissStep();
+      globalTime.value = Math.max(globalTime.value, timeline);
+      advancePastClip(index);
+      return;
+    }
+    const next = timeline + frameStepSec();
+    clearMissStep();
+    missStepTimer = window.setTimeout(() => {
+      missStepTimer = 0;
+      if (!framePacedPlayback()) return;
+      if (previewSourceTimeUs(clips.value, currentIdx.value, sampleTime.value) !== sourceTimeUs) return;
+      globalTime.value = Math.max(globalTime.value, timeline);
+      requestSample(next);
+      syncEmbeddedAudioToPicture();
+    }, 32);
+  }
+
+  /** 开始按帧推进。上一帧已在画面上时，直接要下一帧 */
+  function beginFramePace(): void {
+    if (!framePacedPlayback()) return;
+    requestSample(globalTime.value + frameStepSec());
   }
 
   /** 源时间 → 片段内时间轴偏移 */
@@ -318,6 +447,21 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
     boundVideoEl = v;
   }
 
+  /**
+   * 在已绑定 seeked 的活动层上设置源时间。
+   * 浏览器稍后的 seeked 常吸到关键帧；时间没变时不会触发 seeked，因此不计数。
+   */
+  function assignActiveCurrentTime(media: HTMLMediaElement, sourceTime: number): void {
+    const willSeek = media.currentTime !== sourceTime;
+    if (willSeek) pendingProgrammaticSeeks += 1;
+    try {
+      media.currentTime = sourceTime;
+    } catch (error) {
+      if (willSeek) pendingProgrammaticSeeks -= 1;
+      throw error;
+    }
+  }
+
   /** 分离原声或 volume=0 时强制静音内嵌音轨，原声走独立 audio clip */
   function shouldMuteVideoEmbeddedAudio(clip: VideoClipItem | undefined, vol: number): boolean {
     return clip?.audioDetached === true || vol <= 0;
@@ -341,6 +485,7 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
     globalTime.value = atTime;
     const v = activeVideoEl.value;
     if (v) {
+      if (!v.paused) pendingProgrammaticPauses += 1;
       suppressMediaEvents = true;
       try {
         v.pause();
@@ -410,11 +555,8 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
 
       activeSlot.value = newSlot;
       currentIdx.value = nextIdx;
-      if (mediaElementCanClock(next)) {
-        wallClockActive = false;
+      if (!framePacedPlayback() && mediaElementCanClock(next)) {
         globalTime.value = computeGlobalFromVideo(next, nextIdx);
-      } else {
-        engageWallClock(globalTime.value);
       }
 
       if (prev) {
@@ -460,16 +602,14 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
       }
       const sourceTime = timelineOffsetToSource(clip, localTimeSec);
       try {
-        v.currentTime = sourceTime;
+        assignActiveCurrentTime(v, sourceTime);
       } catch {
         /* ignore */
       }
       applyClipMediaParams(v, clip);
       await waitForPlayable(v);
       currentIdx.value = idx;
-      globalTime.value = clipAbsStart(clip, idx) + localTimeSec;
-      if (!mediaElementCanClock(v)) engageWallClock(globalTime.value);
-      else wallClockActive = false;
+      placePlayhead(clipAbsStart(clip, idx) + localTimeSec);
       if (autoplay) await v.play().catch(() => undefined);
     } finally {
       suppressMediaEvents = false;
@@ -499,9 +639,9 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
       exitGap();
       suppressMediaEvents = true;
       try {
-        active.currentTime = sourceTime;
+        assignActiveCurrentTime(active, sourceTime);
         applyClipMediaParams(active, clip);
-        globalTime.value = clipAbsStart(clip, idx) + localTimeSec;
+        placePlayhead(clipAbsStart(clip, idx) + localTimeSec);
         if (autoplay) await active.play().catch(() => undefined);
       } finally {
         suppressMediaEvents = false;
@@ -521,11 +661,11 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
       if (v) {
         if (Math.abs(v.currentTime - sourceTime) > 0.05) {
           try {
-            v.currentTime = sourceTime;
+            assignActiveCurrentTime(v, sourceTime);
           } catch {
             /* ignore */
           }
-          globalTime.value = clipAbsStart(clip, idx) + localTimeSec;
+          if (!framePacedPlayback()) placePlayhead(clipAbsStart(clip, idx) + localTimeSec);
         }
         applyClipMediaParams(v, clip);
       }
@@ -567,13 +707,10 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
     audioMixer.refresh(mixerState());
   }
 
-  /** 是否已到达当前片段源出点或时间轴终点 */
-  function reachedClipEnd(v: HTMLMediaElement, clip: VideoClipItem | undefined, idx: number): boolean {
+  /** 游标是否已到当前片段的时间轴终点。不看原声，避免声音先走完把画面截掉 */
+  function reachedClipEnd(clip: VideoClipItem | undefined, idx: number): boolean {
     if (!clip) return false;
-    const absEnd = clipAbsEnd(clip, idx);
-    if (globalTime.value >= absEnd - 0.04) return true;
-    const end = clipTrimEnd(clip);
-    return v.currentTime >= end - 0.04 || v.ended;
+    return globalTime.value >= clipAbsEnd(clip, idx) - TIMELINE_END_EPSILON;
   }
 
   /** 到达段尾：循环 / 下一段 / 空隙 / 结束 */
@@ -585,9 +722,9 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
       suppressMediaEvents = true;
       void (async () => {
         try {
-          v.currentTime = clipTrimStart(clip);
+          assignActiveCurrentTime(v, clipTrimStart(clip));
           applyClipMediaParams(v, clip);
-          globalTime.value = clipAbsStart(clip, fromIdx);
+          placePlayhead(clipAbsStart(clip, fromIdx));
           await v.play().catch(() => undefined);
         } finally {
           suppressMediaEvents = false;
@@ -602,7 +739,7 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
     const nextIdx = nextClipIndex(fromIdx);
     if (nextIdx < 0) {
       pause();
-      globalTime.value = totalDurationSec.value;
+      placePlayhead(totalDurationSec.value);
       return;
     }
 
@@ -621,12 +758,12 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
     else void switchToClip(nextIdx, true, 0);
   }
 
-  /** RAF：更新全局时间 + 提前 prepare/软切 + 空隙推进 */
+  /** RAF：提前 prepare/软切。游标不在这里推进 */
   function tickSoftCut(v: HTMLMediaElement): void {
     const clip = clips.value[currentIdx.value];
     if (!clip || inGap.value) return;
 
-    if (reachedClipEnd(v, clip, currentIdx.value)) {
+    if (reachedClipEnd(clip, currentIdx.value)) {
       if (suppressMediaEvents) return;
       advancePastClip(currentIdx.value);
       return;
@@ -688,16 +825,10 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
   function loop(): void {
     if (inGap.value || isAudioOnlyPreview.value) {
       tickGap();
-    } else {
+    } else if (isPlaying.value) {
       const v = activeVideoEl.value;
       if (v) {
-        const clip = clips.value[currentIdx.value];
-        if (!mediaElementCanClock(v)) {
-          if (isPlaying.value) advanceWallClock(clip);
-        } else {
-          wallClockActive = false;
-          globalTime.value = computeGlobalFromVideo(v, currentIdx.value);
-        }
+        holdEmbeddedAudioIfAhead();
         tickSoftCut(v);
       }
     }
@@ -739,7 +870,7 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
     isPlaying.value = true;
     // 仅在「已暂停且处于末尾」时回到起点重播
     if (resumeFromEnd) {
-      globalTime.value = 0;
+      placePlayhead(0);
       exitGap();
       await seek(0);
     } else if (!isPlayheadAlignedWithMedia(globalTime.value)) {
@@ -761,7 +892,6 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
       await waitForPlayable(v);
       if (gen !== playGeneration) return;
       await v.play().catch(() => undefined);
-      if (!mediaElementCanClock(v)) engageWallClock(globalTime.value);
     }
     if (gen !== playGeneration) {
       activeVideoEl.value?.pause();
@@ -769,16 +899,14 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
       return;
     }
     startLoop();
+    beginFramePace();
   }
 
   function pause(): void {
     playGeneration += 1;
-    // 先记下视频真实时间，再停播，避免暂停后 timeupdate/关键帧把光标拽走
-    if (!inGap.value && !isAudioOnlyPreview.value) {
-      const v = activeVideoEl.value;
-      if (v && mediaElementCanClock(v)) globalTime.value = computeGlobalFromVideo(v, currentIdx.value);
-    }
+    clearMissStep();
     isPlaying.value = false;
+    sampleTime.value = globalTime.value;
     activeVideoEl.value?.pause();
     audioMixer.pauseAll(bgmEl.value);
     cancelAnimationFrame(rafId);
@@ -803,7 +931,7 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
   }
 
   function onEnded(): void {
-    if (suppressMediaEvents) return;
+    if (suppressMediaEvents || framePacedPlayback()) return;
     advancePastClip(currentIdx.value);
   }
 
@@ -814,6 +942,10 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
   }
 
   function onNativePlay(): void {
+    if (pendingProgrammaticPlays > 0) {
+      pendingProgrammaticPlays -= 1;
+      return;
+    }
     if (suppressMediaEvents || inGap.value) return;
     isPlaying.value = true;
     syncVolumes();
@@ -822,7 +954,11 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
   }
 
   function onNativePause(): void {
-    if (suppressMediaEvents || inGap.value) return;
+    if (pendingProgrammaticPauses > 0) {
+      pendingProgrammaticPauses -= 1;
+      return;
+    }
+    if (suppressMediaEvents || inGap.value || framePacedPlayback()) return;
     const active = activeVideoEl.value;
     if (boundVideoEl && active && boundVideoEl !== active) return;
     if (active && !active.paused) return;
@@ -832,7 +968,11 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
   }
 
   function onNativeSeeked(): void {
-    if (suppressMediaEvents || inGap.value) return;
+    if (pendingProgrammaticSeeks > 0) {
+      pendingProgrammaticSeeks -= 1;
+      return;
+    }
+    if (suppressMediaEvents || inGap.value || framePacedPlayback()) return;
     const v = activeVideoEl.value;
     if (!v) return;
     globalTime.value = computeGlobalFromVideo(v, currentIdx.value);
@@ -842,7 +982,7 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
   async function seek(globalSec: number): Promise<void> {
     const total = totalDurationSec.value;
     const t = Math.max(0, Math.min(globalSec, total || globalSec));
-    globalTime.value = t;
+    placePlayhead(t);
 
     const idx = findClipIndexAtTime(t);
     if (idx < 0) {
@@ -855,9 +995,7 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
     const clip = clips.value[idx];
     const localTime = Math.max(0, t - clipAbsStart(clip, idx));
     await switchToClip(idx, isPlaying.value, localTime);
-    globalTime.value = t;
-    const clock = activeVideoEl.value;
-    if (clock && !mediaElementCanClock(clock)) engageWallClock(t);
+    placePlayhead(t);
     syncBgm();
   }
 
@@ -865,9 +1003,7 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
     const clip = clips.value[idx];
     if (!clip) return;
     await switchToClip(idx, isPlaying.value, 0);
-    globalTime.value = clipAbsStart(clip, idx);
-    const clock = activeVideoEl.value;
-    if (clock && !mediaElementCanClock(clock)) engageWallClock(globalTime.value);
+    placePlayhead(clipAbsStart(clip, idx));
     syncBgm();
   }
 
@@ -895,6 +1031,7 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
           await v.play().catch(() => undefined);
         }
         startLoop();
+        beginFramePace();
       }
     }
     syncVolumes();
@@ -927,6 +1064,7 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
   }
 
   function destroy(): void {
+    clearMissStep();
     cancelAnimationFrame(rafId);
     unbindVideoEvents();
     videoA.value?.pause();
@@ -960,12 +1098,22 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
     },
   );
 
+  /** 空隙、暂停、纯音频时取帧目标跟着游标。播放中的步长由出帧回调单独推进 */
+  watch(globalTime, (timeSec) => {
+    if (framePacedPlayback()) return;
+    sampleTime.value = timeSec;
+  });
+
   onUnmounted(destroy);
 
   return {
     isPlaying,
     currentIdx,
     globalTime,
+    sampleTime,
+    renderGeneration,
+    onFramePresented,
+    onFrameMissed,
     totalDurationSec,
     activeSlot,
     activeVideoEl,

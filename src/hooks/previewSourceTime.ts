@@ -28,3 +28,19 @@ export function previewSourceTimeUs(clips: VideoClipItem[], index: number, globa
   const trimEnd = clip.trimEnd != null && clip.trimEnd > trim ? clip.trimEnd : trim + (clip.durationSec || 0) * rate;
   return Math.max(0, Math.round(Math.min(sourceSec, trimEnd) * 1e6));
 }
+
+/**
+ * 源时间（微秒）换回时间轴秒数，是 previewSourceTimeUs 的反函数。
+ * @param clips 当前播放列表
+ * @param index 当前片段下标
+ * @param sourceTimeUs 源时间（微秒）
+ */
+export function previewTimelineSec(clips: VideoClipItem[], index: number, sourceTimeUs: number): number {
+  const clip = clips[index];
+  if (!clip) return 0;
+  const rate = clip.playbackRate != null && clip.playbackRate > 0 ? clip.playbackRate : 1;
+  const trim = Math.max(0, clip.trimStart ?? 0);
+  const sourceSec = Math.max(0, sourceTimeUs / 1e6);
+  const local = Math.max(0, (sourceSec - trim) / rate);
+  return previewClipStartSec(clips, index) + local;
+}

@@ -59,6 +59,17 @@ export interface BeautyFrameEvent {
   landmarks: Float32Array<ArrayBufferLike>;
 }
 
+/** 这一时刻没有画面。播放中主线程应继续要下一帧 */
+export interface BeautyMissEvent {
+  type: "miss";
+  /** 对应的请求序号 */
+  requestId: number;
+  /** 片段 id */
+  clipId: string;
+  /** 请求的源时间（微秒） */
+  sourceTimeUs: number;
+}
+
 /** Worker 无法解码或检测时的说明 */
 export interface BeautyErrorEvent {
   type: "error";
@@ -69,7 +80,7 @@ export interface BeautyErrorEvent {
 }
 
 /** Worker 发回主线程的消息 */
-export type BeautyWorkerEvent = BeautyFrameEvent | BeautyErrorEvent;
+export type BeautyWorkerEvent = BeautyFrameEvent | BeautyMissEvent | BeautyErrorEvent;
 
 /** 当前帧要交给 GPUPixel 的强度。关闭时四项为 0 */
 export function beautyLevelsForFrame(beauty: BeautyParams): BeautyParams {

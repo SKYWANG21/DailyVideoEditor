@@ -240,6 +240,10 @@ const {
   globalTime,
   isPlaying,
   inGap,
+  sampleTime,
+  renderGeneration,
+  onFramePresented,
+  onFrameMissed,
   pause,
   play,
   toggle,
@@ -267,8 +271,12 @@ const {
   canvas: previewCanvasRef,
   clips: effectiveClips,
   currentIdx: playingIdx,
-  globalTime,
+  sampleTime,
+  renderGeneration,
+  isPlaying,
   inGap,
+  onFramePresented,
+  onFrameMissed,
 });
 
 /** 有解码帧且不在时间轴空隙时才显示画面 */
