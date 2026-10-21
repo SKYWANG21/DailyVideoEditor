@@ -127,7 +127,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, provide, computed, watch } from "vue";
+import { ref, onMounted, onUnmounted, provide, computed, watch, nextTick } from "vue";
 import { useTracksStore } from "../stores/tracks";
 import { usePlaybackStore } from "../stores/playback";
 import { useHistoryStore } from "../stores/history";
@@ -438,6 +438,8 @@ const emit = defineEmits<{
   "scale:changed": [scale: number];
   /** 轨道横向滚动位置（像素） */
   scroll: [left: number];
+  /** 可视区域宽度变化（像素）。缩放条据此重算滑块 */
+  "viewport:resize": [width: number];
 
   // 历史变化事件
   "history:changed": [state: { canUndo: boolean; canRedo: boolean }];
@@ -595,9 +597,7 @@ onMounted(() => {
   // 应用主题配置
   applyTheme(props.theme);
 
-  // 监听窗口大小变化
   updateTracksWidth();
-  window.addEventListener("resize", updateTracksWidth);
 });
 
 // 监听主题变化
@@ -652,16 +652,64 @@ function applyTheme(theme?: ThemeConfig) {
 }
 
 onUnmounted(() => {
-  window.removeEventListener("resize", updateTracksWidth);
+  viewportResizeObserver?.disconnect();
+  viewportResizeObserver = null;
+  observedViewportEl = null;
 });
 
-// 更新轨道宽度
-function updateTracksWidth() {
-  if (containerRef.value) {
-    const rect = containerRef.value.getBoundingClientRect();
-    tracksWidth.value = rect.width - currentTrackControlWidth.value;
-  }
+/** 当前观察的视口节点。轨道出现后从刻度尺切到轨道区 */
+let observedViewportEl: HTMLElement | null = null;
+let viewportResizeObserver: ResizeObserver | null = null;
+
+/** 缩放条用的可视节点。有轨道时用轨道区，否则用刻度尺 */
+function resolveViewportElement(): HTMLElement | null {
+  const root = containerRef.value;
+  if (!root) return null;
+  const area = root.querySelector(".track-area");
+  if (area instanceof HTMLElement && area.clientWidth > 0) return area;
+  const ruler = root.querySelector(".ruler__wrapper");
+  if (ruler instanceof HTMLElement) return ruler;
+  return null;
 }
+
+/** 还没有轨道区和刻度尺时，用容器宽减去控制栏，避免首帧为 0 */
+function fallbackViewportWidth(): number {
+  const root = containerRef.value;
+  if (!root) return 0;
+  return Math.max(0, root.clientWidth - currentTrackControlWidth.value);
+}
+
+/** 视口节点换了就重新观察。轨道从空到有时 .track-area 才出现 */
+function bindViewportObserver(): void {
+  const viewport = resolveViewportElement();
+  if (viewport === observedViewportEl && viewportResizeObserver) return;
+  viewportResizeObserver?.disconnect();
+  viewportResizeObserver = null;
+  observedViewportEl = viewport;
+  if (!viewport || typeof ResizeObserver === "undefined") return;
+  viewportResizeObserver = new ResizeObserver(() => {
+    updateTracksWidth();
+  });
+  viewportResizeObserver.observe(viewport);
+}
+
+/** 写入可视宽度。宽度没变不通知，避免缩放条反复重算 */
+function updateTracksWidth(): void {
+  bindViewportObserver();
+  const viewport = observedViewportEl;
+  const next = viewport && viewport.clientWidth > 0 ? viewport.clientWidth : fallbackViewportWidth();
+  if (next === tracksWidth.value) return;
+  tracksWidth.value = next;
+  emit("viewport:resize", next);
+}
+
+/** 轨道数量变化后轨道区才挂上，下一帧再量一次 */
+watch(
+  () => tracksStore.tracks.length,
+  () => {
+    void nextTick(() => updateTracksWidth());
+  },
+);
 
 // 处理轨道控制栏宽度更新
 function handleTrackControlWidthUpdate(width: number) {
@@ -697,7 +745,7 @@ function setScrollLeft(left: number) {
   scrollLeft.value = next;
 }
 
-/** 轨道可视宽度（像素），不含左侧控制栏 */
+/** 轨道可视宽度（像素）。轨道区或刻度尺的 clientWidth，不含左侧控制栏 */
 function getViewportWidth() {
   return tracksWidth.value;
 }
@@ -1440,6 +1488,9 @@ defineExpose({
   // 缩放控制
   setScale,
   getScale,
+  getViewportWidth,
+  getScrollLeft,
+  setScrollLeft,
   zoomIn,
   zoomOut,
   enableSnap,
@@ -1457,7 +1508,7 @@ defineExpose({
 .video-track {
   width: 100%;
   height: 100%;
-  min-width: 1024px;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   background: var(--color-bg-medium);

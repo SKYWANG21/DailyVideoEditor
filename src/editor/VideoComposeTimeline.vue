@@ -48,6 +48,7 @@
       @playback:ratechange="onPlaybackRateChange"
       @scale:changed="onScaleChanged"
       @scroll="onTrackScroll"
+      @viewport:resize="onViewportResize"
       @selection:changed="onSelectionChanged"
       @clip:dblclick="onClipDblClick"
       @drop-media="onDropMedia"
@@ -494,11 +495,9 @@ let themeObserver: MutationObserver | null = null;
 const hScrollbarControlWidthPx = ref(TIMELINE_TRACK_CONTROL_WIDTH);
 
 /** 根节点 CSS 变量，缩放条左缘与轨道头对齐 */
-const hScrollbarAlignStyle = computed(
-  (): Record<string, string> => ({
-    "--timeline-track-control-width": `${hScrollbarControlWidthPx.value}px`,
-  }),
-);
+const hScrollbarAlignStyle = computed((): Record<string, string> => ({
+  "--timeline-track-control-width": `${hScrollbarControlWidthPx.value}px`,
+}));
 
 /** 控制栏单元格尺寸变化时更新假横向条左缘 */
 let hScrollbarAlignResizeObserver: ResizeObserver | null = null;
@@ -960,6 +959,12 @@ function onZoomEnd(): void {
 
 /** 轨道自己滚动时，滑块跟着走 */
 function onTrackScroll(): void {
+  if (zoomGesture) return;
+  readZoomView();
+}
+
+/** 视口变宽变窄时重算滑块。拖动中不打断手势 */
+function onViewportResize(): void {
   if (zoomGesture) return;
   readZoomView();
 }
