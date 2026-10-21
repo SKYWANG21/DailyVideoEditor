@@ -6,9 +6,23 @@
     <audio ref="bgmAudioRef" preload="auto" crossorigin="anonymous" class="hidden" />
 
     <div ref="playerContainerRef" class="relative mx-4 mt-4 min-h-0 min-w-0 flex-1 overflow-hidden rounded-[4px] bg-[var(--compose-stage)]">
-      <!-- 原声时钟。画面由 WebCodecs + GPUPixel 画到下面的 canvas，不能对 canvas 调用 getContext -->
-      <audio ref="audioARef" preload="auto" class="hidden" />
-      <audio ref="audioBRef" preload="auto" class="hidden" />
+      <!-- 美颜关闭时双 video 出画；打开时只出声。canvas 交给 GPUPixel，不要 getContext -->
+      <video
+        ref="videoARef"
+        preload="auto"
+        playsinline
+        class="pointer-events-none absolute inset-0 z-0 h-full w-full object-contain"
+        :class="directVideoLayerClass(0)"
+        @loadedmetadata="onDirectVideoMetadata"
+      />
+      <video
+        ref="videoBRef"
+        preload="auto"
+        playsinline
+        class="pointer-events-none absolute inset-0 z-0 h-full w-full object-contain"
+        :class="directVideoLayerClass(1)"
+        @loadedmetadata="onDirectVideoMetadata"
+      />
       <canvas
         :id="GPU_PIXEL_CANVAS_ID"
         ref="previewCanvasRef"
@@ -129,13 +143,7 @@
           <Pause v-if="isPlaying" :size="16" />
           <Play v-else :size="16" class="translate-x-px" />
         </button>
-        <button
-          type="button"
-          :class="transportBtnClass"
-          aria-label="转到结束"
-          title="转到结束"
-          @click="emit('seek-playback', durationSec)"
-        >
+        <button type="button" :class="transportBtnClass" aria-label="转到结束" title="转到结束" @click="emit('seek-playback', durationSec)">
           <SkipForward :size="16" />
         </button>
       </div>
@@ -166,6 +174,8 @@ import type {
   SubtitleStyleConfig,
   VideoClipItem,
 } from "@/types/videoCompose";
+import { readBeautyParams } from "@/types/composeMedia";
+import type { PreviewVideoSize } from "@/types/beautyPreview";
 import { useVideoComposePreview } from "@/hooks/useVideoComposePreview";
 import { useComposePreviewFrame } from "@/hooks/useComposePreviewFrame";
 import { useVideoComposeSubtitleAdjust } from "@/hooks/useVideoComposeSubtitleAdjust";
@@ -235,8 +245,8 @@ const effectiveClips = computed<VideoClipItem[]>(() => {
   return props.videoClips;
 });
 
-const audioARef = ref<HTMLMediaElement | null>(null);
-const audioBRef = ref<HTMLMediaElement | null>(null);
+const videoARef = ref<HTMLVideoElement | null>(null);
+const videoBRef = ref<HTMLVideoElement | null>(null);
 const previewCanvasRef = ref<HTMLCanvasElement | null>(null);
 const playerContainerRef = ref<HTMLElement | null>(null);
 /** 模板 legacy BGM 元素；timeline 多轨由 preview mixer 池播放 */
@@ -253,6 +263,9 @@ const {
   globalTime,
   isPlaying,
   inGap,
+  activeSlot,
+  activeVideoEl,
+  directVideoAligned,
   sampleTime,
   renderGeneration,
   onFramePresented,
@@ -267,8 +280,8 @@ const {
   init,
   refreshBgm,
 } = useVideoComposePreview({
-  videoA: audioARef,
-  videoB: audioBRef,
+  videoA: videoARef,
+  videoB: videoBRef,
   bgmEl: bgmAudioRef,
   clips: effectiveClips,
   audioClips: audioClipsRef,
@@ -291,11 +304,7 @@ function fmtClock(sec: number): string {
   return hours > 0 ? `${hours}:${mm}:${ss}` : `${minutes}:${ss}`;
 }
 
-const {
-  videoSize,
-  frameReady,
-  previewError,
-} = useComposePreviewFrame({
+const { videoSize, frameReady, previewError } = useComposePreviewFrame({
   canvas: previewCanvasRef,
   clips: effectiveClips,
   currentIdx: playingIdx,
@@ -307,12 +316,46 @@ const {
   onFrameMissed,
 });
 
-/** 有解码帧且不在时间轴空隙时才显示画面 */
-const showPreviewFrame = computed(() => effectiveClips.value.length > 0 && !inGap.value && frameReady.value);
+/** 当前片段美颜总开关。强度为 0 仍显示 canvas */
+const beautyPreviewOn = computed(() => readBeautyParams(effectiveClips.value[playingIdx.value]?.beauty).enabled);
+
+/** 美颜打开且已经画出一帧时才显示 canvas。空隙保持黑屏 */
+const showPreviewFrame = computed(() => effectiveClips.value.length > 0 && !inGap.value && beautyPreviewOn.value && frameReady.value);
+
+/** 活动 video 的像素尺寸。美颜关闭时贴图按它对齐 */
+const directVideoSize = ref<PreviewVideoSize | null>(null);
+
+/** 读取 video 的原始像素尺寸。还没有元数据时返回空 */
+function readDirectVideoSize(el: HTMLMediaElement | null): PreviewVideoSize | null {
+  if (!(el instanceof HTMLVideoElement) || el.videoWidth <= 0 || el.videoHeight <= 0) return null;
+  return { width: el.videoWidth, height: el.videoHeight };
+}
+
+/** 活动层元数据就绪后记下贴图像素尺寸 */
+function onDirectVideoMetadata(event: Event): void {
+  const target = event.currentTarget;
+  if (!(target instanceof HTMLVideoElement) || target !== activeVideoEl.value) return;
+  directVideoSize.value = readDirectVideoSize(target);
+}
+
+/** 切到另一层时，用该 video 上已经加载好的像素尺寸 */
+watch(activeVideoEl, (el) => {
+  directVideoSize.value = readDirectVideoSize(el);
+});
+
+/** 该缓冲层是否直接出画：活动层、美颜关闭、不在空隙、且已对齐游标 */
+function directVideoLayerClass(slot: 0 | 1): string {
+  const visible =
+    activeSlot.value === slot && !beautyPreviewOn.value && !inGap.value && directVideoAligned.value && effectiveClips.value.length > 0;
+  return visible ? "opacity-100" : "opacity-0";
+}
+
+/** 贴图像素尺寸：美颜用 Worker 回传，否则用活动 video */
+const overlayVideoSize = computed<PreviewVideoSize | null>(() => (beautyPreviewOn.value ? videoSize.value : directVideoSize.value));
 
 /** 贴图 overlay 使用的视频原始尺寸 */
-const overlayVideoWidth = computed(() => videoSize.value?.width || 0);
-const overlayVideoHeight = computed(() => videoSize.value?.height || 0);
+const overlayVideoWidth = computed(() => overlayVideoSize.value?.width || 0);
+const overlayVideoHeight = computed(() => overlayVideoSize.value?.height || 0);
 
 /** 传给 overlay 的贴图列表 */
 const textClips = computed<ComposeTextOverlayClip[]>(() => props.textClips || []);
@@ -320,9 +363,9 @@ const textClips = computed<ComposeTextOverlayClip[]>(() => props.textClips || []
 /** 当前选中贴图 id */
 const selectedTextClipId = computed(() => props.selectedTextClipId ?? null);
 
-/** 添加贴图时用的视频像素尺寸 */
+/** 添加贴图时用的视频像素尺寸。美颜关闭时取活动 video，打开时取 Worker */
 function getVideoSize(): { width: number; height: number } | null {
-  const size = videoSize.value;
+  const size = overlayVideoSize.value;
   if (!size || size.width <= 0 || size.height <= 0) return null;
   return { width: size.width, height: size.height };
 }
@@ -337,7 +380,7 @@ const {
   centerLineStyle,
   subtitleTextStyle,
 } = useVideoComposeSubtitleAdjust({
-  videoSize,
+  videoSize: overlayVideoSize,
   containerEl: playerContainerRef,
   style: props.subtitleStyle,
   onEnter: pause,
@@ -509,8 +552,8 @@ async function tryInit(): Promise<void> {
 
   if (effectiveClips.value.length) {
     await nextTick();
-    if (!audioARef.value || !audioBRef.value) await nextTick();
-    if (!audioARef.value || !audioBRef.value) return;
+    if (!videoARef.value || !videoBRef.value) await nextTick();
+    if (!videoARef.value || !videoBRef.value) return;
   } else {
     await nextTick();
   }
@@ -554,8 +597,8 @@ watch(
   { immediate: true },
 );
 
-/** 双 audio 晚于 clips 挂载时补一次 init；纯音轨预览由 mixer 池驱动 */
-watch([audioARef, audioBRef], ([a, b]) => {
+/** 双 video 晚于 clips 挂载时补一次 init；纯音轨预览由 mixer 池驱动 */
+watch([videoARef, videoBRef], ([a, b]) => {
   if (!hasTimelineMedia.value) return;
   if (effectiveClips.value.length && (!a || !b)) return;
   init();

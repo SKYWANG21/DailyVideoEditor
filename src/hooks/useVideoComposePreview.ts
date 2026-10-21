@@ -5,12 +5,13 @@ import { createPreviewAudioMixer, type PreviewAudioMixerSyncState } from "@/hook
 import { applyPreviewGain, primePreviewAudioContext } from "@/hooks/previewMediaGain";
 import { clampGain } from "@/editor/volumeDb";
 import { previewSourceTimeUs, previewTimelineSec } from "@/hooks/previewSourceTime";
+import { readBeautyParams } from "@/types/composeMedia";
 
 interface UseVideoComposePreviewOptions {
-  /** 双缓冲原声 A。游标跟已画出的帧走，这里只播内嵌原声 */
-  videoA: Ref<HTMLMediaElement | null>;
-  /** 双缓冲原声 B */
-  videoB: Ref<HTMLMediaElement | null>;
+  /** 双缓冲视频 A。美颜关闭时出画并当时钟；打开时只播原声 */
+  videoA: { readonly value: HTMLMediaElement | null };
+  /** 双缓冲视频 B */
+  videoB: { readonly value: HTMLMediaElement | null };
   /** 模板 legacy BGM audio；timeline 多轨由 previewAudioMixer 池播放 */
   bgmEl: Ref<HTMLAudioElement | null>;
   /** 视频片段列表（按 startTime 排序） */
@@ -65,6 +66,7 @@ function clipTrimEnd(clip: VideoClipItem | undefined): number {
 
 /**
  * 视频合成实时预览：按绝对 startTime/endTime 定位 + 双缓冲切段 + 空隙黑屏。
+ * 美颜关闭时游标跟活动层 currentTime；打开时只跟已经画出的帧。
  */
 export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
   const { videoA, videoB, bgmEl, clips, previewMuted } = options;
@@ -87,6 +89,10 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
   const activeSlot = ref<0 | 1>(0);
   /** 是否处于无视频覆盖的空隙（黑屏推进游标） */
   const inGap = ref(false);
+  /** 从美颜切回视频后，活动层已对齐游标，可以出画 */
+  const directVideoAligned = ref(true);
+  /** 对齐 seek 迟迟不来时的兜底。0 表示没有在等 */
+  let directAlignTimer = 0;
 
   /** 音频轨 / legacy BGM 在时间轴上的最远终点（秒） */
   function maxAudioTimelineEndSec(): number {
@@ -213,9 +219,73 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
     return Number.isFinite(el.duration) && el.duration > 0;
   }
 
-  /** 有视频且正在播放：游标只跟已画出的帧，不跟原声或墙钟 */
+  /** 当前片段美颜总开关。强度为 0 也算打开，预览仍按帧推进 */
+  function currentClipBeautyEnabled(): boolean {
+    return readBeautyParams(clips.value[currentIdx.value]?.beauty).enabled;
+  }
+
+  /** 美颜打开且正在播放：游标只跟已画出的帧，不跟原声或墙钟 */
   function framePacedPlayback(): boolean {
-    return isPlaying.value && !inGap.value && !isAudioOnlyPreview.value && clips.value.length > 0;
+    return isPlaying.value && !inGap.value && !isAudioOnlyPreview.value && clips.value.length > 0 && currentClipBeautyEnabled();
+  }
+
+  /** 对齐结束，活动层可以出画 */
+  function finishDirectVideoAlign(): void {
+    window.clearTimeout(directAlignTimer);
+    directAlignTimer = 0;
+    directVideoAligned.value = true;
+  }
+
+  /** 美颜关掉后如果原声被画面拖停，出画后再继续播 */
+  function resumeActiveVideoIfPlaying(media: HTMLMediaElement): void {
+    if (!isPlaying.value || !media.paused || inGap.value || currentClipBeautyEnabled()) return;
+    pendingProgrammaticPlays += 1;
+    void media.play().catch(() => {
+      pendingProgrammaticPlays = Math.max(0, pendingProgrammaticPlays - 1);
+    });
+  }
+
+  /** 对齐完成：先出画，再把被拖停的原声继续播起来 */
+  function revealDirectVideo(): void {
+    finishDirectVideoAlign();
+    const media = activeVideoEl.value;
+    if (media) resumeActiveVideoIfPlaying(media);
+  }
+
+  /**
+   * 从美颜切回视频：把活动层 currentTime 对齐到当前游标，对齐完成后再出画。
+   */
+  function alignActiveLayerToPlayhead(): void {
+    const media = activeVideoEl.value;
+    const index = currentIdx.value;
+    const clip = clips.value[index];
+    if (!media || !clip || inGap.value) {
+      finishDirectVideoAlign();
+      return;
+    }
+    const local = Math.max(0, globalTime.value - clipAbsStart(clip, index));
+    const sourceTime = timelineOffsetToSource(clip, local);
+    const delta = Math.abs((media.currentTime || 0) - sourceTime);
+    if (delta <= PLAY_RESUME_SEEK_EPSILON && media.readyState >= HTMLMediaElement.HAVE_METADATA) {
+      revealDirectVideo();
+      return;
+    }
+    directVideoAligned.value = false;
+    window.clearTimeout(directAlignTimer);
+    directAlignTimer = window.setTimeout(revealDirectVideo, 400);
+    try {
+      assignActiveCurrentTime(media, sourceTime);
+    } catch {
+      revealDirectVideo();
+    }
+  }
+
+  /** 美颜关闭时用活动层 currentTime 写游标。还在 seek 或没有元数据时游标停住 */
+  function writePlayheadFromActiveVideo(media: HTMLMediaElement): void {
+    if (!directVideoAligned.value || media.seeking) return;
+    if (media.readyState < HTMLMediaElement.HAVE_METADATA) return;
+    if (!mediaElementCanClock(media)) return;
+    globalTime.value = computeGlobalFromVideo(media, currentIdx.value);
   }
 
   /** 下一帧的时间轴步长。工具栏倍速按同样比例放大，1 倍速仍是 1/30 秒 */
@@ -804,13 +874,15 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
     }
   }
 
+  /** 播放循环。美颜打开时等出帧并拦住超前的原声；关掉时游标跟活动层 */
   function loop(): void {
     if (inGap.value || isAudioOnlyPreview.value) {
       tickGap();
     } else if (isPlaying.value) {
       const v = activeVideoEl.value;
       if (v) {
-        holdEmbeddedAudioIfAhead();
+        if (framePacedPlayback()) holdEmbeddedAudioIfAhead();
+        else writePlayheadFromActiveVideo(v);
         tickSoftCut(v);
       }
     }
@@ -950,10 +1022,13 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
   }
 
   function onNativeSeeked(): void {
+    const revealing = !directVideoAligned.value;
     if (pendingProgrammaticSeeks > 0) {
       pendingProgrammaticSeeks -= 1;
+      if (revealing) revealDirectVideo();
       return;
     }
+    if (revealing) revealDirectVideo();
     if (suppressMediaEvents || inGap.value || framePacedPlayback()) return;
     const v = activeVideoEl.value;
     if (!v) return;
@@ -1047,6 +1122,8 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
 
   function destroy(): void {
     clearMissStep();
+    window.clearTimeout(directAlignTimer);
+    directAlignTimer = 0;
     cancelAnimationFrame(rafId);
     unbindVideoEvents();
     videoA.value?.pause();
@@ -1085,11 +1162,27 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
     },
   );
 
-  /** 空隙、暂停、纯音频时取帧目标跟着游标。播放中的步长由出帧回调单独推进 */
+  /** 空隙、暂停、纯音频、美颜关闭时取帧目标跟着游标。美颜播放的步长由出帧回调单独推进 */
   watch(globalTime, (timeSec) => {
     if (framePacedPlayback()) return;
     sampleTime.value = timeSec;
   });
+
+  /** 美颜总开关从开到关时，先把活动层对齐到游标再出画 */
+  watch(
+    () => currentClipBeautyEnabled(),
+    (enabled, prev) => {
+      if (prev === true && !enabled) {
+        alignActiveLayerToPlayhead();
+        return;
+      }
+      if (enabled) {
+        window.clearTimeout(directAlignTimer);
+        directAlignTimer = 0;
+        directVideoAligned.value = true;
+      }
+    },
+  );
 
   onUnmounted(destroy);
 
@@ -1104,6 +1197,7 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
     totalDurationSec,
     activeSlot,
     activeVideoEl,
+    directVideoAligned,
     globalPlaybackRate,
     inGap,
     isAudioOnlyPreview,

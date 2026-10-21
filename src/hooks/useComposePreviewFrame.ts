@@ -28,7 +28,8 @@ interface UseComposePreviewFrameOptions {
 }
 
 /**
- * 把时间轴时钟交给预览 Worker，再用主线程 GPUPixel 把返回的 RGBA 画到 canvas。
+ * 美颜总开关打开时，把时间轴交给预览 Worker，再用 GPUPixel 画到 canvas。
+ * 开关关闭时不创建 Worker、不画。开着但强度为 0 仍走这条取帧路径。
  */
 export function useComposePreviewFrame(options: UseComposePreviewFrameOptions) {
   const { canvas, clips, currentIdx, sampleTime, renderGeneration, isPlaying, inGap, onFramePresented, onFrameMissed } = options;
@@ -79,8 +80,9 @@ export function useComposePreviewFrame(options: UseComposePreviewFrameOptions) {
     return gpuReady;
   }
 
-  /** 只画最新一帧。GPUPixel 还没好时先把帧留着 */
+  /** 只画最新一帧。美颜关掉后的过期结果直接丢掉 */
   function onWorkerEvent(event: BeautyWorkerEvent): void {
+    if (!clipBeautyEnabled()) return;
     if (event.type === "error") {
       previewError.value = event.message;
       return;
@@ -100,8 +102,9 @@ export function useComposePreviewFrame(options: UseComposePreviewFrameOptions) {
     void drawLatest();
   }
 
-  /** 按当前片段的美颜参数把最近一帧画上去 */
+  /** 按当前片段的美颜参数把最近一帧画上去。总开关关闭时不画 */
   async function drawLatest(): Promise<void> {
+    if (!clipBeautyEnabled()) return;
     const frame = latestFrame;
     const ready = ensureGpu();
     if (!frame || !ready || !gpu) return;
@@ -121,6 +124,11 @@ export function useComposePreviewFrame(options: UseComposePreviewFrameOptions) {
   /** 当前片段的美颜。没有片段时用关闭 */
   function currentBeauty(): BeautyParams {
     return readBeautyParams(clips.value[currentIdx.value]?.beauty);
+  }
+
+  /** 当前片段美颜总开关。强度为 0 也算打开 */
+  function clipBeautyEnabled(): boolean {
+    return currentBeauty().enabled;
   }
 
   /** 暂停拖动时合并取帧的等待（毫秒）。只解最后一次 */
@@ -155,7 +163,10 @@ export function useComposePreviewFrame(options: UseComposePreviewFrameOptions) {
     }, PAUSED_RENDER_DELAY_MS);
   }
 
-  /** 把当前源时间和是否检测人脸发给 Worker */
+  /**
+   * 把当前源时间和是否检测人脸发给 Worker。
+   * 总开关关闭时直接返回，不创建 Worker。开着但强度为 0 仍然取帧。
+   */
   function postRender(): void {
     if (disposed || inGap.value) return;
     const list = clips.value;
@@ -163,6 +174,7 @@ export function useComposePreviewFrame(options: UseComposePreviewFrameOptions) {
     const clip = list[index];
     if (!clip?.url) return;
     const beauty = readBeautyParams(clip.beauty);
+    if (!beauty.enabled) return;
     requestId += 1;
     ensureWorker().postMessage({
       type: "render",
@@ -197,6 +209,11 @@ export function useComposePreviewFrame(options: UseComposePreviewFrameOptions) {
       ].join("|");
     },
     () => {
+      if (!clipBeautyEnabled()) {
+        clearPausedRender();
+        frameReady.value = false;
+        return;
+      }
       schedule();
       if (latestFrame) void drawLatest();
     },
@@ -204,7 +221,10 @@ export function useComposePreviewFrame(options: UseComposePreviewFrameOptions) {
   );
 
   watch(canvas, () => {
-    void ensureGpu()?.then(() => drawLatest()).catch(() => undefined);
+    if (!clipBeautyEnabled()) return;
+    void ensureGpu()
+      ?.then(() => drawLatest())
+      .catch(() => undefined);
   });
 
   onUnmounted(() => {
