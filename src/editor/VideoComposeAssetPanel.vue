@@ -1,29 +1,29 @@
 <template>
   <aside
-    class="compose-assets relative flex h-full shrink-0 overflow-hidden rounded-[16px] bg-[var(--compose-surface)] shadow-[var(--compose-shadow-card)] transition-[width] duration-300"
-    :class="collapsed ? 'w-[132px]' : 'w-[34%] min-w-[264px]'"
+    ref="panelRef"
+    class="compose-assets relative flex h-full min-h-0 w-full min-w-0 overflow-hidden rounded-[16px] bg-[var(--compose-surface)] shadow-[var(--compose-shadow-card)]"
     aria-label="素材"
   >
     <div class="flex min-w-0 flex-1 flex-col">
       <div class="flex shrink-0 items-center gap-1 px-3 pt-2">
-        <button v-if="collapsed" type="button" class="compose-assets__arrow" aria-label="上一个分类" @click="stepCat(-1)">
+        <button v-if="narrow" type="button" class="compose-assets__arrow" aria-label="上一个分类" @click="stepCat(-1)">
           <ChevronLeft :size="16" />
         </button>
-        <div class="min-w-0 flex-1" :class="collapsed ? 'flex justify-center' : ''">
+        <div class="min-w-0 flex-1" :class="narrow ? 'flex justify-center' : ''">
           <VideoComposeUnderlineTabs
-            :tabs="collapsed ? [cats[catIndex].name] : catNames"
-            :model-value="collapsed ? 0 : catIndex"
+            :tabs="narrow ? [cats[catIndex].name] : catNames"
+            :model-value="narrow ? 0 : catIndex"
             @update:model-value="onCatIndex"
           />
         </div>
-        <button v-if="collapsed" type="button" class="compose-assets__arrow" aria-label="下一个分类" @click="stepCat(1)">
+        <button v-if="narrow" type="button" class="compose-assets__arrow" aria-label="下一个分类" @click="stepCat(1)">
           <ChevronRight :size="16" />
         </button>
       </div>
 
       <div class="compose-scroll min-h-0 flex-1 overflow-y-auto px-3 py-3">
         <template v-if="catId === 'video'">
-          <div class="grid gap-2" :style="gridStyle">
+          <div class="grid gap-2" :style="cardGridStyle">
             <button v-if="!readonly" type="button" :class="addCardClass" @click="emit('upload-clip')">
               <UploadCloud :size="24" />
               上传视频片段
@@ -32,7 +32,6 @@
           <VideoComposeClipCatalog
             class="mt-3"
             :groups="segmentCatalog || []"
-            :columns="columns"
             :timeline-clip-urls="timelineClipUrls"
             :preview-clip-id="previewClipId"
             :readonly="readonly"
@@ -43,7 +42,7 @@
         </template>
 
         <template v-else-if="catId === 'audio'">
-          <div class="grid gap-2" :style="gridStyle">
+          <div class="grid gap-2" :style="cardGridStyle">
             <button v-if="!readonly" type="button" :class="addCardClass" @click="emit('open-upload-bgm')">
               <UploadCloud :size="24" />
               上传音频
@@ -53,7 +52,7 @@
         </template>
 
         <template v-else-if="catId === 'subtitle'">
-          <div class="grid gap-2" :style="gridStyle">
+          <div class="grid gap-2" :style="cardGridStyle">
             <button type="button" :class="addCardClass" :disabled="isTranscribing" @click="emit('regenerate-subtitles')">
               <Sparkles :size="24" />
               {{ isTranscribing ? "识别中…" : "重新识别字幕" }}
@@ -65,33 +64,16 @@
           </div>
         </template>
 
-        <VideoComposeTextTemplateCatalog
-          v-else-if="catId === 'fancy'"
-          :columns="columns"
-          :readonly="readonly"
-          @add-to-timeline="emit('add-text-template', $event)"
-        />
+        <VideoComposeTextTemplateCatalog v-else-if="catId === 'fancy'" :readonly="readonly" @add-to-timeline="emit('add-text-template', $event)" />
 
         <p v-else class="px-3 py-6 text-center text-[12px] leading-relaxed text-[var(--compose-fg-3)]">暂无音效</p>
       </div>
-    </div>
-
-    <div class="flex w-6 shrink-0 items-center justify-center">
-      <button
-        type="button"
-        class="grid h-12 w-4 place-items-center rounded-[4px] bg-[var(--compose-surface-2)] text-[var(--compose-fg-3)] transition-colors duration-200 hover:bg-[var(--compose-accent)] hover:text-white"
-        :aria-label="collapsed ? '展开素材' : '收起素材'"
-        @click="collapsed = !collapsed"
-      >
-        <ChevronRight v-if="collapsed" :size="16" />
-        <ChevronLeft v-else :size="16" />
-      </button>
     </div>
   </aside>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { ChevronLeft, ChevronRight, Plus, Sparkles, UploadCloud } from "@lucide/vue";
 import type { ComposeSegmentClipGroup, ComposeSegmentClipVariant } from "@/types/videoCompose";
 import VideoComposeClipCatalog from "./VideoComposeClipCatalog.vue";
@@ -109,6 +91,11 @@ const cats = [
 ] as const;
 
 type AssetCatId = (typeof cats)[number]["id"];
+
+/** 素材卡边长。拖宽面板时不跟着变 */
+const CARD_SIZE_PX = 72;
+/** 左栏拖到这个宽度时，页签收成当前分类 */
+const NARROW_PANE_PX = 132;
 
 defineProps<{
   /** 各片段历史版本 */
@@ -136,19 +123,25 @@ const emit = defineEmits<{
   "add-text-template": [item: TextTemplateItem];
 }>();
 
-/** 收起后单列 */
-const collapsed = ref(false);
+/** 面板根节点，用来量当前栏宽 */
+const panelRef = ref<HTMLElement | null>(null);
+/** 当前栏宽。0 表示还没量到 */
+const paneWidth = ref(0);
 /** 当前分类下标 */
 const catIndex = ref(0);
+/** 栏宽观察，拖动时更新收起判断 */
+let paneObserver: ResizeObserver | null = null;
 
 const catNames = cats.map((item) => item.name);
 const catId = computed<AssetCatId>(() => cats[catIndex.value].id);
-const columns = computed(() => (collapsed.value ? 1 : 4));
-const gridStyle = computed(() => ({ gridTemplateColumns: `repeat(${columns.value}, minmax(0, 1fr))` }));
+/** 拖到左栏下限时只显示当前分类 */
+const narrow = computed(() => paneWidth.value > 0 && paneWidth.value <= NARROW_PANE_PX);
+/** 固定 72px 方格，多出来的宽度留空 */
+const cardGridStyle = { gridTemplateColumns: `repeat(auto-fill, ${CARD_SIZE_PX}px)` };
 
-/** 虚线添加入口，和设计稿素材卡同尺寸 */
+/** 虚线添加入口，固定 72px，不随栏宽拉伸 */
 const addCardClass =
-  "flex aspect-square min-w-0 flex-col items-center justify-center gap-2 rounded-[12px] border border-dashed border-[var(--compose-accent)] bg-[var(--compose-accent-soft)] px-1 text-center text-[12px] font-semibold text-[var(--compose-accent)] transition-colors duration-200 disabled:cursor-wait disabled:opacity-60";
+  "flex h-[72px] w-[72px] flex-col items-center justify-center gap-1 rounded-[12px] border border-dashed border-[var(--compose-accent)] bg-[var(--compose-accent-soft)] px-1 text-center text-[12px] font-semibold text-[var(--compose-accent)] transition-colors duration-200 disabled:cursor-wait disabled:opacity-60";
 
 /** 收起时左右切换分类 */
 function stepCat(delta: number): void {
@@ -158,14 +151,29 @@ function stepCat(delta: number): void {
 
 /** 展开时点页签 */
 function onCatIndex(index: number): void {
-  if (collapsed.value) return;
+  if (narrow.value) return;
   catIndex.value = index;
 }
+
+onMounted(() => {
+  const panel = panelRef.value;
+  if (!panel) return;
+  paneObserver = new ResizeObserver(() => {
+    paneWidth.value = panel.clientWidth;
+  });
+  paneObserver.observe(panel);
+  paneWidth.value = panel.clientWidth;
+});
+
+onBeforeUnmount(() => {
+  paneObserver?.disconnect();
+  paneObserver = null;
+});
 </script>
 
 <style scoped lang="scss">
 .compose-assets {
-  transition-timing-function: cubic-bezier(0.25, 0.8, 0.25, 1);
+  min-width: 0;
 }
 
 .compose-assets__arrow {

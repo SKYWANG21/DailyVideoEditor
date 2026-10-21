@@ -5,7 +5,7 @@
         <p class="truncate text-[12px] font-medium text-[var(--compose-fg)]" :title="group.segmentTitle">
           {{ group.segmentTitle }}
         </p>
-        <div class="grid gap-2" :style="{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }">
+        <div class="grid gap-2" style="grid-template-columns: repeat(auto-fill, 72px)">
           <div
             v-for="variant in group.variants"
             :key="variant.id"
@@ -13,7 +13,7 @@
           >
             <div
               :class="[
-                'group relative aspect-square overflow-hidden rounded-[12px] bg-[var(--compose-surface-2)] transition-opacity duration-150',
+                'group relative h-[72px] w-[72px] overflow-hidden rounded-[12px] bg-[var(--compose-surface-2)] transition-opacity duration-150',
                 canDrag(variant) ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer',
                 draggingVariantId === variant.id ? 'opacity-60' : '',
               ]"
@@ -90,21 +90,16 @@ import {
 } from "@/types/videoCompose";
 import { COMPOSE_UPLOAD_CATALOG_SEGMENT_INDEX } from "@/hooks/useComposeUploadCatalog";
 
-const props = withDefaults(
-  defineProps<{
+const props = defineProps<{
     /** 按片段分组的历史版本 */
     groups: ComposeSegmentClipGroup[];
-    /** 一行几列。收起素材栏时为 1 */
-    columns?: number;
     /** 已在时间轴上的视频 URL 集合 */
     timelineClipUrls?: Set<string>;
     /** 当前主播放器预览中的版本 id */
     previewClipId?: string;
     /** 只读：禁止添加到时间轴 */
     readonly?: boolean;
-  }>(),
-  { columns: 4 },
-);
+  }>();
 
 const emit = defineEmits<{
   preview: [variant: ComposeSegmentClipVariant];
