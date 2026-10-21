@@ -1,0 +1,186 @@
+<template>
+  <aside
+    class="compose-assets relative flex h-full shrink-0 overflow-hidden rounded-[16px] bg-[var(--compose-surface)] shadow-[var(--compose-shadow-card)] transition-[width] duration-300"
+    :class="collapsed ? 'w-[132px]' : 'w-[34%] min-w-[264px]'"
+    aria-label="素材"
+  >
+    <div class="flex min-w-0 flex-1 flex-col">
+      <div class="flex shrink-0 items-center gap-1 px-3 pt-2">
+        <button v-if="collapsed" type="button" class="compose-assets__arrow" aria-label="上一个分类" @click="stepCat(-1)">
+          <ChevronLeft :size="16" />
+        </button>
+        <div class="min-w-0 flex-1" :class="collapsed ? 'flex justify-center' : ''">
+          <VideoComposeUnderlineTabs
+            :tabs="collapsed ? [cats[catIndex].name] : catNames"
+            :model-value="collapsed ? 0 : catIndex"
+            @update:model-value="onCatIndex"
+          />
+        </div>
+        <button v-if="collapsed" type="button" class="compose-assets__arrow" aria-label="下一个分类" @click="stepCat(1)">
+          <ChevronRight :size="16" />
+        </button>
+      </div>
+
+      <div class="compose-scroll min-h-0 flex-1 overflow-y-auto px-3 py-3">
+        <template v-if="catId === 'video'">
+          <div class="grid gap-2" :style="gridStyle">
+            <button v-if="!readonly" type="button" :class="addCardClass" @click="emit('upload-clip')">
+              <UploadCloud :size="24" />
+              上传视频片段
+            </button>
+          </div>
+          <VideoComposeClipCatalog
+            class="mt-3"
+            :groups="segmentCatalog || []"
+            :columns="columns"
+            :timeline-clip-urls="timelineClipUrls"
+            :preview-clip-id="previewClipId"
+            :readonly="readonly"
+            @preview="emit('preview-clip', $event)"
+            @add-to-timeline="emit('add-clip-to-timeline', $event)"
+            @remove="emit('remove-catalog-clip', $event)"
+          />
+        </template>
+
+        <template v-else-if="catId === 'audio'">
+          <div class="grid gap-2" :style="gridStyle">
+            <button v-if="!readonly" type="button" :class="addCardClass" @click="emit('open-upload-bgm')">
+              <UploadCloud :size="24" />
+              上传音频
+            </button>
+          </div>
+          <p v-if="audioClipCount > 0" class="mt-3 text-[12px] text-[var(--compose-fg-3)]">已添加 {{ audioClipCount }} 段音频到时间轴</p>
+        </template>
+
+        <template v-else-if="catId === 'subtitle'">
+          <div class="grid gap-2" :style="gridStyle">
+            <button type="button" :class="addCardClass" :disabled="isTranscribing" @click="emit('regenerate-subtitles')">
+              <Sparkles :size="24" />
+              {{ isTranscribing ? "识别中…" : "重新识别字幕" }}
+            </button>
+            <button v-if="!readonly" type="button" :class="addCardClass" @click="emit('add-subtitle')">
+              <Plus :size="24" />
+              添加字幕
+            </button>
+          </div>
+        </template>
+
+        <VideoComposeTextTemplateCatalog
+          v-else-if="catId === 'fancy'"
+          :columns="columns"
+          :readonly="readonly"
+          @add-to-timeline="emit('add-text-template', $event)"
+        />
+
+        <p v-else class="px-3 py-6 text-center text-[12px] leading-relaxed text-[var(--compose-fg-3)]">暂无音效</p>
+      </div>
+    </div>
+
+    <div class="flex w-6 shrink-0 items-center justify-center">
+      <button
+        type="button"
+        class="grid h-12 w-4 place-items-center rounded-[4px] bg-[var(--compose-surface-2)] text-[var(--compose-fg-3)] transition-colors duration-200 hover:bg-[var(--compose-accent)] hover:text-white"
+        :aria-label="collapsed ? '展开素材' : '收起素材'"
+        @click="collapsed = !collapsed"
+      >
+        <ChevronRight v-if="collapsed" :size="16" />
+        <ChevronLeft v-else :size="16" />
+      </button>
+    </div>
+  </aside>
+</template>
+
+<script setup lang="ts">
+import { computed, ref } from "vue";
+import { ChevronLeft, ChevronRight, Plus, Sparkles, UploadCloud } from "@lucide/vue";
+import type { ComposeSegmentClipGroup, ComposeSegmentClipVariant } from "@/types/videoCompose";
+import VideoComposeClipCatalog from "./VideoComposeClipCatalog.vue";
+import VideoComposeTextTemplateCatalog from "./VideoComposeTextTemplateCatalog.vue";
+import VideoComposeUnderlineTabs from "./VideoComposeUnderlineTabs.vue";
+import type { TextTemplateItem } from "./textTemplateCatalog";
+
+/** 左栏分类。不含图片、转场 */
+const cats = [
+  { id: "video", name: "视频" },
+  { id: "audio", name: "音频" },
+  { id: "subtitle", name: "字幕" },
+  { id: "fancy", name: "花字" },
+  { id: "sfx", name: "音效" },
+] as const;
+
+type AssetCatId = (typeof cats)[number]["id"];
+
+defineProps<{
+  /** 各片段历史版本 */
+  segmentCatalog?: ComposeSegmentClipGroup[];
+  /** 已在时间轴上的视频地址 */
+  timelineClipUrls?: Set<string>;
+  /** 正在预览的版本 id */
+  previewClipId?: string;
+  /** 只读：隐藏上传和添加到时间轴 */
+  readonly?: boolean;
+  /** 字幕识别中 */
+  isTranscribing?: boolean;
+  /** 时间轴上的音频段数 */
+  audioClipCount: number;
+}>();
+
+const emit = defineEmits<{
+  "upload-clip": [];
+  "open-upload-bgm": [];
+  "regenerate-subtitles": [];
+  "add-subtitle": [];
+  "preview-clip": [variant: ComposeSegmentClipVariant];
+  "add-clip-to-timeline": [variant: ComposeSegmentClipVariant];
+  "remove-catalog-clip": [variant: ComposeSegmentClipVariant];
+  "add-text-template": [item: TextTemplateItem];
+}>();
+
+/** 收起后单列 */
+const collapsed = ref(false);
+/** 当前分类下标 */
+const catIndex = ref(0);
+
+const catNames = cats.map((item) => item.name);
+const catId = computed<AssetCatId>(() => cats[catIndex.value].id);
+const columns = computed(() => (collapsed.value ? 1 : 4));
+const gridStyle = computed(() => ({ gridTemplateColumns: `repeat(${columns.value}, minmax(0, 1fr))` }));
+
+/** 虚线添加入口，和设计稿素材卡同尺寸 */
+const addCardClass =
+  "flex aspect-square min-w-0 flex-col items-center justify-center gap-2 rounded-[12px] border border-dashed border-[var(--compose-accent)] bg-[var(--compose-accent-soft)] px-1 text-center text-[12px] font-semibold text-[var(--compose-accent)] transition-colors duration-200 disabled:cursor-wait disabled:opacity-60";
+
+/** 收起时左右切换分类 */
+function stepCat(delta: number): void {
+  const count = cats.length;
+  catIndex.value = (catIndex.value + delta + count) % count;
+}
+
+/** 展开时点页签 */
+function onCatIndex(index: number): void {
+  if (collapsed.value) return;
+  catIndex.value = index;
+}
+</script>
+
+<style scoped lang="scss">
+.compose-assets {
+  transition-timing-function: cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+.compose-assets__arrow {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  place-items: center;
+  border-radius: 8px;
+  color: var(--compose-fg-3);
+  transition: background-color 200ms cubic-bezier(0.25, 0.8, 0.25, 1), color 150ms cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+.compose-assets__arrow:hover {
+  background: var(--compose-surface-2);
+  color: var(--compose-fg);
+}
+</style>

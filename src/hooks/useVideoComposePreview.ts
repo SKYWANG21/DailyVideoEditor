@@ -19,8 +19,8 @@ interface UseVideoComposePreviewOptions {
   audioClips?: Ref<PreviewAudioClip[]>;
   /** 合成参数（响应式 ref，作 volume / legacy BGM 回退） */
   config: Ref<ComposeConfig>;
-  /** 是否循环当前片段（为 true 时 ended 不切下一段） */
-  loopCurrent: Ref<boolean>;
+  /** 预览静音。只把出声增益打成 0，不改片段音量 */
+  previewMuted: Ref<boolean>;
 }
 
 /** 等待可播帧的超时（毫秒） */
@@ -67,7 +67,7 @@ function clipTrimEnd(clip: VideoClipItem | undefined): number {
  * 视频合成实时预览：按绝对 startTime/endTime 定位 + 双缓冲切段 + 空隙黑屏。
  */
 export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
-  const { videoA, videoB, bgmEl, clips, loopCurrent } = options;
+  const { videoA, videoB, bgmEl, clips, previewMuted } = options;
   const composeConfig = options.config;
   const audioClips = options.audioClips;
   const audioMixer = createPreviewAudioMixer();
@@ -471,7 +471,7 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
   function applyClipMediaParams(v: HTMLMediaElement, clip: VideoClipItem | undefined): void {
     const fallbackVol = clampGain(composeConfig.value.videoVolume);
     const vol = clip?.volume != null && Number.isFinite(clip.volume) ? clampGain(clip.volume) : fallbackVol;
-    const muteEmbedded = shouldMuteVideoEmbeddedAudio(clip, vol);
+    const muteEmbedded = previewMuted.value || shouldMuteVideoEmbeddedAudio(clip, vol);
     v.muted = muteEmbedded;
     applyPreviewGain(v, muteEmbedded ? 0 : vol);
     v.playbackRate = effectiveRate(clip);
@@ -579,7 +579,7 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
     }
 
     const n = nextClipIndex(nextIdx);
-    if (!loopCurrent.value && n >= 0) {
+    if (n >= 0) {
       void prepareStandby(n);
     }
   }
@@ -621,7 +621,7 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
     }
     softSwappedForIdx = -1;
     const n = nextClipIndex(idx);
-    if (!loopCurrent.value && n >= 0) {
+    if (n >= 0) {
       void prepareStandby(n);
     }
   }
@@ -687,12 +687,14 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
 
   /** 组装 mixer 所需的当前播放态 */
   function mixerState(): PreviewAudioMixerSyncState {
+    const silent = previewMuted.value;
+    const rawClips = audioClips?.value || [];
     return {
-      audioClips: audioClips?.value || [],
+      audioClips: silent ? rawClips.map((clip) => ({ ...clip, volume: 0, muted: true })) : rawClips,
       globalTime: globalTime.value,
       isPlaying: isPlaying.value,
       globalPlaybackRate: globalPlaybackRate.value,
-      composeConfig: composeConfig.value,
+      composeConfig: silent ? { ...composeConfig.value, bgmVolume: 0 } : composeConfig.value,
       bgmEl: bgmEl.value,
     };
   }
@@ -713,29 +715,9 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
     return globalTime.value >= clipAbsEnd(clip, idx) - TIMELINE_END_EPSILON;
   }
 
-  /** 到达段尾：循环 / 下一段 / 空隙 / 结束 */
+  /** 到达段尾：下一段 / 空隙 / 结束 */
   function advancePastClip(fromIdx: number): void {
     const clip = clips.value[fromIdx];
-    if (loopCurrent.value && clip) {
-      const v = activeVideoEl.value;
-      if (!v) return;
-      suppressMediaEvents = true;
-      void (async () => {
-        try {
-          assignActiveCurrentTime(v, clipTrimStart(clip));
-          applyClipMediaParams(v, clip);
-          placePlayhead(clipAbsStart(clip, fromIdx));
-          await v.play().catch(() => undefined);
-        } finally {
-          suppressMediaEvents = false;
-          isPlaying.value = true;
-          startLoop();
-          syncBgm();
-        }
-      })();
-      return;
-    }
-
     const nextIdx = nextClipIndex(fromIdx);
     if (nextIdx < 0) {
       pause();
@@ -769,7 +751,7 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
       return;
     }
 
-    if (loopCurrent.value || suppressMediaEvents) return;
+    if (suppressMediaEvents) return;
     const nextIdx = nextClipIndex(currentIdx.value);
     if (nextIdx < 0) return;
 
@@ -1073,6 +1055,11 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
   }
 
   watch(() => [composeConfig.value.videoVolume, composeConfig.value.bgmVolume], syncVolumes);
+  /** 预览静音开关：内嵌原声和音轨一起跟着变，不写回片段音量 */
+  watch(previewMuted, () => {
+    syncVolumes();
+    syncBgm();
+  });
   watch(() => composeConfig.value.bgm?.url, refreshBgm);
   /** clips 音量/倍速变更时刷新当前段（结构变更由 Player/Editor 调 resync） */
   watch(

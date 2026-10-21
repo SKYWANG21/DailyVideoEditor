@@ -4,7 +4,7 @@
     <div v-if="sortedTracks.length === 0" class="tracks__empty">
       <div class="tracks__empty-content">
         <span class="tracks__empty-icon">🎬</span>
-        <span class="tracks__empty-text">{{ locale?.emptyTip || '拖拽媒体文件到此处添加' }}</span>
+        <span class="tracks__empty-text">{{ locale?.emptyTip || "拖拽媒体文件到此处添加" }}</span>
       </div>
     </div>
 
@@ -13,12 +13,18 @@
       <!-- 轨道表格 -->
       <div class="tracks__table" ref="tableRef">
         <!-- 轨道列表 -->
-        <div v-for="(track, index) in sortedTracks" :key="track.id" class="tracks__track" :class="{
-          'tracks__track--locked': track.locked,
-          'tracks__track--hidden': !track.visible
-        }" :data-track-id="track.id">
+        <div
+          v-for="(track, index) in sortedTracks"
+          :key="track.id"
+          class="tracks__track"
+          :class="{
+            'tracks__track--locked': track.locked,
+            'tracks__track--hidden': !track.visible,
+          }"
+          :data-track-id="track.id"
+        >
           <!-- 轨道操作栏 -->
-          <div class="tracks__track-control-cell" :ref="el => setControlCellRef(el, index)">
+          <div class="tracks__track-control-cell" :ref="(el) => setControlCellRef(el, index)">
             <TrackControl :track="track" :locale="locale" @update="handleTrackUpdate" @delete="handleTrackDelete">
               <slot name="track-control" :track="track" />
             </TrackControl>
@@ -26,10 +32,17 @@
 
           <!-- 轨道区域 -->
           <div class="tracks__track-area-cell">
-            <TrackArea :track="track" :scroll-left="scrollLeft" @scroll="handleAreaScroll"
-              @context-menu="handleContextMenu" @track-context-menu="handleTrackContextMenu"
-              @add-transition="handleAddTransition" @drop-media="handleDropMedia" @seek="handleSeek"
-              @clip:dblclick="(clip, time) => emit('clip:dblclick', clip, time)">
+            <TrackArea
+              :track="track"
+              :scroll-left="scrollLeft"
+              @scroll="handleAreaScroll"
+              @context-menu="handleContextMenu"
+              @track-context-menu="handleTrackContextMenu"
+              @add-transition="handleAddTransition"
+              @drop-media="handleDropMedia"
+              @seek="handleSeek"
+              @clip:dblclick="(clip, time) => emit('clip:dblclick', clip, time)"
+            >
               <template #clip-content="slotProps">
                 <slot name="clip-content" v-bind="slotProps" />
               </template>
@@ -38,284 +51,253 @@
         </div>
       </div>
     </div>
-
-    <!-- 横向滚动条（底部） -->
-    <div class="tracks__scrollbar" @scroll="handleScrollbarScroll" ref="scrollbarRef">
-      <div class="tracks__scrollbar-content" :style="{ width: contentWidth + 'px' }" />
-    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, inject, provide, onMounted, onUnmounted, nextTick, watch } from 'vue'
-import { useTracksStore } from '../../stores/tracks'
-import { useHistoryStore } from '../../stores/history'
-import { useScaleStore } from '../../stores/scale'
-import { useDragStore } from '../../stores/drag'
-import { usePlaybackStore } from '../../stores/playback'
-import TrackControl from './TrackControl.vue'
-import TrackArea from './TrackArea.vue'
-import type { Track } from '../../types'
-import type { LocaleConfig } from '../../types/config'
+import { ref, computed, inject, provide, onMounted, onUnmounted, nextTick, watch } from "vue";
+import { useTracksStore } from "../../stores/tracks";
+import { useHistoryStore } from "../../stores/history";
+import { useDragStore } from "../../stores/drag";
+import TrackControl from "./TrackControl.vue";
+import TrackArea from "./TrackArea.vue";
+import type { Track } from "../../types";
+import type { LocaleConfig } from "../../types/config";
 
 // Props
 interface Props {
-  scrollLeft?: number
-  locale?: LocaleConfig
+  scrollLeft?: number;
+  locale?: LocaleConfig;
 }
 
 const props = withDefaults(defineProps<Props>(), {
   scrollLeft: 0,
-  locale: () => ({})
-})
+  locale: () => ({}),
+});
 
 // Emits
 const emit = defineEmits<{
-  scroll: [left: number]
-  contextMenu: [clip: any, event: MouseEvent]
-  trackContextMenu: [track: Track, time: number, event: MouseEvent]
-  trackDelete: [trackId: string]
-  addTransition: [beforeClipId: string, afterClipId: string]
-  dropMedia: [mediaData: any, trackId: string, startTime: number]
-  'update:trackControlWidth': [width: number]
-  seek: [time: number]
-  'clip:dblclick': [clip: any, time: number]
-}>()
+  scroll: [left: number];
+  contextMenu: [clip: any, event: MouseEvent];
+  trackContextMenu: [track: Track, time: number, event: MouseEvent];
+  trackDelete: [trackId: string];
+  addTransition: [beforeClipId: string, afterClipId: string];
+  dropMedia: [mediaData: any, trackId: string, startTime: number];
+  "update:trackControlWidth": [width: number];
+  seek: [time: number];
+  "clip:dblclick": [clip: any, time: number];
+}>();
 
 // Stores
-const tracksStore = useTracksStore()
-const historyStore = useHistoryStore()
-const scaleStore = useScaleStore()
-const dragStore = useDragStore()
-const playbackStore = usePlaybackStore()
+const tracksStore = useTracksStore();
+const historyStore = useHistoryStore();
+const dragStore = useDragStore();
 
 // Inject config from parent
-const config = inject<any>('config', {})
+const config = inject<any>("config", {});
 
 // Refs
-const tracksRef = ref<HTMLElement>()
-const scrollContainerRef = ref<HTMLElement>()
-const tableRef = ref<HTMLElement>()
-const scrollbarRef = ref<HTMLElement>()
-const scrollLeft = ref(props.scrollLeft)
-const isScrollingSelf = ref(false)
-const firstControlCell = ref<HTMLElement | null>(null)
+const tracksRef = ref<HTMLElement>();
+const scrollContainerRef = ref<HTMLElement>();
+const tableRef = ref<HTMLElement>();
+const scrollLeft = ref(props.scrollLeft);
+const isScrollingSelf = ref(false);
+const firstControlCell = ref<HTMLElement | null>(null);
 
 // Computed
-const sortedTracks = computed(() => tracksStore.sortedTracks)
-
-const actualPixelsPerSecond = computed(() => scaleStore.actualPixelsPerSecond)
-
-const contentWidth = computed(() => {
-  const maxDuration = Math.max(
-    tracksStore.totalDuration,
-    dragStore.previewEndTime, // 拖拽预览的结束时间
-    60 // 最少显示 60 秒
-  )
-  return Math.ceil(maxDuration * actualPixelsPerSecond.value)
-})
+const sortedTracks = computed(() => tracksStore.sortedTracks);
 
 // 控制栏宽度
-const trackControlWidth = ref(200)
-
-
+const trackControlWidth = ref(200);
 
 // Watchers
-watch(() => props.scrollLeft, (newVal) => {
-  if (!isScrollingSelf.value && newVal !== scrollLeft.value) {
-    scrollLeft.value = newVal
-    if (scrollbarRef.value) {
-      scrollbarRef.value.scrollLeft = newVal
+watch(
+  () => props.scrollLeft,
+  (newVal) => {
+    if (!isScrollingSelf.value && newVal !== scrollLeft.value) {
+      scrollLeft.value = newVal;
     }
-  }
-})
+  },
+);
 
 // 监听轨道变化，当从空变为有轨道时设置 ResizeObserver
-watch(sortedTracks, (newTracks, oldTracks) => {
-  const wasEmpty = !oldTracks || oldTracks.length === 0
-  const hasTracksNow = newTracks && newTracks.length > 0
+watch(
+  sortedTracks,
+  (newTracks, oldTracks) => {
+    const wasEmpty = !oldTracks || oldTracks.length === 0;
+    const hasTracksNow = newTracks && newTracks.length > 0;
 
-  if (wasEmpty && hasTracksNow) {
-    // 从空变为有轨道，需要重新设置 ResizeObserver
-    nextTick(() => {
-      if (tableRef.value && !resizeObserver) {
-        resizeObserver = new ResizeObserver(() => {
-          measureControlWidth()
-        })
-        resizeObserver.observe(tableRef.value)
-      }
-      // 立即测量一次
-      measureControlWidth()
-    })
-  }
-}, { immediate: true })
+    if (wasEmpty && hasTracksNow) {
+      // 从空变为有轨道，需要重新设置 ResizeObserver
+      nextTick(() => {
+        if (tableRef.value && !resizeObserver) {
+          resizeObserver = new ResizeObserver(() => {
+            measureControlWidth();
+          });
+          resizeObserver.observe(tableRef.value);
+        }
+        // 立即测量一次
+        measureControlWidth();
+        bindEdgeScroll();
+      });
+    }
+  },
+  { immediate: true },
+);
 
 // 设置第一个控制单元格的 ref
 function setControlCellRef(el: any, index: number) {
   if (index === 0) {
-    firstControlCell.value = el as HTMLElement
+    firstControlCell.value = el as HTMLElement;
   }
 }
 
 // 测量控制栏宽度
-let resizeObserver: ResizeObserver | null = null
+let resizeObserver: ResizeObserver | null = null;
 
 // 边缘滚动回调 - 当拖拽时边缘滚动触发，更新 scrollLeft 状态
 function handleEdgeScroll(left: number) {
   if (!isScrollingSelf.value) {
-    isScrollingSelf.value = true
-    scrollLeft.value = left
-    emit('scroll', left)
+    isScrollingSelf.value = true;
+    scrollLeft.value = left;
+    emit("scroll", left);
     requestAnimationFrame(() => {
-      isScrollingSelf.value = false
-    })
+      isScrollingSelf.value = false;
+    });
   }
 }
 
 onMounted(() => {
   if (tableRef.value) {
     resizeObserver = new ResizeObserver(() => {
-      measureControlWidth()
-    })
-    resizeObserver.observe(tableRef.value)
+      measureControlWidth();
+    });
+    resizeObserver.observe(tableRef.value);
   }
 
-  // 设置拖拽边缘滚动的容器引用
   nextTick(() => {
-    // tracksRef 作为滚动区域的边界检测容器
-    // scrollbarRef 作为实际执行滚动的容器
-    dragStore.setScrollContainers(
-      tracksRef.value || null,
-      scrollbarRef.value || null,
-      handleEdgeScroll
-    )
-  })
+    bindEdgeScroll();
+  });
 
   // 初始滚动到主轨道
   nextTick(() => {
-    scrollToMainTrack()
-  })
-})
+    scrollToMainTrack();
+  });
+});
 
 onUnmounted(() => {
   if (resizeObserver) {
-    resizeObserver.disconnect()
+    resizeObserver.disconnect();
   }
-})
+});
+
+/** 贴边拖拽滚动第一条轨道区，其它轨道靠 scrollLeft 同步 */
+function bindEdgeScroll() {
+  const area = tracksRef.value?.querySelector(".track-area");
+  dragStore.setScrollContainers(tracksRef.value || null, area instanceof HTMLElement ? area : null, handleEdgeScroll);
+}
 
 function measureControlWidth() {
   if (firstControlCell.value) {
-    const width = firstControlCell.value.getBoundingClientRect().width
-    trackControlWidth.value = width
-    emit('update:trackControlWidth', width)
+    const width = firstControlCell.value.getBoundingClientRect().width;
+    trackControlWidth.value = width;
+    emit("update:trackControlWidth", width);
   }
 }
 
 // 滚动到主轨道
 function scrollToMainTrack() {
-  const mainTrack = tracksStore.mainTrack
-  if (!mainTrack || !tableRef.value) return
+  const mainTrack = tracksStore.mainTrack;
+  if (!mainTrack || !tableRef.value) return;
 
-  const trackEl = tableRef.value.querySelector(`[data-track-id="${mainTrack.id}"]`)
+  const trackEl = tableRef.value.querySelector(`[data-track-id="${mainTrack.id}"]`);
   if (trackEl) {
-    trackEl.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    trackEl.scrollIntoView({ block: "center", behavior: "smooth" });
   }
 }
 
 // 监听主轨道变化，自动滚动
-watch(() => tracksStore.mainTrack, (newVal) => {
-  if (newVal) {
-    nextTick(() => {
-      scrollToMainTrack()
-    })
-  }
-})
+watch(
+  () => tracksStore.mainTrack,
+  (newVal) => {
+    if (newVal) {
+      nextTick(() => {
+        scrollToMainTrack();
+      });
+    }
+  },
+);
 
 // 处理滚动容器滚动（垂直滚动）
 function handleScrollContainerScroll() {
-  // 这里可以处理垂直同步，如果需要的话
+  // 竖向滚动不改横向位置
 }
 
-// 处理底部滚动条滚动
-function handleScrollbarScroll() {
-  if (scrollbarRef.value && !isScrollingSelf.value) {
-    isScrollingSelf.value = true
-    scrollLeft.value = scrollbarRef.value.scrollLeft
-    emit('scroll', scrollLeft.value)
-    requestAnimationFrame(() => {
-      isScrollingSelf.value = false
-    })
-  }
-}
-
-// 处理轨道区域滚动（同步到统一滚动条）
+/** 某条轨道横向滚动后，同步到刻度尺和其它轨道 */
 function handleAreaScroll(left: number) {
   if (!isScrollingSelf.value) {
-    isScrollingSelf.value = true
-    scrollLeft.value = left
-    if (scrollbarRef.value && scrollbarRef.value.scrollLeft !== left) {
-      scrollbarRef.value.scrollLeft = left
-    }
-    emit('scroll', left)
+    isScrollingSelf.value = true;
+    scrollLeft.value = left;
+    emit("scroll", left);
     requestAnimationFrame(() => {
-      isScrollingSelf.value = false
-    })
+      isScrollingSelf.value = false;
+    });
   }
 }
 
 // 处理轨道更新
 function handleTrackUpdate(trackId: string, updates: Partial<Track>) {
-  tracksStore.updateTrack(trackId, updates)
-  historyStore.pushSnapshot('更新轨道')
+  tracksStore.updateTrack(trackId, updates);
+  historyStore.pushSnapshot("更新轨道");
 }
 
 // 处理轨道删除
 function handleTrackDelete(trackId: string) {
-  const track = tracksStore.tracks.find((t) => t.id === trackId)
+  const track = tracksStore.tracks.find((t) => t.id === trackId);
   if (track?.isMain) {
-    alert('主轨道不能删除')
-    return
+    alert("主轨道不能删除");
+    return;
   }
 
-  tracksStore.removeTrack(trackId)
-  historyStore.pushSnapshot('删除轨道')
-  emit('trackDelete', trackId)
+  tracksStore.removeTrack(trackId);
+  historyStore.pushSnapshot("删除轨道");
+  emit("trackDelete", trackId);
 }
 
 // 处理 Clip 右键菜单
 function handleContextMenu(clip: any, event: MouseEvent) {
-  emit('contextMenu', clip, event)
+  emit("contextMenu", clip, event);
 }
 
 // 处理轨道空白区域右键菜单
 function handleTrackContextMenu(track: Track, time: number, event: MouseEvent) {
-  emit('trackContextMenu', track, time, event)
+  emit("trackContextMenu", track, time, event);
 }
 
 // 处理添加转场
 function handleAddTransition(beforeClipId: string, afterClipId: string) {
-  emit('addTransition', beforeClipId, afterClipId)
+  emit("addTransition", beforeClipId, afterClipId);
 }
 
 // 处理拖放媒体
 function handleDropMedia(mediaData: any, trackId: string, startTime: number) {
-  emit('dropMedia', mediaData, trackId, startTime)
+  emit("dropMedia", mediaData, trackId, startTime);
 }
 
 // 处理 seek 事件
 function handleSeek(time: number) {
-  emit('seek', time)
+  emit("seek", time);
 }
 
 // 提供配置给子组件
-provide('config', config)
+provide("config", config);
 </script>
 
 <style scoped>
 .tracks {
   flex: 1;
   overflow: hidden;
-  background: var(--color-bg-dark);
+  background: var(--color-bg-medium);
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -332,17 +314,17 @@ provide('config', config)
 }
 
 .tracks__table {
-  display: table;
+  display: flex;
+  flex-direction: column;
   width: 100%;
-  table-layout: auto;
-  border-collapse: collapse;
-  /* 不设置 height: 100%，让其由内容撑开 */
 }
 
 .tracks__track {
-  display: table-row;
-  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  align-items: stretch;
+  width: 100%;
   min-height: 48px;
+  border-bottom: 1px solid var(--color-border);
   transition: all var(--transition-fast);
 }
 
@@ -352,11 +334,7 @@ provide('config', config)
 
 .tracks__track--locked {
   opacity: 0.5;
-  background: repeating-linear-gradient(45deg,
-      transparent,
-      transparent 10px,
-      var(--color-bg-light) 10px,
-      var(--color-bg-light) 11px);
+  background: repeating-linear-gradient(45deg, transparent, transparent 10px, var(--color-bg-light) 10px, var(--color-bg-light) 11px);
 }
 
 .tracks__track--hidden {
@@ -364,13 +342,11 @@ provide('config', config)
 }
 
 .tracks__track-control-cell {
-  display: table-cell;
-  width: 1px;
-  /* 让单元格尽可能小，由内容撑开 */
+  display: flex;
+  flex: 0 0 auto;
+  align-items: stretch;
   white-space: nowrap;
-  vertical-align: top;
   border-bottom: 1px solid var(--color-border);
-  height: 100%;
   background-color: transparent;
   /* 确保 track-control 在拖拽 clip 之上 */
   position: relative;
@@ -378,39 +354,30 @@ provide('config', config)
 }
 
 .tracks__track-area-cell {
-  display: table-cell;
-  vertical-align: top;
+  display: flex;
+  flex: 1 1 auto;
+  align-items: stretch;
+  min-width: 0;
   border-bottom: 1px solid var(--color-border);
-  max-width: 0;
-  /* 关键：允许 table-cell 内部的 overflow 生效 */
-  width: 100%;
-  height: 100%;
 }
 
-/* 确保 TrackArea 填满单元格 */
+/* 轨道区跟着行高拉伸，并允许内部横向滚动 */
 .tracks__track-area-cell :deep(.track-area) {
-  height: 100%;
+  flex: 1 1 auto;
+  align-self: stretch;
+  min-width: 0;
+  height: auto;
   min-height: 48px;
 }
 
-/* 确保 TrackControl 填满单元格 */
+/* 轨道头在文档流里撑满行高，避免绝对定位把列宽挤没 */
 .tracks__track-control-cell :deep(.track-control) {
-  height: 100%;
+  position: static;
+  flex: 0 0 200px;
+  align-self: stretch;
+  width: 200px;
+  height: auto;
   min-height: 48px;
-}
-
-.tracks__scrollbar {
-  width: 100%;
-  height: 12px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  flex-shrink: 0;
-  background: var(--color-bg-elevated);
-  border-top: 1px solid var(--color-border);
-}
-
-.tracks__scrollbar-content {
-  height: 1px;
 }
 
 /* 空状态提示 */

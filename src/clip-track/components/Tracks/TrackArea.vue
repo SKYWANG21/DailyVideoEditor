@@ -25,7 +25,7 @@ import { useScaleStore } from '../../stores/scale'
 import { useTracksStore } from '../../stores/tracks'
 import { useDragStore } from '../../stores/drag'
 import { useResize } from '../../composables/useResize'
-import { normalizeTime } from '../../utils/helpers'
+import { normalizeTime, timelineContentWidth, timelineSpanSeconds } from '../../utils/helpers'
 import ClipItem from './ClipItem.vue'
 import DragPreview from './DragPreview.vue'
 import type { Track, Clip } from '../../types'
@@ -80,12 +80,8 @@ const showDragPreview = computed(() => {
 })
 
 const contentWidth = computed(() => {
-  const maxDuration = Math.max(
-    tracksStore.totalDuration,
-    dragStore.previewEndTime, // 拖拽预览的结束时间
-    60 // 最少显示 60 秒
-  )
-  return Math.ceil(maxDuration * actualPixelsPerSecond.value)
+  const span = timelineSpanSeconds([tracksStore.totalDuration, dragStore.previewEndTime])
+  return timelineContentWidth(span, actualPixelsPerSecond.value)
 })
 
 // 计算轨道高度
@@ -251,7 +247,7 @@ function handleDrop(event: DragEvent) {
   flex: 1;
   overflow-x: auto;
   overflow-y: hidden;
-  background: var(--color-bg-dark);
+  background: var(--color-bg-light);
   position: relative;
   scrollbar-width: none;
   -ms-overflow-style: none;

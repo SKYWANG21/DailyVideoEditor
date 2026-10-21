@@ -1,15 +1,12 @@
 <template>
   <div class="flex flex-col gap-3">
-    <span class="flex items-center gap-2 text-sm font-medium text-foreground">
-      <Type :size="16" class="text-primary" />
-      贴图属性
-    </span>
+    <span class="text-[12px] text-[var(--compose-fg-2)]">贴图属性</span>
     <div class="flex flex-col gap-2">
-      <label class="text-[11px] text-muted-foreground">文案</label>
+      <label class="text-[12px] text-[var(--compose-fg-2)]">文案</label>
       <input
         :value="text"
         maxlength="64"
-        class="h-10 w-full rounded-md border border-border bg-transparent px-2 text-xs outline-none transition-colors focus:border-primary/50"
+        class="h-10 w-full rounded-[8px] border border-transparent bg-[var(--compose-surface-2)] px-3 text-[14px] text-[var(--compose-fg)] outline-none transition-[border-color,box-shadow] duration-150 focus:border-[var(--compose-accent)] focus:shadow-[var(--compose-focus)]"
         @input="onTextInput"
       />
     </div>
@@ -19,10 +16,10 @@
           :value="fontSize"
           type="number"
           min="1"
-          class="h-10 w-full rounded-md border border-border bg-transparent px-2 pr-10 text-xs outline-none transition-colors focus:border-primary/50"
+          class="h-10 w-full rounded-[8px] border border-transparent bg-[var(--compose-surface-2)] px-3 pr-10 text-[14px] text-[var(--compose-fg)] outline-none transition-[border-color,box-shadow] duration-150 focus:border-[var(--compose-accent)] focus:shadow-[var(--compose-focus)]"
           @input="onFontSizeInput"
         />
-        <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">px</span>
+        <span class="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-[12px] text-[var(--compose-fg-3)]">px</span>
       </div>
       <div class="flex items-center gap-2">
         <el-color-picker
@@ -35,7 +32,7 @@
         <input
           :value="colorDraft"
           maxlength="7"
-          class="h-10 flex-1 min-w-0 rounded-md border border-border bg-transparent px-2 font-mono text-xs outline-none transition-colors focus:border-primary/50"
+          class="h-10 min-w-0 flex-1 rounded-[8px] border border-transparent bg-[var(--compose-surface-2)] px-3 font-mono text-[14px] text-[var(--compose-fg)] outline-none transition-[border-color,box-shadow] duration-150 focus:border-[var(--compose-accent)] focus:shadow-[var(--compose-focus)]"
           @input="onColorTextInput"
         />
       </div>
@@ -45,7 +42,6 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { Type } from "@lucide/vue";
 import { isCssHexColor } from "./textTemplateCatalog";
 
 const props = defineProps<{

@@ -1,15 +1,15 @@
 <template>
   <div class="flex flex-col gap-3">
     <div class="flex items-center justify-between">
-      <span class="flex items-center gap-2 text-sm font-medium text-foreground">
-        <Sparkles :size="16" class="text-primary" />
+      <span class="flex items-center gap-2 text-[14px] font-medium text-[var(--compose-fg)]">
+        <Sparkles :size="16" class="text-[var(--compose-accent)]" />
         美颜
       </span>
       <el-switch :model-value="beauty.enabled" @change="onEnabled" />
     </div>
     <template v-if="beauty.enabled">
       <div v-for="field in fields" :key="field.key" class="flex flex-col gap-1">
-        <div class="flex items-center justify-between text-xs text-muted-foreground">
+        <div class="flex items-center justify-between text-[12px] text-[var(--compose-fg-2)]">
           <span>{{ field.label }}</span>
           <span>{{ formatLevel(beauty[field.key]) }}</span>
         </div>

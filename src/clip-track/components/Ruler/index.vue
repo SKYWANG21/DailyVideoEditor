@@ -37,6 +37,7 @@ import { usePlaybackStore } from '../../stores/playback'
 import { useScaleStore } from '../../stores/scale'
 import { useTracksStore } from '../../stores/tracks'
 import { useDragStore } from '../../stores/drag'
+import { timelineContentWidth, timelineSpanSeconds } from '../../utils/helpers'
 
 // Props
 interface Props {
@@ -80,15 +81,10 @@ const rulerConfig = computed(() => scaleStore.rulerConfig)
 const actualPixelsPerSecond = computed(() => scaleStore.actualPixelsPerSecond)
 
 // 内容总宽度
-const contentWidth = computed(() => {
-  const maxDuration = Math.max(
-    tracksStore.totalDuration,
-    playbackStore.duration,
-    dragStore.previewEndTime, // 拖拽预览的结束时间
-    60 // 最少显示 60 秒
-  )
-  return Math.ceil(maxDuration * actualPixelsPerSecond.value)
-})
+const spanSeconds = computed(() =>
+  timelineSpanSeconds([tracksStore.totalDuration, playbackStore.duration, dragStore.previewEndTime]),
+)
+const contentWidth = computed(() => timelineContentWidth(spanSeconds.value, actualPixelsPerSecond.value))
 
 // 生成刻度标记（使用整数索引避免浮点数误差）
 const marks = computed(() => {
@@ -100,7 +96,7 @@ const marks = computed(() => {
   }> = []
 
   const config = rulerConfig.value
-  const maxTime = contentWidth.value / actualPixelsPerSecond.value
+  const maxTime = spanSeconds.value
   const minorInterval = config.minorInterval
   const majorInterval = config.majorInterval
 
@@ -343,7 +339,7 @@ watch(cursorPosition, (newPos) => {
   position: relative;
   width: 100%;
   height: 36px;
-  background: var(--color-bg-elevated);
+  background: var(--color-bg-medium);
   border-bottom: 1px solid var(--color-border);
   overflow: visible;
   flex-shrink: 0;
@@ -354,7 +350,7 @@ watch(cursorPosition, (newPos) => {
 .ruler__placeholder {
   flex-shrink: 0;
   height: 100%;
-  background: var(--color-bg-elevated);
+  background: var(--color-bg-medium);
 }
 
 .ruler__wrapper {

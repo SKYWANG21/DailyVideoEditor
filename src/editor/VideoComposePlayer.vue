@@ -1,11 +1,11 @@
 <template>
   <div
-    class="relative flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-[10px] border border-border/40 bg-card/60 shadow-lg backdrop-blur-xl"
+    class="relative flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-[16px] bg-[var(--compose-surface)] shadow-[var(--compose-shadow-card)]"
   >
     <!-- timeline 多轨混音在 preview hook 的 audio 池；此节点仅 legacy composeConfig.bgm -->
     <audio ref="bgmAudioRef" preload="auto" crossorigin="anonymous" class="hidden" />
 
-    <div ref="playerContainerRef" class="relative min-h-0 w-full flex-1 overflow-hidden rounded-t-[10px] bg-black">
+    <div ref="playerContainerRef" class="relative mx-4 mt-4 min-h-0 min-w-0 flex-1 overflow-hidden rounded-[4px] bg-[var(--compose-stage)]">
       <!-- 原声时钟。画面由 WebCodecs + GPUPixel 画到下面的 canvas，不能对 canvas 调用 getContext -->
       <audio ref="audioARef" preload="auto" class="hidden" />
       <audio ref="audioBRef" preload="auto" class="hidden" />
@@ -29,7 +29,7 @@
         />
       </template>
       <template v-else>
-        <div class="absolute inset-0 z-0 flex flex-col items-center justify-center text-white/20">
+        <div class="absolute inset-0 z-0 flex flex-col items-center justify-center text-[var(--compose-fg-3)]">
           <Video :size="48" class="mb-2" />
           <span class="text-sm">尚未生成视频内容</span>
         </div>
@@ -43,12 +43,12 @@
 
       <div
         v-if="catalogPreviewActive"
-        class="pointer-events-auto absolute inset-x-0 top-0 z-40 flex items-center justify-center gap-2 bg-black/70 px-3 py-2"
+        class="pointer-events-auto absolute inset-x-3 top-3 z-40 flex items-center justify-center gap-2 rounded-full bg-[var(--compose-surface)]/80 px-3 py-1 shadow-[var(--compose-shadow-1)] backdrop-blur-md"
       >
-        <span class="truncate text-xs text-white/90">正在预览素材 · {{ catalogPreviewLabel }}</span>
+        <span class="truncate text-[12px] text-[var(--compose-fg)]">正在预览素材 · {{ catalogPreviewLabel }}</span>
         <button
           type="button"
-          class="shrink-0 rounded-[4px] bg-primary px-2.5 py-1 text-[11px] font-medium text-white hover:bg-primary/90"
+          class="shrink-0 rounded-[8px] bg-[var(--compose-accent)] px-3 py-1 text-[12px] font-semibold text-white transition-colors duration-200 hover:bg-[var(--compose-accent-hover)]"
           @click="emit('clear-catalog-preview')"
         >
           返回时间轴
@@ -110,38 +110,46 @@
       </template>
     </div>
 
-    <div
-      v-if="effectiveClips.length && !catalogPreviewActive"
-      class="flex shrink-0 items-center gap-3 rounded-b-[10px] bg-[#000] px-4 py-2"
-    >
-      <div class="flex shrink-0 items-center gap-2">
-        <span class="whitespace-nowrap text-xs text-white/80">循环当前片段</span>
+    <div v-if="!catalogPreviewActive" class="grid h-14 shrink-0 grid-cols-[1fr_auto_1fr] items-center px-4">
+      <span class="text-[13px] text-[var(--compose-fg-3)] tabular-nums">
+        <span class="text-[var(--compose-fg)]">{{ fmtClock(globalTime) }}</span>
+        / {{ fmtClock(durationSec) }}
+      </span>
+      <div class="flex items-center gap-2">
+        <button type="button" :class="transportBtnClass" aria-label="转到开始" title="转到开始" @click="emit('seek-playback', 0)">
+          <SkipBack :size="16" />
+        </button>
         <button
           type="button"
-          class="relative h-4 w-7 rounded-full transition-colors"
-          :class="loopCurrent ? 'bg-primary' : 'bg-white/30'"
-          @click="emit('update:loopCurrent', !loopCurrent)"
+          class="grid size-9 place-items-center rounded-full bg-[var(--compose-accent)] text-white transition-[filter,transform] duration-200 hover:brightness-110 active:scale-95"
+          :aria-label="isPlaying ? '暂停' : '播放'"
+          :title="isPlaying ? '暂停（空格）' : '播放（空格）'"
+          @click="emit('toggle-playback')"
         >
-          <div
-            class="absolute bottom-0.5 top-0.5 w-3 rounded-full bg-white transition-all"
-            :class="loopCurrent ? 'left-[14px]' : 'left-0.5'"
-          />
+          <Pause v-if="isPlaying" :size="16" />
+          <Play v-else :size="16" class="translate-x-px" />
+        </button>
+        <button
+          type="button"
+          :class="transportBtnClass"
+          aria-label="转到结束"
+          title="转到结束"
+          @click="emit('seek-playback', durationSec)"
+        >
+          <SkipForward :size="16" />
         </button>
       </div>
-      <div class="flex min-w-0 flex-1 cursor-pointer gap-1">
-        <div
-          v-for="(clip, i) in effectiveClips"
-          :key="clip.id"
-          class="relative h-1.5 flex-1 overflow-hidden rounded-full"
-          :class="i < playingIdx ? 'bg-primary' : 'bg-white/20'"
-          @click.stop="selectClip(i)"
+      <div class="flex justify-end">
+        <button
+          type="button"
+          :class="[transportBtnClass, previewMuted ? 'text-[var(--compose-accent)]' : '']"
+          :aria-label="previewMuted ? '取消静音' : '静音'"
+          :title="previewMuted ? '取消静音' : '静音'"
+          @click="previewMuted = !previewMuted"
         >
-          <div
-            v-if="i === playingIdx"
-            class="absolute bottom-0 left-0 top-0 rounded-full bg-primary"
-            :style="{ width: currentClipProgressPct + '%' }"
-          />
-        </div>
+          <VolumeX v-if="previewMuted" :size="16" />
+          <Volume2 v-else :size="16" />
+        </button>
       </div>
     </div>
   </div>
@@ -149,7 +157,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, toRef, onBeforeUnmount } from "vue";
-import { Video } from "@lucide/vue";
+import { Pause, Play, SkipBack, SkipForward, Video, Volume2, VolumeX } from "@lucide/vue";
 import type {
   ComposeConfig,
   ComposeTextOverlayClip,
@@ -178,8 +186,8 @@ const props = defineProps<{
   audioClips?: PreviewAudioClip[];
   /** 合成参数（BGM、音量等，与父级共享 reactive） */
   composeConfig: ComposeConfig;
-  /** 是否循环当前片段 */
-  loopCurrent: boolean;
+  /** 时间轴总时长（秒），只用于播放条展示和跳到结尾 */
+  durationSec: number;
   /** 是否显示字幕 */
   showSubtitles: boolean;
   /** 预览区当前可见字幕 */
@@ -197,7 +205,10 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  "update:loopCurrent": [value: boolean];
+  /** 播放 / 暂停。由父级走时间轴时钟，不在这里直接 play */
+  "toggle-playback": [];
+  /** 跳到时间轴上的秒数 */
+  "seek-playback": [timeSec: number];
   /** 当前播放片段索引变化 */
   "update:playing-idx": [index: number];
   /** 全局播放时间变化（秒） */
@@ -234,6 +245,8 @@ const bgmAudioRef = ref<HTMLAudioElement | null>(null);
 const audioClipsRef = computed(() => props.audioClips || []);
 
 const composeConfigRef = toRef(props, "composeConfig");
+/** 预览静音。不写回片段音量 */
+const previewMuted = ref(false);
 
 const {
   currentIdx: playingIdx,
@@ -260,8 +273,23 @@ const {
   clips: effectiveClips,
   audioClips: audioClipsRef,
   config: composeConfigRef,
-  loopCurrent: toRef(props, "loopCurrent"),
+  previewMuted,
 });
+
+/** 播放条两侧的次按钮 */
+const transportBtnClass =
+  "grid size-8 place-items-center rounded-[8px] text-[var(--compose-fg-2)] transition-colors duration-200 hover:bg-[var(--compose-surface-2)] hover:text-[var(--compose-fg)]";
+
+/** 秒数显示成 m:ss 或 h:mm:ss */
+function fmtClock(sec: number): string {
+  const whole = Number.isFinite(sec) ? Math.max(0, Math.floor(sec + 1e-6)) : 0;
+  const hours = Math.floor(whole / 3600);
+  const minutes = Math.floor((whole % 3600) / 60);
+  const seconds = whole % 60;
+  const mm = String(minutes).padStart(2, "0");
+  const ss = String(seconds).padStart(2, "0");
+  return hours > 0 ? `${hours}:${mm}:${ss}` : `${minutes}:${ss}`;
+}
 
 const {
   videoSize,
@@ -470,22 +498,6 @@ onBeforeUnmount(() => {
     commitSubtitleEdit(editingSubtitleId.value);
   }
 });
-
-const currentClipProgressPct = computed(() => {
-  const idx = playingIdx.value;
-  const clip = effectiveClips.value[idx];
-  if (!clip) return 0;
-  const start = clip.startTime ?? effectiveClips.value.slice(0, idx).reduce((s, c) => s + (c.durationSec || 0), 0);
-  const end = clip.endTime ?? start + (clip.durationSec || 0);
-  const dur = end - start;
-  if (!dur) return 0;
-  const within = globalTime.value - start;
-  return Math.max(0, Math.min(100, (within / dur) * 100));
-});
-
-function selectClip(i: number): void {
-  void seekToClip(i);
-}
 
 watch(playingIdx, (i) => emit("update:playing-idx", i), { immediate: true });
 watch(globalTime, (t) => emit("global-time-update", t));

@@ -1,7 +1,7 @@
 <template>
   <div
     ref="timelineRootRef"
-    class="video-compose-timeline relative flex h-full min-h-0 flex-col overflow-hidden rounded-[10px] border border-border/40 bg-card/80 shadow-lg backdrop-blur-xl"
+    class="video-compose-timeline relative flex h-full min-h-0 flex-col overflow-hidden rounded-[16px] bg-[var(--compose-surface)] shadow-[var(--compose-shadow-card)]"
     :class="{ 'is-readonly': readonly, 'is-catalog-drag-over': catalogDragOver }"
     :style="hScrollbarAlignStyle"
     @pointerdown.capture="onTimelinePointerDown"
@@ -15,12 +15,13 @@
       :scale-config-buttons="['snap']"
       :track-types="trackTypes"
       :show-tools-bar="!readonly"
+      :show-playback="false"
+      :show-scale-control="false"
       :enable-main-track-mode="true"
       :enable-cross-track-drag="true"
       :enable-snap="true"
       :fps="DEFAULT_COMPOSE_TIMELINE_FPS"
       :pixels-per-second="80"
-      :track-control-width="180"
       :locale="locales['zh-CN']"
       :theme="clipTrackTheme"
       :clip-configs="clipTypeConfigs"
@@ -46,6 +47,7 @@
       @playback:seek="onPlaybackSeek"
       @playback:ratechange="onPlaybackRateChange"
       @scale:changed="onScaleChanged"
+      @scroll="onTrackScroll"
       @selection:changed="onSelectionChanged"
       @clip:dblclick="onClipDblClick"
       @drop-media="onDropMedia"
@@ -61,7 +63,8 @@
           @pointerdown.stop
           @click.stop="toggleAudioTrackMute(track)"
         >
-          <Volume2 :size="14" color="#8e51ff" />
+          <VolumeX v-if="isTrackMuted(track)" :size="16" />
+          <Volume2 v-else :size="16" />
         </button>
         <button
           type="button"
@@ -71,7 +74,7 @@
           @pointerdown.stop
           @click.stop="alignTrackClipsForward(track)"
         >
-          <AlignStartHorizontal :size="14" color="#8e51ff" />
+          <AlignStartHorizontal :size="16" />
         </button>
       </template>
 
@@ -103,13 +106,26 @@
         </div>
       </template>
     </VideoTrack>
+    <div class="flex h-10 shrink-0 items-center">
+      <div class="shrink-0" :style="{ width: `${hScrollbarControlWidthPx}px` }" />
+      <VideoComposeZoomBar
+        :left-pct="zoomLeftPct"
+        :width-pct="zoomWidthPct"
+        :min-span-pct="zoomMinSpanPct"
+        :disabled="zoomTotal <= 0"
+        @change="onZoomChange"
+        @end="onZoomEnd"
+      />
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from "vue";
 import { ElMessage } from "element-plus";
-import { AlignStartHorizontal, Volume2 } from "@lucide/vue";
+import { AlignStartHorizontal, Volume2, VolumeX } from "@lucide/vue";
+import VideoComposeZoomBar from "./VideoComposeZoomBar.vue";
+import { TIMELINE_END_GAP_PX } from "@/clip-track/utils/helpers";
 import {
   VideoTrack,
   locales,
@@ -183,6 +199,9 @@ interface VideoTrackExpose {
   getDuration?: () => number;
   getScale?: () => number;
   setScale?: (scale: number) => void;
+  getScrollLeft?: () => number;
+  setScrollLeft?: (left: number) => void;
+  getViewportWidth?: () => number;
   reset: () => void;
 }
 
@@ -227,18 +246,22 @@ const emit = defineEmits<{
   "detach-audio": [payload: { clipId: string; sourceUrl: string }];
   /** 时间轴显示倍率变更（写入工程 JSON） */
   "update:scale": [scale: number];
+  /** 点轨道头或片段时，把轨道/片段类型交给右栏 */
+  "inspect-track": [trackType: string];
 }>();
 
 const videoTrackRef = ref<VideoTrackExpose | null>(null);
 /** 时间轴根节点：用于拖放命中与坐标换算 */
 const timelineRootRef = ref<HTMLElement | null>(null);
+/** 视口尺寸变化时重算缩放条 */
+let zoomResizeObserver: ResizeObserver | null = null;
 /** 侧栏素材拖入时高亮时间轴 */
 const catalogDragOver = ref(false);
 
 /** VideoTrack 每秒像素基数（与 props pixels-per-second 一致） */
 const TIMELINE_BASE_PPS = 80;
 /** 轨道左侧控制栏宽度（与 props track-control-width 一致） */
-const TIMELINE_TRACK_CONTROL_WIDTH = 180;
+const TIMELINE_TRACK_CONTROL_WIDTH = 276;
 /** Ctrl/⌘+滚轮缩放底数：deltaY=100 时约 10%（与工具栏在 1x 的 0.1 步接近） */
 const TIMELINE_ZOOM_FACTOR = 1.1;
 
@@ -278,11 +301,24 @@ const trackTypes = {
   subtitle: { max: 1 },
 };
 
-/** 贴图 TextClip 在时间轴上的色块 */
+/** 片段色靠近设计稿：视频中性、音频成功、字幕警告、贴图蓝 */
 const clipTypeConfigs: ClipTypeConfig = {
+  video: {
+    backgroundColor: "#1F1F30",
+    selected: { borderColor: "#8261FF", boxShadow: "0 0 0 2px rgba(130, 97, 255, 0.45)" },
+  },
+  audio: {
+    backgroundColor: "linear-gradient(135deg, #2FC77E 0%, #1FAE69 100%)",
+    selected: { borderColor: "#8261FF", boxShadow: "0 0 0 2px rgba(130, 97, 255, 0.45)" },
+  },
+  subtitle: {
+    backgroundColor: "#E8960F",
+    selected: { borderColor: "#8261FF", boxShadow: "0 0 0 2px rgba(130, 97, 255, 0.45)" },
+  },
   text: {
-    backgroundColor: "#7c3aed",
+    backgroundColor: "#3D7BFF",
     name: "贴图",
+    selected: { borderColor: "#8261FF", boxShadow: "0 0 0 2px rgba(130, 97, 255, 0.45)" },
   },
 };
 
@@ -453,15 +489,16 @@ const isDark = ref(typeof document !== "undefined" && document.documentElement.c
 let themeObserver: MutationObserver | null = null;
 
 /**
- * 假横向条左缘对齐轨区：库 `.tracks__scrollbar` 全宽含控制栏，dummy 却只有时间轴像素宽，
- * 拖条 maxScroll 比 `.track-area` 少一截。margin-left 跟控制栏实宽走（静音/对齐按钮可能撑过 180）。
+ * 缩放条左侧留白跟轨道头实宽走。静音、对齐按钮可能把控制栏撑过 180。
  */
 const hScrollbarControlWidthPx = ref(TIMELINE_TRACK_CONTROL_WIDTH);
 
-/** 根节点 CSS 变量，供 `.tracks__scrollbar` margin-left 使用 */
-const hScrollbarAlignStyle = computed((): Record<string, string> => ({
-  "--timeline-track-control-width": `${hScrollbarControlWidthPx.value}px`,
-}));
+/** 根节点 CSS 变量，缩放条左缘与轨道头对齐 */
+const hScrollbarAlignStyle = computed(
+  (): Record<string, string> => ({
+    "--timeline-track-control-width": `${hScrollbarControlWidthPx.value}px`,
+  }),
+);
 
 /** 控制栏单元格尺寸变化时更新假横向条左缘 */
 let hScrollbarAlignResizeObserver: ResizeObserver | null = null;
@@ -518,34 +555,34 @@ function stopHScrollbarAlign(): void {
 
 /** 贴近合成页浅色卡片的主题（边框/弱文字加深刻度与轨控可见） */
 const lightTheme: ThemeConfig = {
-  primaryColor: "#8E51FF",
-  primaryHue: 265,
-  primarySaturation: 70,
-  primaryLightness: 55,
-  bgDark: "#f8fafc",
-  bgMedium: "#ffffff",
-  bgLight: "#f1f5f9",
-  bgElevated: "#ffffff",
-  textPrimary: "rgba(15, 23, 42, 0.92)",
-  textSecondary: "rgba(71, 85, 105, 0.9)",
-  textMuted: "rgba(100, 116, 139, 0.95)",
-  borderColor: "rgba(100, 116, 139, 0.55)",
+  primaryColor: "#7650FF",
+  primaryHue: 252,
+  primarySaturation: 100,
+  primaryLightness: 66,
+  bgDark: "#F6F6F8",
+  bgMedium: "#FFFFFF",
+  bgLight: "#F0F0F4",
+  bgElevated: "#E6E6EC",
+  textPrimary: "#0E0E11",
+  textSecondary: "#5B5B66",
+  textMuted: "#8E8E99",
+  borderColor: "rgba(14, 14, 17, 0.10)",
 };
 
-/** 对齐库官方暗色 token 的深色主题（主色与浅色一致） */
+/** 深色表面与强调色，和合成器外壳同一套 */
 const darkTheme: ThemeConfig = {
-  primaryColor: "#8E51FF",
-  primaryHue: 265,
-  primarySaturation: 70,
-  primaryLightness: 55,
-  bgDark: "#0f172a",
-  bgMedium: "#1e293b",
-  bgLight: "#334155",
-  bgElevated: "#1e293b",
-  textPrimary: "rgba(255, 255, 255, 0.95)",
-  textSecondary: "rgba(255, 255, 255, 0.7)",
-  textMuted: "rgba(255, 255, 255, 0.5)",
-  borderColor: "rgba(255, 255, 255, 0.1)",
+  primaryColor: "#8261FF",
+  primaryHue: 255,
+  primarySaturation: 100,
+  primaryLightness: 69,
+  bgDark: "#0A0A0F",
+  bgMedium: "#141420",
+  bgLight: "#1A1A28",
+  bgElevated: "#1F1F30",
+  textPrimary: "#FFFFFF",
+  textSecondary: "#A3A3AD",
+  textMuted: "#6C6C76",
+  borderColor: "rgba(255, 255, 255, 0.10)",
 };
 
 /** 按应用主题切换传给 VideoTrack 的 ThemeConfig */
@@ -668,6 +705,7 @@ function onDataChanged(): void {
   removeEmptyNonMainTracks();
   refreshClipConfigCache();
   emit("update:tracks", exportTracks());
+  if (!zoomGesture) readZoomView();
 }
 
 /** 非主轨且无有效 clip（忽略 transition）则删除 */
@@ -755,12 +793,43 @@ function scheduleDataChanged(): void {
   }, DATA_CHANGED_DEBOUNCE_MS);
 }
 
-/** 时间线内按下：标记可能发生裁剪/拖动，松手后兜底同步 */
+/** 时间线内按下：标记可能发生裁剪/拖动，松手后兜底同步。点轨道头或片段时通知右栏 */
 function onTimelinePointerDown(e: PointerEvent): void {
   if (props.readonly || suppressEmit) return;
   // 仅响应主键，忽略滚动条等非编辑指针
   if (e.button !== 0) return;
   pendingPointerSync = true;
+  emitInspectTarget(e);
+}
+
+/** 点片段或轨道名称时切换右栏。轨道上的按钮仍走原来的静音、锁定、删除 */
+function emitInspectTarget(e: PointerEvent): void {
+  const target = e.target;
+  if (!(target instanceof Element)) return;
+  const clipId = target.closest("[data-clip-id]")?.getAttribute("data-clip-id");
+  if (clipId) {
+    const clipType = findClipType(clipId);
+    if (clipType) emit("inspect-track", clipType);
+    return;
+  }
+  if (target.closest("button, input, textarea, select")) return;
+  const cell = target.closest(".tracks__track-control-cell");
+  if (!cell) return;
+  const trackId = cell.closest(".tracks__track")?.getAttribute("data-track-id");
+  if (!trackId) return;
+  const track = videoTrackRef.value?.getTracks?.().find((item) => item.id === trackId);
+  if (!track?.type) return;
+  emit("inspect-track", track.type);
+}
+
+/** 从当前轨道列表里找片段类型 */
+function findClipType(clipId: string): string | null {
+  const tracks = videoTrackRef.value?.getTracks?.() ?? [];
+  for (const track of tracks) {
+    const clip = track.clips.find((item) => item.id === clipId);
+    if (clip?.type) return clip.type;
+  }
+  return null;
 }
 
 /** window pointerup：裁剪结束库往往不发事件，靠此兜底 export */
@@ -801,6 +870,98 @@ function onPlaybackRateChange(rate: number): void {
 function onScaleChanged(scale: number): void {
   if (!bootstrapped) return;
   emit("update:scale", normalizeComposeTimelineScale(scale));
+  if (!zoomGesture) readZoomView();
+}
+
+/** 缩放条拖动中，忽略滚动回写，避免滑块被自己的 setScrollLeft 拽回去 */
+let zoomGesture = false;
+/** 可视区间（秒） */
+const zoomView = ref({ v0: 0, v1: 0, total: 0 });
+/** 区间最短秒数。再短就看不清片段 */
+const ZOOM_MIN_SPAN_SEC = 2;
+
+const zoomTotal = computed(() => zoomView.value.total);
+const zoomLeftPct = computed(() => (zoomView.value.total > 0 ? (zoomView.value.v0 / zoomView.value.total) * 100 : 0));
+const zoomWidthPct = computed(() => {
+  if (zoomView.value.total <= 0) return 100;
+  return ((zoomView.value.v1 - zoomView.value.v0) / zoomView.value.total) * 100;
+});
+/** 两端不能拖到比最短区间更近 */
+const zoomMinSpanPct = computed(() => {
+  if (zoomView.value.total <= 0) return 100;
+  const raw = videoTrackRef.value?.getViewportWidth?.() ?? 1;
+  const viewW = Math.max(1, raw - TIMELINE_END_GAP_PX);
+  const minByScale = viewW / (TIMELINE_BASE_PPS * 10);
+  const minSpan = Math.min(zoomView.value.total, Math.max(ZOOM_MIN_SPAN_SEC, minByScale));
+  return (minSpan / zoomView.value.total) * 100;
+});
+
+/** 时间像素可用的视口：扣掉右侧留白，铺满时滑块才能贴边 */
+function timeViewportWidth(api: VideoTrackExpose): number {
+  const viewW = Math.max(api.getViewportWidth?.() ?? 1, 1);
+  return Math.max(1, viewW - TIMELINE_END_GAP_PX);
+}
+
+/** 用当前倍率和滚动反推可视区间 */
+function readZoomView(): void {
+  const api = videoTrackRef.value;
+  const total = Math.max(0, api?.getDuration?.() ?? 0);
+  if (!api || total <= 0) {
+    zoomView.value = { v0: 0, v1: 0, total: 0 };
+    return;
+  }
+  const viewW = timeViewportWidth(api);
+  const scale = normalizeComposeTimelineScale(api.getScale?.() ?? 1);
+  const pps = TIMELINE_BASE_PPS * scale;
+  const span = Math.min(total, Math.max(viewW / pps, 0.001));
+  const v0 = Math.min(Math.max(0, (api.getScrollLeft?.() ?? 0) / pps), Math.max(0, total - span));
+  zoomView.value = { v0, v1: v0 + span, total };
+}
+
+/** 滑块百分比写回倍率和平移。盖住全部时长时按真实时长铺满并留出右侧空白 */
+function applyZoomRange(leftPct: number, rightPct: number): void {
+  const api = videoTrackRef.value;
+  const total = zoomView.value.total;
+  if (!api || total <= 0) return;
+  const viewW = timeViewportWidth(api);
+  const coversAll = rightPct - leftPct >= 99.5;
+  if (coversAll) {
+    const scale = normalizeComposeTimelineScale(viewW / total / TIMELINE_BASE_PPS);
+    api.setScale?.(scale);
+    api.setScrollLeft?.(0);
+    zoomView.value = { v0: 0, v1: total, total };
+    return;
+  }
+  const minByScale = viewW / (TIMELINE_BASE_PPS * 10);
+  const maxByScale = viewW / (TIMELINE_BASE_PPS * 0.1);
+  let span = ((rightPct - leftPct) / 100) * total;
+  span = Math.min(total, Math.max(span, Math.min(total, Math.max(ZOOM_MIN_SPAN_SEC, minByScale))));
+  span = Math.min(span, maxByScale);
+  let v0 = (leftPct / 100) * total;
+  v0 = Math.min(Math.max(0, v0), Math.max(0, total - span));
+  const scale = normalizeComposeTimelineScale(viewW / span / TIMELINE_BASE_PPS);
+  api.setScale?.(scale);
+  const pps = TIMELINE_BASE_PPS * (api.getScale?.() ?? scale);
+  api.setScrollLeft?.(v0 * pps);
+  zoomView.value = { v0, v1: v0 + span, total };
+}
+
+/** 拖动中先记住手势，避免滚动事件把滑块打回旧位置 */
+function onZoomChange(leftPct: number, rightPct: number): void {
+  zoomGesture = true;
+  applyZoomRange(leftPct, rightPct);
+}
+
+/** 松手后按真实倍率重读一次 */
+function onZoomEnd(): void {
+  zoomGesture = false;
+  readZoomView();
+}
+
+/** 轨道自己滚动时，滑块跟着走 */
+function onTrackScroll(): void {
+  if (zoomGesture) return;
+  readZoomView();
 }
 
 /** 把工程 JSON 的倍率写回库（reset 会清 store / localStorage） */
@@ -948,9 +1109,9 @@ function onSelectionChanged(selectedClipIds: string[]): void {
 }
 
 /** 对齐 vue-clip-track `.subtitle-clip` 的黄底（仅正常态） */
-const SUBTITLE_CLIP_BG = "linear-gradient(135deg, #f59e0b 0%, #d97706 100%)";
+const SUBTITLE_CLIP_BG = "#E8960F";
 /** 贴图 TextClip 色块底（与 clipTypeConfigs.text.backgroundColor 一致） */
-const TEXT_CLIP_BG = "linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)";
+const TEXT_CLIP_BG = "#3D7BFF";
 
 /**
  * 字幕 slot 外层样式：正常态黄底白字；编辑态不加黄底（保留现状），字色仍为白。
@@ -2171,6 +2332,12 @@ onMounted(async () => {
   document.addEventListener("visibilitychange", onPlayheadVisibilityChange);
   // capture + 非 passive：才能拦住 Ctrl+滚轮的浏览器页缩放
   timelineRootRef.value?.addEventListener("wheel", onTimelineWheel, { capture: true, passive: false });
+  if (timelineRootRef.value) {
+    zoomResizeObserver = new ResizeObserver(() => {
+      if (!zoomGesture) readZoomView();
+    });
+    zoomResizeObserver.observe(timelineRootRef.value);
+  }
 
   try {
     await nextTick();
@@ -2183,6 +2350,7 @@ onMounted(async () => {
     }
     await nextTick();
     startHScrollbarAlign();
+    readZoomView();
   } finally {
     settleTimelineReady();
   }
@@ -2192,6 +2360,8 @@ onBeforeUnmount(() => {
   settleTimelineReady();
   themeObserver?.disconnect();
   themeObserver = null;
+  zoomResizeObserver?.disconnect();
+  zoomResizeObserver = null;
   stopHScrollbarAlign();
   window.removeEventListener("pointerup", onWindowPointerUp, true);
   window.removeEventListener("pointercancel", onWindowPointerUp, true);
@@ -2246,6 +2416,7 @@ defineExpose({
   getClipSourceUrl,
   getClipConfig,
   getCurrentTime: () => videoTrackRef.value?.getCurrentTime?.() ?? 0,
+  getDuration: () => videoTrackRef.value?.getDuration?.() ?? 0,
   getScale: () => normalizeComposeTimelineScale(videoTrackRef.value?.getScale?.()),
   seekTo,
   play: () => videoTrackRef.value?.play?.(),
@@ -2267,19 +2438,19 @@ defineExpose({
   min-height: 0;
 
   /* 浅色对比度：补齐 ThemeConfig 无法写入的 token（深色由 html.dark 隔离 CSS 覆盖） */
-  --color-border-light: rgba(100, 116, 139, 0.5);
-  --color-border-strong: rgba(71, 85, 105, 0.65);
-  --color-text-tertiary: #64748b;
+  --color-border-light: var(--compose-split, rgba(14, 14, 17, 0.08));
+  --color-border-strong: var(--compose-line, rgba(14, 14, 17, 0.16));
+  --color-text-tertiary: var(--compose-fg-3, #8e8e99);
 
   /* 竖向滚动条与轨道内容固定 10px；刻度尺按「间隙 + 细条宽度」右缩，避免尺与 clip 错位 */
   --timeline-v-scroll-gap: 10px;
   --timeline-v-scrollbar-width: 8px;
   /* 假横向条左缘；JS 按控制栏实宽覆盖，缺省与 track-control-width 一致 */
-  --timeline-track-control-width: 180px;
+  --timeline-track-control-width: 276px;
 
   :deep(.video-track) {
     flex: 1;
-    height: 100%;
+    height: auto;
     min-height: 0;
     border-radius: 0;
   }
@@ -2300,16 +2471,6 @@ defineExpose({
     box-sizing: border-box;
   }
 
-  /*
-   * 库假横向条 width:100% 含左侧控制栏，dummy 宽却等于轨内容。
-   * 缩到轨视口：左让控制栏，右让竖条 gutter（勿用 padding-right，会加大 scrollWidth）。
-   */
-  :deep(.tracks__scrollbar) {
-    box-sizing: border-box;
-    width: auto;
-    margin-left: var(--timeline-track-control-width, 180px);
-    margin-right: calc(var(--timeline-v-scroll-gap) + var(--timeline-v-scrollbar-width));
-  }
   // 隐藏全局倍速调整器
   :deep(.tools-bar__select) {
     display: none;
@@ -2333,26 +2494,18 @@ defineExpose({
     color: var(--color-text-secondary);
   }
 
-  :deep(.track-control__btn) {
-    color: var(--color-text-secondary);
-  }
-
-  :deep(.track-control__btn--danger) {
-    display: none !important;
-  }
-
-  /* slot 内容不带库组件 scoped id，需自行对齐 👁/🔒 按钮尺寸 */
+  /* slot 按钮与轨道头 28px 图标按钮对齐 */
   .track-control-extra-btn {
-    width: 24px;
-    height: 24px;
+    width: 28px;
+    height: 28px;
     padding: 0;
     display: flex;
     align-items: center;
     justify-content: center;
     background: transparent;
-    border: 1px solid transparent;
-    border-radius: var(--radius-sm, 4px);
-    color: var(--color-text-tertiary);
+    border: 0;
+    border-radius: 4px;
+    color: var(--compose-fg-3, var(--color-text-tertiary));
     cursor: pointer;
   }
 
@@ -2367,7 +2520,8 @@ defineExpose({
   }
 
   .audio-track-mute-btn.is-muted {
-    opacity: 0.45;
+    background: var(--compose-accent-soft, rgba(130, 97, 255, 0.14));
+    color: var(--compose-accent, var(--color-primary));
   }
 
   &.is-readonly {
@@ -2379,7 +2533,7 @@ defineExpose({
   }
 
   &.is-catalog-drag-over {
-    outline: 2px solid hsl(var(--primary) / 0.45);
+    outline: 2px solid var(--compose-accent, #8261ff);
     outline-offset: -2px;
   }
 }

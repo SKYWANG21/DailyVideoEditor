@@ -1,18 +1,34 @@
 <template>
-  <div class="relative isolate h-full w-full min-h-0 overflow-hidden">
-    <div class="grid h-full w-full min-h-0 grid-rows-2 grid-rows-[3fr_2fr] gap-2 overflow-hidden">
-      <div class="grid min-h-0 grid-cols-[2fr_1fr] gap-4 overflow-hidden">
+  <div class="compose-shell relative isolate h-full w-full min-h-0 overflow-hidden">
+    <div class="grid h-full w-full min-h-0 gap-3 overflow-hidden" style="grid-template-rows: minmax(0, 1fr) 42%">
+      <div class="flex min-h-0 gap-3 overflow-hidden">
+        <VideoComposeAssetPanel
+          v-if="!readonly"
+          :segment-catalog="mergedSegmentCatalog"
+          :timeline-clip-urls="timelineClipUrls"
+          :preview-clip-id="previewCatalogVariant?.id"
+          :readonly="readonly"
+          :is-transcribing="isTranscribing"
+          :audio-clip-count="audioClipCount"
+          @open-upload-bgm="uploadAudioModalOpen = true"
+          @upload-clip="uploadClipModalOpen = true"
+          @regenerate-subtitles="onRegenerateSubtitles"
+          @add-subtitle="onAddSubtitle"
+          @preview-clip="onCatalogPreview"
+          @add-clip-to-timeline="onCatalogAddToTimeline"
+          @remove-catalog-clip="onRemoveCatalogVariant"
+          @add-text-template="onAddTextTemplate"
+        />
         <VideoComposePlayer
           ref="playerRef"
-          class="h-full min-h-0"
-          :class="{ 'col-span-2': readonly }"
+          class="h-full min-h-0 min-w-0 flex-1"
           :video-clips="derivedMainClips"
           :override-clips="previewOverrideClips"
           :catalog-preview-active="!!previewCatalogVariant"
           :catalog-preview-label="previewCatalogLabel"
           :audio-clips="catalogPreviewActive ? [] : derivedAudioClips"
           :compose-config="catalogPreviewActive ? catalogPreviewComposeConfig : derivedComposeConfig"
-          :loop-current="loopCurrent"
+          :duration-sec="previewDurationSec"
           :show-subtitles="!previewCatalogVariant"
           :visible-preview-subtitles="visiblePreviewSubtitles"
           :adjust-preview-subtitles="adjustPreviewSubtitles"
@@ -20,8 +36,9 @@
           :text-clips="textOverlayClips"
           :selected-text-clip-id="activeTextClipId"
           :readonly="readonly"
-          @update:loop-current="loopCurrent = $event"
           @update:playing-idx="playingIdx = $event"
+          @toggle-playback="onPreviewTogglePlayback"
+          @seek-playback="onPreviewSeek"
           @global-time-update="onPlayerGlobalTimeUpdate"
           @update:is-adjusting="onIsAdjustingUpdate"
           @update:video-ready="videoReady = $event"
@@ -35,7 +52,7 @@
         <VideoComposeSidebar
           v-if="!readonly"
           ref="sidebarRef"
-          class="h-full min-h-0"
+          class="h-full min-h-0 w-[300px] shrink-0"
           :video-volume="videoVolume"
           :beauty="beauty"
           :video-volume-label="videoVolumeLabel"
@@ -48,23 +65,13 @@
           :subtitle-visible="subtitleVisible"
           :is-adjusting="isAdjusting"
           :video-ready="videoReady"
-          :is-transcribing="isTranscribing"
-          :segment-catalog="mergedSegmentCatalog"
-          :timeline-clip-urls="timelineClipUrls"
-          :preview-clip-id="previewCatalogVariant?.id"
-          :readonly="readonly"
-          :active-tab="sidebarTab"
+          :inspector-kind="inspectorKind"
+          :frame-width="frameSize.width"
+          :frame-height="frameSize.height"
           :selected-text-clip="selectedTextClipProps"
           :selected-subtitle-text="selectedSubtitleText"
           :selected-subtitle-id="activeSubtitleId"
           :has-selected-subtitle="Boolean(activeSubtitleId)"
-          @open-upload-bgm="uploadAudioModalOpen = true"
-          @upload-clip="uploadClipModalOpen = true"
-          @regenerate-subtitles="onRegenerateSubtitles"
-          @add-subtitle="onAddSubtitle"
-          @preview-clip="onCatalogPreview"
-          @add-clip-to-timeline="onCatalogAddToTimeline"
-          @remove-catalog-clip="onRemoveCatalogVariant"
           @update:video-volume="onVideoVolumeChange"
           @update:beauty="onBeautyChange"
           @update:bgm-volume="onBgmVolumeChange"
@@ -72,8 +79,6 @@
           @update:subtitle-visible="onSubtitleVisibleChange"
           @update:subtitle-text="onSubtitleTextChange"
           @commit:subtitle-text="onSubtitleTextCommit"
-          @update:active-tab="sidebarTab = $event"
-          @add-text-template="onAddTextTemplate"
           @update:text-clip-props="onTextClipPropsChange"
           @font-popover-toggle="onFontPopoverToggle"
           @toggle-adjust-position="toggleAdjustSubPosition"
@@ -98,6 +103,7 @@
         @playback-ratechange="onTimelineRateChange"
         @drop-catalog-clip="onTimelineDropCatalogClip"
         @detach-audio="onTimelineDetachAudio"
+        @inspect-track="onInspectTrack"
       />
     </div>
 
@@ -122,6 +128,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, reactive, nextTick, onBeforeUnmount, onMounted, type CSSProperties } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
+import VideoComposeAssetPanel from "./VideoComposeAssetPanel.vue";
 import VideoComposePlayer from "./VideoComposePlayer.vue";
 import VideoComposeSidebar from "./VideoComposeSidebar.vue";
 import VideoComposeTimeline from "./VideoComposeTimeline.vue";
@@ -161,7 +168,7 @@ import {
   readTextClipConfig,
   normalizeComposeTimelineScale,
 } from "@/types/videoCompose";
-import type { ComposeApplyGlobalScope, ComposeSidebarTab, SelectedTextClipProps, SubtitleTextEditPayload } from "./VideoComposeSidebar.vue";
+import type { ComposeApplyGlobalScope, ComposeInspectorKind, SelectedTextClipProps, SubtitleTextEditPayload } from "./VideoComposeSidebar.vue";
 import { dbToGain, gainToDb } from "./volumeDb";
 import type { PatchableClipType } from "./VideoComposeTimeline.vue";
 import {
@@ -236,8 +243,24 @@ const playingIdx = ref(0);
 const globalTime = ref(0);
 const isAdjusting = ref(false);
 const videoReady = ref(false);
-const loopCurrent = ref(false);
+/** 播放条总时长，跟时间轴 getDuration */
+const previewDurationSec = ref(0);
+
+/** 画面变换只展示当前预览尺寸，不参与写回 */
+const frameSize = computed(() => {
+  void videoReady.value;
+  const size = playerRef.value?.getVideoSize?.() ?? null;
+  return {
+    width: size?.width ?? 0,
+    height: size?.height ?? 0,
+  };
+});
 const isTranscribing = ref(false);
+
+/** 把时间轴总时长同步到预览播放条 */
+function syncPreviewDuration(): void {
+  previewDurationSec.value = Math.max(0, timelineRef.value?.getDuration?.() ?? 0);
+}
 
 /** 本地上传/素材库选中片段在侧栏 catalog 的分组序号（与 Step3 片段区分） */
 const UPLOAD_CATALOG_SEGMENT_INDEX = COMPOSE_UPLOAD_CATALOG_SEGMENT_INDEX;
@@ -515,8 +538,27 @@ const tracks = ref<ComposeTrack[]>(props.modelValue.tracks?.length ? JSON.parse(
 /** 时间轴当前选中 clip id 列表 */
 const selectedClipIds = ref<string[]>([]);
 
-/** 侧栏当前 Tab */
-const sidebarTab = ref<ComposeSidebarTab>();
+/** 右栏当前编辑对象；未选中轨道或片段时为空 */
+const inspectorKind = ref<ComposeInspectorKind | null>(null);
+
+/** 片段类型对应的右栏 */
+function inspectorKindFromClipType(clipType: string): ComposeInspectorKind | null {
+  if (clipType === "video" || clipType === "audio" || clipType === "subtitle") return clipType;
+  if (clipType === "text") return "text";
+  return null;
+}
+
+/** 轨道类型对应的右栏。贴图轨在库里叫 sticker */
+function inspectorKindFromTrackType(trackType: string): ComposeInspectorKind | null {
+  if (trackType === "video" || trackType === "audio" || trackType === "subtitle") return trackType;
+  if (trackType === "sticker" || trackType === "text") return "text";
+  return null;
+}
+
+/** 点轨道头时切换右栏，不改轨道数据 */
+function onInspectTrack(trackType: string): void {
+  inspectorKind.value = inspectorKindFromTrackType(trackType);
+}
 
 /** Sidebar / Player 展示用样式（从目标 clip 同步；调整位置时就地写回） */
 const subtitleStyle = reactive<SubtitleStyleConfig>(getDefaultSubtitleStyleSnapshot());
@@ -551,15 +593,6 @@ const catalogPreviewComposeConfig = computed<ComposeConfig>(() => ({
   bgmStartTime: 0,
   bgmSourceStartTime: 0,
 }));
-
-/** 当前播放主轨片段在时间轴上的 [start, end] */
-const currentMainClipRange = computed<{ start: number; end: number } | null>(() => {
-  const clip = derivedMainClips.value[playingIdx.value];
-  if (!clip) return null;
-  const start = clip.startTime ?? derivedMainClips.value.slice(0, playingIdx.value).reduce((s, c) => s + (c.durationSec || 0), 0);
-  const end = clip.endTime ?? start + (clip.durationSec || 0);
-  return { start, end };
-});
 
 /** 选中且类型匹配的 audio / video / subtitle clip id；否则 undefined（表示全轨） */
 const activeAudioId = computed(() => findSelectedIdOfType("audio"));
@@ -763,7 +796,7 @@ function onSelectSubtitleClip(clipId: string): void {
   if (props.readonly) return;
   timelineRef.value?.selectClipById?.(clipId);
   selectedClipIds.value = [clipId];
-  sidebarTab.value = "subtitle";
+  inspectorKind.value = "subtitle";
 }
 
 /** 预览区字幕就地编辑提交；空文案拒绝并提示 */
@@ -811,7 +844,7 @@ function onAddTextTemplate(item: TextTemplateItem): void {
     videoHeight: size?.height,
   });
   if (!clipId) return;
-  sidebarTab.value = "textTemplate";
+  inspectorKind.value = "text";
   ElMessage.success("已添加到时间轴");
 }
 
@@ -831,7 +864,7 @@ function onTextClipRectUpdate(payload: { clipId: string; rect: RectConfig }): vo
 function onSelectTextClip(clipId: string): void {
   timelineRef.value?.selectClipById?.(clipId);
   selectedClipIds.value = [clipId];
-  sidebarTab.value = "textTemplate";
+  inspectorKind.value = "text";
 }
 
 function toggleAdjustSubPosition(): void {
@@ -905,6 +938,7 @@ let lastMainLayoutSig = "";
 function onTracksUpdate(next: ComposeTrack[]): void {
   tracks.value = next;
   syncDerivedClipsFromTimeline();
+  syncPreviewDuration();
   if (!syncingFromTracks) syncSidebarFromTracks();
 
   const sig = mainVideoLayoutSig(derivedMainClips.value);
@@ -924,9 +958,20 @@ function onTimelineScaleUpdate(_scale: number): void {
 function onSelectionChanged(ids: string[]): void {
   selectedClipIds.value = ids || [];
   syncSidebarFromTracks();
-  if (findSelectedIdOfType("text")) {
-    sidebarTab.value = "textTemplate";
+  if (!ids?.length) {
+    inspectorKind.value = null;
+    return;
   }
+  for (const id of ids) {
+    const clip = findClipById(id);
+    if (!clip) continue;
+    const kind = inspectorKindFromClipType(clip.type);
+    if (kind) {
+      inspectorKind.value = kind;
+      return;
+    }
+  }
+  inspectorKind.value = null;
 }
 
 /** 主轨时间轴总时长（秒） */
@@ -1071,8 +1116,21 @@ function onTimelineRateChange(rate: number): void {
   playerRef.value?.setPlaybackRate?.(rate);
 }
 
+/** 预览播放条：走时间轴 play/pause，空格键同一条路径 */
+function onPreviewTogglePlayback(): void {
+  if (isPlayerPlaying()) timelineRef.value?.pause?.();
+  else timelineRef.value?.play?.();
+}
+
+/** 预览播放条跳转。时间轴 seek 会再驱动预览 */
+function onPreviewSeek(timeSec: number): void {
+  const duration = timelineRef.value?.getDuration?.() ?? previewDurationSec.value;
+  const next = Math.max(0, Math.min(timeSec, duration > 0 ? duration : 0));
+  timelineRef.value?.seekTo?.(next);
+}
+
 /**
- * Player 全局时间 → 时间线游标；loopCurrent 时强制在当前片段内回环。
+ * Player 全局时间 → 时间线游标。
  * 素材库预览时主播放器独立播放，不同步时间轴游标。
  */
 function onPlayerGlobalTimeUpdate(timeSec: number): void {
@@ -1097,18 +1155,6 @@ function onPlayerGlobalTimeUpdate(timeSec: number): void {
 
   syncTimelinePlaybackUi(true);
   playerDrivingTimeline = true;
-
-  if (loopCurrent.value) {
-    const range = currentMainClipRange.value;
-    if (range && timeSec >= range.end - 0.02) {
-      suppressTimelineSeekToPlayer = true;
-      timelineRef.value?.seekTo?.(range.start);
-      requestAnimationFrame(() => {
-        suppressTimelineSeekToPlayer = false;
-      });
-      return;
-    }
-  }
 
   suppressTimelineSeekToPlayer = true;
   timelineRef.value?.seekTo?.(timeSec);
@@ -1555,3 +1601,83 @@ onBeforeUnmount(() => {
   flush();
 });
 </script>
+
+<style lang="scss">
+.compose-shell {
+  --compose-surface: #ffffff;
+  --compose-surface-2: #f0f0f4;
+  --compose-surface-3: #e6e6ec;
+  --compose-fg: #0e0e11;
+  --compose-fg-2: #5b5b66;
+  --compose-fg-3: #8e8e99;
+  --compose-accent: #7650ff;
+  --compose-accent-hover: #8664ff;
+  --compose-accent-soft: rgba(118, 80, 255, 0.1);
+  --compose-line: #d8d8e0;
+  --compose-split: #e8e8ee;
+  --compose-success: #1fae69;
+  --compose-warning: #e8960f;
+  --compose-danger: #ef3347;
+  --compose-stage: #f1f1f5;
+  --compose-thumb: #c9c9d4;
+  --compose-shadow-card: 0 4px 24px rgba(14, 14, 17, 0.06);
+  --compose-shadow-1: 0 1px 2px rgba(14, 14, 17, 0.06);
+  --compose-focus: 0 0 0 4px rgba(118, 80, 255, 0.18);
+  color: var(--compose-fg);
+  font-family: "Noto Sans SC", "Source Han Sans SC", "Source Han Sans", sans-serif;
+}
+
+.dark .compose-shell {
+  --compose-surface: #141420;
+  --compose-surface-2: #1a1a28;
+  --compose-surface-3: #1f1f30;
+  --compose-fg: #ffffff;
+  --compose-fg-2: #a3a3ad;
+  --compose-fg-3: #6c6c76;
+  --compose-accent: #8261ff;
+  --compose-accent-hover: #9479ff;
+  --compose-accent-soft: rgba(130, 97, 255, 0.14);
+  --compose-line: rgba(255, 255, 255, 0.1);
+  --compose-split: rgba(255, 255, 255, 0.06);
+  --compose-success: #2fc77e;
+  --compose-warning: #ffb547;
+  --compose-danger: #ff4d5e;
+  --compose-stage: #08080c;
+  --compose-thumb: #2e2e44;
+  --compose-shadow-card: 0 4px 24px rgba(0, 0, 0, 0.3);
+  --compose-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --compose-focus: 0 0 0 4px rgba(130, 97, 255, 0.22);
+}
+
+.compose-shell .compose-scroll {
+  scrollbar-width: none;
+}
+
+.compose-shell .compose-scroll::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.compose-shell .compose-scroll:hover {
+  scrollbar-width: thin;
+  scrollbar-color: var(--compose-thumb) transparent;
+}
+
+.compose-shell .compose-scroll:hover::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.compose-shell .compose-scroll:hover::-webkit-scrollbar-thumb {
+  background: var(--compose-thumb);
+  border-radius: 999px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .compose-shell,
+  .compose-shell * {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+</style>

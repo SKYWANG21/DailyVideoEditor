@@ -3,12 +3,12 @@
     <div class="relative h-9 flex flex-1 items-center">
       <div
         ref="trackRef"
-        class="relative h-2 w-full cursor-pointer rounded-full bg-muted"
+        class="relative h-2 w-full cursor-pointer rounded-full bg-[var(--compose-surface-3,#e6e6ec)]"
         @mousedown.prevent="onTrackPointerDown"
       >
-        <div class="absolute inset-y-0 left-0 rounded-full bg-[#8E51FF]" :style="{ width: fillPercent }" />
+        <div class="absolute inset-y-0 left-0 rounded-full bg-[var(--compose-accent,#8261FF)]" :style="{ width: fillPercent }" />
         <div
-          class="absolute top-1/2 h-[18px] w-[18px] -translate-y-1/2 rounded-full border-[3px] border-white bg-[#8E51FF] shadow-[0_2px_8px_rgba(0,0,0,0.3)]"
+          class="absolute top-1/2 h-4 w-4 -translate-y-1/2 rounded-full border-2 border-white bg-[var(--compose-accent,#8261FF)] shadow-[var(--compose-shadow-1)]"
           :style="{ left: thumbLeft }"
         />
       </div>
@@ -28,7 +28,7 @@
         @mousedown="primePreviewAudioContext"
         @change="onInputChange"
       />
-      <span class="text-xs text-muted-foreground">dB</span>
+      <span class="text-[12px] text-[var(--compose-fg-3,#8e8e99)]">dB</span>
     </div>
   </div>
 </template>
@@ -63,7 +63,7 @@ const trackRef = ref<HTMLElement | null>(null);
 const fillPercent = computed(() => `${dbToSliderRatio(props.db) * 100}%`);
 
 /** 拇指左边缘。与旧滑条一样用半径把圆心对齐到刻度 */
-const thumbLeft = computed(() => `calc(${dbToSliderRatio(props.db) * 100}% - 9px)`);
+const thumbLeft = computed(() => `calc(${dbToSliderRatio(props.db) * 100}% - 8px)`);
 
 /** 指针相对轨道的 0～1 位置 */
 function ratioFromClientX(clientX: number): number {

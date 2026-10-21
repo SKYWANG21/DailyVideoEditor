@@ -35,7 +35,7 @@
     </div>
 
     <!-- 中间：播放控制区 -->
-    <div class="tools-bar__section tools-bar__playback">
+    <div v-if="showPlayback" class="tools-bar__section tools-bar__playback">
       <!-- 前置插槽 -->
       <slot name="playback-prepend" />
 
@@ -92,7 +92,7 @@
       </div>
 
       <!-- 缩放控制 -->
-      <div class="tools-bar__scale-control">
+      <div v-if="showScaleControl" class="tools-bar__scale-control">
         <button class="tools-bar__btn tools-bar__btn--icon" :disabled="scale <= minScale" @click="zoomOut">
           −
         </button>
@@ -126,12 +126,18 @@ interface Props {
   operationButtons?: OperationButton[]
   scaleConfigButtons?: ScaleConfigButton[]
   locale?: LocaleConfig
+  /** 是否显示播放钮、时间和倍速 */
+  showPlayback?: boolean
+  /** 是否显示缩放加减和倍率滑杆。吸附按钮不受影响 */
+  showScaleControl?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   operationButtons: () => ['reset', 'undo', 'redo', 'split', 'delete'],
   scaleConfigButtons: () => ['snap'],
-  locale: () => ({})
+  locale: () => ({}),
+  showPlayback: true,
+  showScaleControl: true
 })
 
 // Emits
@@ -314,7 +320,7 @@ function handleScaleChange() {
   align-items: center;
   justify-content: space-between;
   padding: 8px 16px;
-  background: var(--color-bg-elevated);
+  background: var(--color-bg-medium);
   border-bottom: 1px solid var(--color-border);
   gap: 20px;
   box-sizing: border-box;

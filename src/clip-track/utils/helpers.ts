@@ -24,6 +24,25 @@ export function hasTimeOverlap(
   return start1 < end2 && end1 > start2
 }
 
+/** 时间轴内容右侧留白（像素）。不算进时间，避免铺满后还能横滚 */
+export const TIMELINE_END_GAP_PX = 48
+
+/** 内容像素宽：时长换算后加上右侧留白 */
+export function timelineContentWidth(spanSeconds: number, pixelsPerSecond: number): number {
+  const seconds = Number.isFinite(spanSeconds) ? Math.max(0, spanSeconds) : 0
+  const pps = Number.isFinite(pixelsPerSecond) ? Math.max(0, pixelsPerSecond) : 0
+  return Math.floor(seconds * pps) + TIMELINE_END_GAP_PX
+}
+
+/** 取一组秒数里的最大有效值 */
+export function timelineSpanSeconds(candidates: number[]): number {
+  let max = 0
+  for (const value of candidates) {
+    if (Number.isFinite(value) && value > max) max = value
+  }
+  return max
+}
+
 // 限制值在范围内
 export function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(value, max))

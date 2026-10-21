@@ -2,10 +2,10 @@
   <div class="flex flex-col gap-4">
     <template v-if="groups.length">
       <div v-for="group in groups" :key="group.segmentIndex" class="flex flex-col gap-2">
-        <p class="text-xs font-medium text-foreground truncate" :title="group.segmentTitle">
+        <p class="truncate text-[12px] font-medium text-[var(--compose-fg)]" :title="group.segmentTitle">
           {{ group.segmentTitle }}
         </p>
-        <div class="grid grid-cols-4 gap-1.5">
+        <div class="grid gap-2" :style="{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }">
           <div
             v-for="variant in group.variants"
             :key="variant.id"
@@ -13,10 +13,8 @@
           >
             <div
               :class="[
-                'group relative aspect-[3/4] rounded-[6px] overflow-hidden bg-black border-2 transition-colors',
+                'group relative aspect-square overflow-hidden rounded-[12px] bg-[var(--compose-surface-2)] transition-opacity duration-150',
                 canDrag(variant) ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer',
-                variant.id === previewClipId ? 'border-primary' : 'border-transparent hover:border-primary/40',
-                isOnTimeline(variant) && variant.id !== previewClipId ? 'ring-1 ring-primary/30' : '',
                 draggingVariantId === variant.id ? 'opacity-60' : '',
               ]"
               :draggable="canDrag(variant)"
@@ -36,53 +34,49 @@
                 <Film :size="20" />
               </div>
 
+              <span
+                v-if="isOnTimeline(variant)"
+                class="absolute top-1.5 left-1.5 z-20 rounded-[4px] bg-[var(--compose-success)] px-1.5 py-0.5 text-[10px] font-medium text-white"
+              >
+                已使用
+              </span>
+              <span
+                v-else-if="variant.isSelected"
+                class="absolute top-1.5 left-1.5 z-20 rounded-[4px] bg-black/55 px-1.5 py-0.5 text-[10px] font-medium text-white"
+              >
+                已选中
+              </span>
               <button
                 v-if="!readonly && isRemovable(variant)"
                 type="button"
-                class="absolute top-1 right-1 z-20 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white opacity-0 transition-opacity hover:bg-destructive group-hover:opacity-100"
+                class="absolute top-1.5 right-1.5 z-20 flex h-5 w-5 items-center justify-center rounded-full bg-black/55 text-white opacity-0 transition-opacity duration-150 hover:bg-[var(--compose-danger)] group-hover:opacity-100"
                 title="从列表移除"
                 @click.stop="emit('remove', variant)"
               >
                 <X :size="12" />
               </button>
 
-              <div
-                v-if="showBottomBar(variant)"
-                class="absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/85 to-transparent px-1 pb-1 pt-3"
-                @click.stop
-              >
+              <div class="pointer-events-none absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/75 to-transparent px-2 pt-5 pb-1.5">
                 <button
                   v-if="!isOnTimeline(variant) && !readonly && variant.url"
                   type="button"
-                  class="w-full h-6 rounded-[3px] text-[10px] font-medium text-white bg-primary/90 hover:bg-primary"
-                  @click="emit('add-to-timeline', variant)"
+                  class="pointer-events-auto mb-1 h-6 w-full rounded-[4px] bg-white text-[10px] font-semibold text-[#0E0E11]"
+                  @click.stop="emit('add-to-timeline', variant)"
                 >
                   添加到时间轴
                 </button>
-                <span
-                  v-else
-                  class="block w-full text-center text-[10px] font-medium text-white/95 py-0.5 truncate"
-                >
-                  {{ bottomStatusLabel(variant) }}
-                </span>
+                <span class="block truncate text-[12px] font-medium text-white">{{ variant.label || "版本" }}</span>
               </div>
+              <span
+                class="pointer-events-none absolute inset-0 rounded-[12px] ring-2 ring-inset ring-[var(--compose-accent)] transition-opacity duration-150"
+                :class="variant.id === previewClipId ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'"
+              />
             </div>
-            <el-tooltip
-              :content="variant.label || '版本'"
-              placement="top"
-              effect="dark"
-              :show-after="200"
-              :disabled="!(variant.label || '').trim()"
-            >
-              <span class="block w-full min-w-0 text-[11px] text-muted-foreground text-center truncate px-0.5">
-                {{ variant.label || "版本" }}
-              </span>
-            </el-tooltip>
           </div>
         </div>
       </div>
     </template>
-    <p v-else class="text-xs text-muted-foreground text-center py-2">暂无历史生成片段</p>
+    <p v-else class="py-2 text-center text-[12px] text-[var(--compose-fg-3)]">暂无历史生成片段</p>
   </div>
 </template>
 
@@ -96,16 +90,21 @@ import {
 } from "@/types/videoCompose";
 import { COMPOSE_UPLOAD_CATALOG_SEGMENT_INDEX } from "@/hooks/useComposeUploadCatalog";
 
-const props = defineProps<{
-  /** 按片段分组的历史版本 */
-  groups: ComposeSegmentClipGroup[];
-  /** 已在时间轴上的视频 URL 集合 */
-  timelineClipUrls?: Set<string>;
-  /** 当前主播放器预览中的版本 id */
-  previewClipId?: string;
-  /** 只读：禁止添加到时间轴 */
-  readonly?: boolean;
-}>();
+const props = withDefaults(
+  defineProps<{
+    /** 按片段分组的历史版本 */
+    groups: ComposeSegmentClipGroup[];
+    /** 一行几列。收起素材栏时为 1 */
+    columns?: number;
+    /** 已在时间轴上的视频 URL 集合 */
+    timelineClipUrls?: Set<string>;
+    /** 当前主播放器预览中的版本 id */
+    previewClipId?: string;
+    /** 只读：禁止添加到时间轴 */
+    readonly?: boolean;
+  }>(),
+  { columns: 4 },
+);
 
 const emit = defineEmits<{
   preview: [variant: ComposeSegmentClipVariant];
@@ -156,18 +155,5 @@ function onVariantDragEnd(): void {
 function isOnTimeline(variant: ComposeSegmentClipVariant): boolean {
   if (!variant.url?.trim() || !props.timelineClipUrls?.size) return false;
   return props.timelineClipUrls.has(variant.url.trim());
-}
-
-/** 底部唯一状态文案：已在时间轴 > 已选中 */
-function bottomStatusLabel(variant: ComposeSegmentClipVariant): string {
-  if (isOnTimeline(variant)) return "已在时间轴";
-  if (variant.isSelected) return "已选中";
-  return "";
-}
-
-/** 是否展示底部状态条 */
-function showBottomBar(variant: ComposeSegmentClipVariant): boolean {
-  if (isOnTimeline(variant) || variant.isSelected) return true;
-  return !props.readonly && Boolean(variant.url?.trim());
 }
 </script>
