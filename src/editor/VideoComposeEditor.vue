@@ -11,14 +11,16 @@
           :readonly="readonly"
           :is-transcribing="isTranscribing"
           :audio-clip-count="audioClipCount"
+          :audio-assets="audioAssets"
+          :sfx-assets="sfxAssets"
+          :subtitle-assets="subtitleAssets"
+          :text-templates="textTemplateCatalog"
           @open-upload-bgm="uploadAudioModalOpen = true"
           @upload-clip="uploadClipModalOpen = true"
           @regenerate-subtitles="onRegenerateSubtitles"
           @add-subtitle="onAddSubtitle"
           @preview-clip="onCatalogPreview"
-          @add-clip-to-timeline="onCatalogAddToTimeline"
           @remove-catalog-clip="onRemoveCatalogVariant"
-          @add-text-template="onAddTextTemplate"
         />
         <div
           v-if="!readonly"
@@ -127,6 +129,9 @@
         @time-update="onTimelineTimeUpdate"
         @playback-ratechange="onTimelineRateChange"
         @drop-catalog-clip="onTimelineDropCatalogClip"
+        @drop-audio-asset="onTimelineDropAudioAsset"
+        @drop-subtitle-asset="onTimelineDropSubtitleAsset"
+        @drop-text-template="onTimelineDropTextTemplate"
         @detach-audio="onTimelineDetachAudio"
         @inspect-track="onInspectTrack"
       />
@@ -174,7 +179,9 @@ import type {
   SubtitleStyleConfig,
   ComposeSegmentClipGroup,
   ComposeSegmentClipVariant,
+  ComposeSubtitleAsset,
   ComposeTextOverlayClip,
+  ComposeTextTemplateDrag,
   BeautyParams,
 } from "@/types/videoCompose";
 import {
@@ -193,7 +200,12 @@ import {
   readTextClipConfig,
   normalizeComposeTimelineScale,
 } from "@/types/videoCompose";
-import type { ComposeApplyGlobalScope, ComposeInspectorKind, SelectedTextClipProps, SubtitleTextEditPayload } from "./VideoComposeSidebar.vue";
+import type {
+  ComposeApplyGlobalScope,
+  ComposeInspectorKind,
+  SelectedTextClipProps,
+  SubtitleTextEditPayload,
+} from "./VideoComposeSidebar.vue";
 import { dbToGain, gainToDb } from "./volumeDb";
 import type { PatchableClipType } from "./VideoComposeTimeline.vue";
 import {
@@ -201,6 +213,7 @@ import {
   getTextTemplateAspect,
   isCssHexColor,
   loadTextTemplateCatalog,
+  textTemplateCatalog,
   type TextTemplateItem,
 } from "./textTemplateCatalog";
 import {
@@ -625,11 +638,6 @@ async function addCatalogVariantToTimeline(
   ElMessage.success(options?.successMessage ?? "已添加到时间轴");
 }
 
-/** 侧栏：将历史版本追加到时间轴主轨末尾 */
-async function onCatalogAddToTimeline(variant: ComposeSegmentClipVariant): Promise<void> {
-  await addCatalogVariantToTimeline(variant);
-}
-
 /** 侧栏：从上传片段列表移除（已在时间轴则确认后一并移除） */
 async function onRemoveCatalogVariant(variant: ComposeSegmentClipVariant): Promise<void> {
   if (props.readonly) return;
@@ -665,6 +673,34 @@ async function onTimelineDropCatalogClip(payload: { variant: ComposeSegmentClipV
   await addCatalogVariantToTimeline(payload.variant, { startTime: payload.startTime });
 }
 
+/** 音频或音效拖入音频轨 */
+function onTimelineDropAudioAsset(payload: { item: BgmItem; startTime: number }): void {
+  if (props.readonly) return;
+  timelineRef.value?.addAudioClip({ ...payload.item }, payload.startTime);
+  ElMessage.success("已添加到时间轴");
+}
+
+/** 字幕素材拖入字幕轨 */
+function onTimelineDropSubtitleAsset(payload: { item: ComposeSubtitleAsset; startTime: number }): void {
+  if (props.readonly) return;
+  timelineRef.value?.addSubtitleClip({
+    text: payload.item.text,
+    durationSec: payload.item.durationSec,
+    startTime: payload.startTime,
+  });
+  ElMessage.success("已添加到时间轴");
+}
+
+/** 花字拖入贴图轨。按 id 找回完整模板 */
+function onTimelineDropTextTemplate(payload: { item: ComposeTextTemplateDrag; startTime: number }): void {
+  const item = findTextTemplateById(payload.item.id);
+  if (!item) {
+    ElMessage.warning("找不到该花字模板");
+    return;
+  }
+  onAddTextTemplate(item, payload.startTime);
+}
+
 /** 时间轴右键「分离音轨」：唯一分离入口，委托 Hook 调后端并写轨 */
 async function onTimelineDetachAudio(payload: { clipId: string; sourceUrl: string }): Promise<void> {
   void payload.sourceUrl;
@@ -689,6 +725,12 @@ let timelineUiPlaying = false;
 
 /** 多轨真相源（与 model.tracks 同步） */
 const tracks = ref<ComposeTrack[]>(props.modelValue.tracks?.length ? JSON.parse(JSON.stringify(props.modelValue.tracks)) : []);
+/** 音频素材。没有远端列表时为空，卡片不造假数据 */
+const audioAssets = ref<BgmItem[]>([]);
+/** 音效素材。拖入后与音频一样进音频轨 */
+const sfxAssets = ref<BgmItem[]>([]);
+/** 字幕素材 */
+const subtitleAssets = ref<ComposeSubtitleAsset[]>([]);
 
 /** 时间轴当前选中 clip id 列表 */
 const selectedClipIds = ref<string[]>([]);
@@ -983,8 +1025,8 @@ function onApplyGlobal(scope: ComposeApplyGlobalScope): void {
   });
 }
 
-/** 侧栏：将文字模板添加到贴图轨光标处 */
-function onAddTextTemplate(item: TextTemplateItem): void {
+/** 将文字模板添加到贴图轨。未指定起点时用播放头 */
+function onAddTextTemplate(item: TextTemplateItem, startTime?: number): void {
   if (props.readonly) return;
   const size = playerRef.value?.getVideoSize?.() ?? null;
   const clipId = timelineRef.value?.addTextClip({
@@ -997,6 +1039,7 @@ function onAddTextTemplate(item: TextTemplateItem): void {
     aspect: getTextTemplateAspect(item.id),
     videoWidth: size?.width,
     videoHeight: size?.height,
+    startTime,
   });
   if (!clipId) return;
   inspectorKind.value = "text";

@@ -331,6 +331,41 @@ export interface ComposeSegmentClipVariant {
 /** 侧栏素材库卡片拖入时间轴时 dataTransfer 的 MIME 类型 */
 export const COMPOSE_SEGMENT_CLIP_DRAG_MIME = "application/x-compose-segment-clip+json";
 
+/** 音频、音效卡片拖入时间轴。两者都进音频轨 */
+export const COMPOSE_AUDIO_ASSET_DRAG_MIME = "application/x-compose-audio-asset+json";
+
+/** 字幕素材卡片拖入时间轴 */
+export const COMPOSE_SUBTITLE_ASSET_DRAG_MIME = "application/x-compose-subtitle-asset+json";
+
+/** 花字卡片拖入时间轴 */
+export const COMPOSE_TEXT_TEMPLATE_DRAG_MIME = "application/x-compose-text-template+json";
+
+/** 字幕素材。拖入后按文案和时长插入字幕轨 */
+export interface ComposeSubtitleAsset {
+  /** 素材 id */
+  id: string;
+  /** 入轨文案 */
+  text: string;
+  /** 期望时长（秒） */
+  durationSec: number;
+}
+
+/** 花字拖放载荷。只带入轨需要的字段，不含 SVG 原文 */
+export interface ComposeTextTemplateDrag {
+  /** 模板 id */
+  id: string;
+  /** 卡片标题 */
+  name: string;
+  /** 默认文案 */
+  defaultText: string;
+  /** 默认字号 */
+  defaultFontSize: number;
+  /** 默认颜色 */
+  defaultColor: string;
+  /** 模板地址 */
+  sourceUrl: string;
+}
+
 /** 侧栏素材库：按片段分组 */
 export interface ComposeSegmentClipGroup {
   /** 片段序号（0-based） */

@@ -147,12 +147,17 @@ import type {
   SubtitleStyleConfig,
   ComposeSegmentClipVariant,
   ComposeMediaClipConfig,
+  ComposeSubtitleAsset,
+  ComposeTextTemplateDrag,
 } from "@/types/videoCompose";
 import {
   DEFAULT_COMPOSE_TIMELINE_FPS,
   normalizeSubtitleClipStyle,
   mapMediaClipToVideoClipItem,
+  COMPOSE_AUDIO_ASSET_DRAG_MIME,
   COMPOSE_SEGMENT_CLIP_DRAG_MIME,
+  COMPOSE_SUBTITLE_ASSET_DRAG_MIME,
+  COMPOSE_TEXT_TEMPLATE_DRAG_MIME,
   readClipConfig,
   TEXT_TEMPLATE_TRACK_TYPE,
   TEXT_TEMPLATE_TRACK_NAME,
@@ -241,6 +246,12 @@ const emit = defineEmits<{
   "playback-ratechange": [rate: number];
   /** 侧栏素材库版本拖入主轨 */
   "drop-catalog-clip": [payload: { variant: ComposeSegmentClipVariant; startTime: number }];
+  /** 音频或音效拖入音频轨 */
+  "drop-audio-asset": [payload: { item: BgmItem; startTime: number }];
+  /** 字幕素材拖入字幕轨 */
+  "drop-subtitle-asset": [payload: { item: ComposeSubtitleAsset; startTime: number }];
+  /** 花字拖入贴图轨 */
+  "drop-text-template": [payload: { item: ComposeTextTemplateDrag; startTime: number }];
   /** 本地媒体文件拖入轨道（vue-clip-track 原生） */
   "drop-media": [payload: { mediaData: unknown; trackId: string; startTime: number }];
   /** 右键「分离音轨」：由 Editor 调抽轨 API */
@@ -1909,13 +1920,26 @@ function resolveDropTimeSec(event: DragEvent): number {
   return mainTrackEndTime();
 }
 
+/** 侧栏卡片拖放使用的 MIME */
+const CATALOG_DRAG_MIMES = [
+  COMPOSE_SEGMENT_CLIP_DRAG_MIME,
+  COMPOSE_AUDIO_ASSET_DRAG_MIME,
+  COMPOSE_SUBTITLE_ASSET_DRAG_MIME,
+  COMPOSE_TEXT_TEMPLATE_DRAG_MIME,
+];
+
+/** 这次拖动是不是侧栏素材 */
+function isCatalogDrag(event: DragEvent): boolean {
+  const types = event.dataTransfer?.types;
+  if (!types) return false;
+  return CATALOG_DRAG_MIMES.some((mime) => types.includes(mime));
+}
+
 /** 侧栏素材拖入：允许 drop */
 function onCatalogDragOver(event: DragEvent): void {
-  if (props.readonly) return;
-  const types = event.dataTransfer?.types;
-  if (!types?.includes(COMPOSE_SEGMENT_CLIP_DRAG_MIME)) return;
+  if (props.readonly || !isCatalogDrag(event)) return;
   event.preventDefault();
-  event.dataTransfer!.dropEffect = "copy";
+  if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
   catalogDragOver.value = true;
 }
 
@@ -1927,18 +1951,40 @@ function onCatalogDragLeave(event: DragEvent): void {
   catalogDragOver.value = false;
 }
 
-/** 侧栏素材松手：解析版本并上报插入时间 */
+/** 读出某种拖放载荷。没有这种 MIME 时返回 null */
+function readCatalogDrag<T>(event: DragEvent, mime: string): T | null {
+  const raw = event.dataTransfer?.getData(mime);
+  if (!raw) return null;
+  return JSON.parse(raw) as T;
+}
+
+/** 侧栏素材松手：按种类上报，起点都是松手时间 */
 function onCatalogDrop(event: DragEvent): void {
   catalogDragOver.value = false;
-  if (props.readonly) return;
-  const raw = event.dataTransfer?.getData(COMPOSE_SEGMENT_CLIP_DRAG_MIME);
-  if (!raw) return;
+  if (props.readonly || !isCatalogDrag(event)) return;
   event.preventDefault();
   event.stopPropagation();
+  const startTime = resolveDropTimeSec(event);
   try {
-    const variant = JSON.parse(raw) as ComposeSegmentClipVariant;
-    const startTime = resolveDropTimeSec(event);
-    emit("drop-catalog-clip", { variant, startTime });
+    const variant = readCatalogDrag<ComposeSegmentClipVariant>(event, COMPOSE_SEGMENT_CLIP_DRAG_MIME);
+    if (variant) {
+      emit("drop-catalog-clip", { variant, startTime });
+      return;
+    }
+    const audio = readCatalogDrag<BgmItem>(event, COMPOSE_AUDIO_ASSET_DRAG_MIME);
+    if (audio) {
+      emit("drop-audio-asset", { item: audio, startTime });
+      return;
+    }
+    const subtitle = readCatalogDrag<ComposeSubtitleAsset>(event, COMPOSE_SUBTITLE_ASSET_DRAG_MIME);
+    if (subtitle) {
+      emit("drop-subtitle-asset", { item: subtitle, startTime });
+      return;
+    }
+    const text = readCatalogDrag<ComposeTextTemplateDrag>(event, COMPOSE_TEXT_TEMPLATE_DRAG_MIME);
+    if (text) {
+      emit("drop-text-template", { item: text, startTime });
+    }
   } catch {
     ElMessage.warning("无法识别该素材，请检查格式后重新拖入");
   }

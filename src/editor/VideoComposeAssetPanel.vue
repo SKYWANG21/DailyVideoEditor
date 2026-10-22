@@ -36,7 +36,6 @@
             :preview-clip-id="previewClipId"
             :readonly="readonly"
             @preview="emit('preview-clip', $event)"
-            @add-to-timeline="emit('add-clip-to-timeline', $event)"
             @remove="emit('remove-catalog-clip', $event)"
           />
         </template>
@@ -49,6 +48,16 @@
             </button>
           </div>
           <p v-if="audioClipCount > 0" class="mt-3 text-[12px] text-[var(--compose-fg-3)]">已添加 {{ audioClipCount }} 段音频到时间轴</p>
+          <div v-if="audioAssets.length" class="mt-3 grid gap-2" :style="cardGridStyle">
+            <VideoComposeAssetCard
+              v-for="(item, index) in audioAssets"
+              :key="`${item.url}-${index}`"
+              :label="item.name || '音频'"
+              :readonly="readonly"
+              @drag-start="onAudioDragStart($event, item)"
+            />
+          </div>
+          <p v-else class="mt-3 text-center text-[12px] text-[var(--compose-fg-3)]">暂无音频</p>
         </template>
 
         <template v-else-if="catId === 'subtitle'">
@@ -62,11 +71,32 @@
               添加字幕
             </button>
           </div>
+          <div v-if="subtitleAssets.length" class="mt-3 grid gap-2" :style="cardGridStyle">
+            <VideoComposeAssetCard
+              v-for="item in subtitleAssets"
+              :key="item.id"
+              :label="item.text || '字幕'"
+              :readonly="readonly"
+              @drag-start="onSubtitleDragStart($event, item)"
+            />
+          </div>
+          <p v-else class="mt-3 text-center text-[12px] text-[var(--compose-fg-3)]">暂无字幕</p>
         </template>
 
-        <VideoComposeTextTemplateCatalog v-else-if="catId === 'fancy'" :readonly="readonly" @add-to-timeline="emit('add-text-template', $event)" />
+        <VideoComposeTextTemplateCatalog v-else-if="catId === 'fancy'" :items="textTemplates" :readonly="readonly" />
 
-        <p v-else class="px-3 py-6 text-center text-[12px] leading-relaxed text-[var(--compose-fg-3)]">暂无音效</p>
+        <template v-else>
+          <div v-if="sfxAssets.length" class="grid gap-2" :style="cardGridStyle">
+            <VideoComposeAssetCard
+              v-for="(item, index) in sfxAssets"
+              :key="`${item.url}-${index}`"
+              :label="item.name || '音效'"
+              :readonly="readonly"
+              @drag-start="onAudioDragStart($event, item)"
+            />
+          </div>
+          <p v-else class="px-3 py-6 text-center text-[12px] leading-relaxed text-[var(--compose-fg-3)]">暂无音效</p>
+        </template>
       </div>
     </div>
   </aside>
@@ -75,7 +105,15 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { ChevronLeft, ChevronRight, Plus, Sparkles, UploadCloud } from "@lucide/vue";
-import type { ComposeSegmentClipGroup, ComposeSegmentClipVariant } from "@/types/videoCompose";
+import {
+  COMPOSE_AUDIO_ASSET_DRAG_MIME,
+  COMPOSE_SUBTITLE_ASSET_DRAG_MIME,
+  type BgmItem,
+  type ComposeSegmentClipGroup,
+  type ComposeSegmentClipVariant,
+  type ComposeSubtitleAsset,
+} from "@/types/videoCompose";
+import VideoComposeAssetCard from "./VideoComposeAssetCard.vue";
 import VideoComposeClipCatalog from "./VideoComposeClipCatalog.vue";
 import VideoComposeTextTemplateCatalog from "./VideoComposeTextTemplateCatalog.vue";
 import VideoComposeUnderlineTabs from "./VideoComposeUnderlineTabs.vue";
@@ -97,19 +135,27 @@ const CARD_SIZE_PX = 72;
 /** 左栏拖到这个宽度时，页签收成当前分类 */
 const NARROW_PANE_PX = 132;
 
-defineProps<{
+const props = defineProps<{
   /** 各片段历史版本 */
   segmentCatalog?: ComposeSegmentClipGroup[];
   /** 已在时间轴上的视频地址 */
   timelineClipUrls?: Set<string>;
   /** 正在预览的版本 id */
   previewClipId?: string;
-  /** 只读：隐藏上传和添加到时间轴 */
+  /** 只读：隐藏上传，卡片不可拖 */
   readonly?: boolean;
   /** 字幕识别中 */
   isTranscribing?: boolean;
   /** 时间轴上的音频段数 */
   audioClipCount: number;
+  /** 音频素材。拖入后进音频轨 */
+  audioAssets?: BgmItem[];
+  /** 音效素材。拖入后同样进音频轨 */
+  sfxAssets?: BgmItem[];
+  /** 字幕素材 */
+  subtitleAssets?: ComposeSubtitleAsset[];
+  /** 花字模板 */
+  textTemplates?: TextTemplateItem[];
 }>();
 
 const emit = defineEmits<{
@@ -118,10 +164,30 @@ const emit = defineEmits<{
   "regenerate-subtitles": [];
   "add-subtitle": [];
   "preview-clip": [variant: ComposeSegmentClipVariant];
-  "add-clip-to-timeline": [variant: ComposeSegmentClipVariant];
   "remove-catalog-clip": [variant: ComposeSegmentClipVariant];
-  "add-text-template": [item: TextTemplateItem];
 }>();
+
+const audioAssets = computed(() => props.audioAssets ?? []);
+const sfxAssets = computed(() => props.sfxAssets ?? []);
+const subtitleAssets = computed(() => props.subtitleAssets ?? []);
+const textTemplates = computed(() => props.textTemplates ?? []);
+
+/** 把素材写进拖放数据。只读时不写 */
+function writeAssetDrag(event: DragEvent, mime: string, payload: BgmItem | ComposeSubtitleAsset): void {
+  if (props.readonly || !event.dataTransfer) return;
+  event.dataTransfer.setData(mime, JSON.stringify(payload));
+  event.dataTransfer.effectAllowed = "copy";
+}
+
+/** 音频或音效开始拖入时间轴 */
+function onAudioDragStart(event: DragEvent, item: BgmItem): void {
+  writeAssetDrag(event, COMPOSE_AUDIO_ASSET_DRAG_MIME, item);
+}
+
+/** 字幕素材开始拖入时间轴 */
+function onSubtitleDragStart(event: DragEvent, item: ComposeSubtitleAsset): void {
+  writeAssetDrag(event, COMPOSE_SUBTITLE_ASSET_DRAG_MIME, item);
+}
 
 /** 面板根节点，用来量当前栏宽 */
 const panelRef = ref<HTMLElement | null>(null);
@@ -184,7 +250,9 @@ onBeforeUnmount(() => {
   place-items: center;
   border-radius: 8px;
   color: var(--compose-fg-3);
-  transition: background-color 200ms cubic-bezier(0.25, 0.8, 0.25, 1), color 150ms cubic-bezier(0.25, 0.8, 0.25, 1);
+  transition:
+    background-color 200ms cubic-bezier(0.25, 0.8, 0.25, 1),
+    color 150ms cubic-bezier(0.25, 0.8, 0.25, 1);
 }
 
 .compose-assets__arrow:hover {

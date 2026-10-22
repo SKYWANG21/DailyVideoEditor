@@ -6,11 +6,7 @@
           {{ group.segmentTitle }}
         </p>
         <div class="grid gap-2" style="grid-template-columns: repeat(auto-fill, 72px)">
-          <div
-            v-for="variant in group.variants"
-            :key="variant.id"
-            class="flex flex-col gap-1 min-w-0"
-          >
+          <div v-for="variant in group.variants" :key="variant.id" class="flex flex-col gap-1 min-w-0">
             <div
               :class="[
                 'group relative h-[72px] w-[72px] overflow-hidden rounded-[12px] bg-[var(--compose-surface-2)] transition-opacity duration-150',
@@ -56,15 +52,9 @@
                 <X :size="12" />
               </button>
 
-              <div class="pointer-events-none absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/75 to-transparent px-2 pt-5 pb-1.5">
-                <button
-                  v-if="!isOnTimeline(variant) && !readonly && variant.url"
-                  type="button"
-                  class="pointer-events-auto mb-1 h-6 w-full rounded-[4px] bg-white text-[10px] font-semibold text-[#0E0E11]"
-                  @click.stop="emit('add-to-timeline', variant)"
-                >
-                  添加到时间轴
-                </button>
+              <div
+                class="pointer-events-none absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/75 to-transparent px-2 pt-4 pb-1.5"
+              >
                 <span class="block truncate text-[12px] font-medium text-white">{{ variant.label || "版本" }}</span>
               </div>
               <span
@@ -83,27 +73,22 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { Film, X } from "@lucide/vue";
-import {
-  COMPOSE_SEGMENT_CLIP_DRAG_MIME,
-  type ComposeSegmentClipGroup,
-  type ComposeSegmentClipVariant,
-} from "@/types/videoCompose";
+import { COMPOSE_SEGMENT_CLIP_DRAG_MIME, type ComposeSegmentClipGroup, type ComposeSegmentClipVariant } from "@/types/videoCompose";
 import { COMPOSE_UPLOAD_CATALOG_SEGMENT_INDEX } from "@/hooks/useComposeUploadCatalog";
 
 const props = defineProps<{
-    /** 按片段分组的历史版本 */
-    groups: ComposeSegmentClipGroup[];
-    /** 已在时间轴上的视频 URL 集合 */
-    timelineClipUrls?: Set<string>;
-    /** 当前主播放器预览中的版本 id */
-    previewClipId?: string;
-    /** 只读：禁止添加到时间轴 */
-    readonly?: boolean;
-  }>();
+  /** 按片段分组的历史版本 */
+  groups: ComposeSegmentClipGroup[];
+  /** 已在时间轴上的视频 URL 集合 */
+  timelineClipUrls?: Set<string>;
+  /** 当前主播放器预览中的版本 id */
+  previewClipId?: string;
+  /** 只读：禁止拖入时间轴 */
+  readonly?: boolean;
+}>();
 
 const emit = defineEmits<{
   preview: [variant: ComposeSegmentClipVariant];
-  "add-to-timeline": [variant: ComposeSegmentClipVariant];
   /** 从侧栏素材列表移除（不删后端 Step3 / 素材库数据） */
   remove: [variant: ComposeSegmentClipVariant];
 }>();
