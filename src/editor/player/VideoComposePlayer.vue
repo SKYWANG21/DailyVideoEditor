@@ -6,48 +6,127 @@
     <audio ref="bgmAudioRef" preload="auto" crossorigin="anonymous" class="hidden" />
 
     <div ref="playerContainerRef" class="relative mx-4 mt-4 min-h-0 min-w-0 flex-1 overflow-hidden rounded-[4px] bg-[var(--compose-stage)]">
-      <!-- 美颜关闭时双 video 出画；打开时只出声。canvas 交给 GPUPixel，不要 getContext -->
-      <video
-        ref="videoARef"
-        preload="auto"
-        playsinline
-        class="pointer-events-none absolute inset-0 z-0 h-full w-full object-contain"
-        :class="directVideoLayerClass(0)"
-        @loadedmetadata="onDirectVideoMetadata"
-      />
-      <video
-        ref="videoBRef"
-        preload="auto"
-        playsinline
-        class="pointer-events-none absolute inset-0 z-0 h-full w-full object-contain"
-        :class="directVideoLayerClass(1)"
-        @loadedmetadata="onDirectVideoMetadata"
-      />
-      <canvas
-        :id="GPU_PIXEL_CANVAS_ID"
-        ref="previewCanvasRef"
-        class="pointer-events-none absolute inset-0 z-0 h-full w-full object-contain"
-        :class="showPreviewFrame ? 'opacity-100' : 'opacity-0'"
-      />
-      <template v-if="effectiveClips.length">
+      <div
+        v-if="effectiveClips.length && stageFit.width"
+        ref="canvasHostRef"
+        class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-[4px] bg-black"
+        :style="stageStyle"
+      >
+        <!-- 美颜关闭时双 video 出画；打开时只出声。canvas 交给 GPUPixel，不要 getContext -->
+        <div
+          class="absolute"
+          :class="catalogPreviewActive ? 'inset-0 overflow-hidden' : undefined"
+          :style="catalogPreviewActive ? undefined : videoBoxStyle"
+        >
+          <video
+            ref="videoARef"
+            preload="auto"
+            playsinline
+            class="pointer-events-none absolute inset-0 h-full w-full"
+            :class="[directVideoLayerClass(0), catalogPreviewActive ? 'object-contain' : 'object-cover']"
+            @loadedmetadata="onDirectVideoMetadata"
+          />
+          <video
+            ref="videoBRef"
+            preload="auto"
+            playsinline
+            class="pointer-events-none absolute inset-0 h-full w-full"
+            :class="[directVideoLayerClass(1), catalogPreviewActive ? 'object-contain' : 'object-cover']"
+            @loadedmetadata="onDirectVideoMetadata"
+          />
+          <canvas
+            :id="GPU_PIXEL_CANVAS_ID"
+            ref="previewCanvasRef"
+            class="pointer-events-none absolute inset-0 h-full w-full"
+            :class="[showPreviewFrame ? 'opacity-100' : 'opacity-0', catalogPreviewActive ? 'object-contain' : 'object-cover']"
+          />
+        </div>
+
         <VideoComposeTextStickerOverlay
-          v-if="!catalogPreviewActive && overlayVideoWidth > 0"
+          v-if="!catalogPreviewActive && (canvasWidth || 0) > 0"
           :class="isAdjusting ? '[&_*]:!pointer-events-none' : undefined"
           :clips="textClips"
           :current-time="globalTime"
           :selected-id="selectedTextClipId"
-          :video-width="overlayVideoWidth"
-          :video-height="overlayVideoHeight"
+          :video-width="canvasWidth || 0"
+          :video-height="canvasHeight || 0"
           @update:rect="emit('update:text-clip-rect', $event)"
           @select="emit('select-text-clip', $event)"
         />
-      </template>
-      <template v-else>
-        <div class="absolute inset-0 z-0 flex flex-col items-center justify-center text-[var(--compose-fg-3)]">
-          <Video :size="48" class="mb-2" />
-          <span class="text-sm">尚未生成视频内容</span>
+
+        <!-- 字幕钉在画幅上，不放进视频变换盒子 -->
+        <div
+          v-if="!isAdjusting"
+          class="pointer-events-none absolute inset-x-0 overflow-hidden"
+          :class="editingSubtitleId ? 'z-[20]' : 'z-[5]'"
+          :style="overlayStyle"
+        >
+          <div
+            v-if="showSubtitles && previewSubtitles.length"
+            class="flex flex-col items-center justify-end text-center"
+            :style="subtitleTextStyle"
+          >
+            <template v-for="sub in previewSubtitles" :key="sub.id">
+              <div
+                v-if="editingSubtitleId === sub.id"
+                :ref="(el) => setEditingEl(el)"
+                class="w-full whitespace-pre-wrap outline-none"
+                :class="readonly ? undefined : 'pointer-events-auto cursor-text'"
+                contenteditable="true"
+                @mousedown.stop
+                @input="onSubtitleEditInput"
+                @keydown.enter="onSubtitleEditEnter($event, sub.id)"
+                @keydown.esc.prevent="cancelSubtitleEdit"
+                @blur="commitSubtitleEdit(sub.id)"
+              />
+              <div
+                v-else
+                class="w-full whitespace-pre-wrap outline-none"
+                :class="readonly ? undefined : 'pointer-events-auto cursor-text'"
+                @dblclick.stop="onSubtitleDblClick(sub)"
+              >
+                {{ sub.text }}
+              </div>
+            </template>
+          </div>
         </div>
-      </template>
+        <template v-else>
+          <div class="pointer-events-none absolute z-[5]" :style="centerLineStyle" />
+          <div
+            class="absolute z-[5] flex cursor-move flex-col items-center justify-end select-none"
+            :style="draftBoxStyle"
+            @mousedown="startBoxDrag($event, 'move')"
+          >
+            <div class="pointer-events-none w-full overflow-hidden text-center" :style="subtitleTextStyle">
+              <div v-for="sub in adjustPreviewSubtitles" :key="sub.id">{{ sub.text }}</div>
+            </div>
+            <div class="absolute top-0 bottom-0 -left-1 w-2 cursor-ew-resize" @mousedown="startBoxDrag($event, 'left')" />
+            <div class="absolute top-0 -right-1 bottom-0 w-2 cursor-ew-resize" @mousedown="startBoxDrag($event, 'right')" />
+            <div class="absolute right-0 left-0 -top-1 h-2 cursor-ns-resize" @mousedown="startBoxDrag($event, 'top')" />
+            <div class="absolute right-0 -bottom-1 left-0 h-2 cursor-ns-resize" @mousedown="startBoxDrag($event, 'bottom')" />
+          </div>
+        </template>
+      </div>
+
+      <VideoComposeFrameBox
+        v-if="effectiveClips.length && stageFit.width && !catalogPreviewActive && !readonly && videoFrame"
+        :frame="videoFrame"
+        :canvas-width="canvasWidth || 0"
+        :canvas-height="canvasHeight || 0"
+        :stage-scale="stageScale"
+        :offset-x="stageOffset.x"
+        :offset-y="stageOffset.y"
+        :stage-width="stageFit.width"
+        :stage-height="stageFit.height"
+        :active="showVideoFrameBox"
+        @select="visibleClipId && emit('select-video-clip', visibleClipId)"
+        @update:frame="emit('update:video-frame', $event)"
+      />
+
+      <div v-if="!effectiveClips.length" class="absolute inset-0 z-0 flex flex-col items-center justify-center text-[var(--compose-fg-3)]">
+        <Video :size="48" class="mb-2" />
+        <span class="text-sm">尚未生成视频内容</span>
+      </div>
       <p
         v-if="previewError && effectiveClips.length"
         class="pointer-events-none absolute inset-x-0 top-2 z-30 truncate px-3 text-center text-[11px] text-white/70"
@@ -68,60 +147,6 @@
           返回时间轴
         </button>
       </div>
-
-      <!-- 字幕低于贴图 z-[15]；编辑中抬到 z-[20] 以免贴图挡住 contenteditable -->
-      <div
-        v-if="!isAdjusting"
-        class="pointer-events-none absolute inset-x-0 overflow-hidden"
-        :class="editingSubtitleId ? 'z-[20]' : 'z-[5]'"
-        :style="overlayStyle"
-      >
-        <div
-          v-if="showSubtitles && previewSubtitles.length"
-          class="flex flex-col items-center justify-end text-center"
-          :style="subtitleTextStyle"
-        >
-          <template v-for="sub in previewSubtitles" :key="sub.id">
-            <div
-              v-if="editingSubtitleId === sub.id"
-              :ref="(el) => setEditingEl(el)"
-              class="w-full whitespace-pre-wrap outline-none"
-              :class="readonly ? undefined : 'pointer-events-auto cursor-text'"
-              contenteditable="true"
-              @mousedown.stop
-              @input="onSubtitleEditInput"
-              @keydown.enter="onSubtitleEditEnter($event, sub.id)"
-              @keydown.esc.prevent="cancelSubtitleEdit"
-              @blur="commitSubtitleEdit(sub.id)"
-            />
-            <div
-              v-else
-              class="w-full whitespace-pre-wrap outline-none"
-              :class="readonly ? undefined : 'pointer-events-auto cursor-text'"
-              @dblclick.stop="onSubtitleDblClick(sub)"
-            >
-              {{ sub.text }}
-            </div>
-          </template>
-        </div>
-      </div>
-
-      <template v-else>
-        <div class="pointer-events-none absolute z-[5]" :style="centerLineStyle" />
-        <div
-          class="absolute z-[5] flex cursor-move select-none flex-col items-center justify-end"
-          :style="draftBoxStyle"
-          @mousedown="startBoxDrag($event, 'move')"
-        >
-          <div class="pointer-events-none w-full overflow-hidden text-center" :style="subtitleTextStyle">
-            <div v-for="sub in adjustPreviewSubtitles" :key="sub.id">{{ sub.text }}</div>
-          </div>
-          <div class="-ml-1 absolute bottom-0 left-0 top-0 w-2 cursor-ew-resize" @mousedown="startBoxDrag($event, 'left')" />
-          <div class="-mr-1 absolute bottom-0 right-0 top-0 w-2 cursor-ew-resize" @mousedown="startBoxDrag($event, 'right')" />
-          <div class="-mt-1 absolute left-0 right-0 top-0 h-2 cursor-ns-resize" @mousedown="startBoxDrag($event, 'top')" />
-          <div class="-mb-1 absolute bottom-0 left-0 right-0 h-2 cursor-ns-resize" @mousedown="startBoxDrag($event, 'bottom')" />
-        </div>
-      </template>
     </div>
 
     <div v-if="!catalogPreviewActive" class="grid h-14 shrink-0 grid-cols-[1fr_auto_1fr] items-center px-4">
@@ -164,7 +189,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, toRef, onBeforeUnmount } from "vue";
+import { ref, computed, watch, nextTick, toRef, onBeforeUnmount, onMounted } from "vue";
 import { Pause, Play, SkipBack, SkipForward, Video, Volume2, VolumeX } from "@lucide/vue";
 import type {
   ComposeConfig,
@@ -173,6 +198,7 @@ import type {
   SubtitleItem,
   SubtitleStyleConfig,
   VideoClipItem,
+  VideoFrameTransform,
 } from "@/types/videoCompose";
 import { readBeautyParams } from "@/types/composeMedia";
 import type { PreviewVideoSize } from "@/types/beautyPreview";
@@ -181,6 +207,8 @@ import { useComposePreviewFrame } from "@/hooks/useComposePreviewFrame";
 import { useVideoComposeSubtitleAdjust } from "@/hooks/useVideoComposeSubtitleAdjust";
 import { GPU_PIXEL_CANVAS_ID } from "@/service/beauty/gpuPixelPreview";
 import VideoComposeTextStickerOverlay from "./VideoComposeTextStickerOverlay.vue";
+import VideoComposeFrameBox from "./VideoComposeFrameBox.vue";
+import { containFrameStage, frameBoxStyle } from "../shared/videoFrame";
 import type { RectConfig } from "@/clip-track";
 
 const props = defineProps<{
@@ -210,8 +238,18 @@ const props = defineProps<{
   textClips?: ComposeTextOverlayClip[];
   /** 当前选中的贴图 clip id */
   selectedTextClipId?: string | null;
-  /** 只读模式：禁止预览区双击改字幕 */
+  /** 只读模式：禁止预览区双击改字幕，也不出调整框 */
   readonly?: boolean;
+  /** 画布宽。字幕和贴图按这个像素定位 */
+  canvasWidth?: number;
+  /** 画布高 */
+  canvasHeight?: number;
+  /** 当前画面上的视频变换 */
+  videoFrame?: VideoFrameTransform | null;
+  /** 当前画面片段已选中 */
+  showVideoFrameBox?: boolean;
+  /** 当前画面上的视频 clip id */
+  visibleClipId?: string;
 }>();
 
 const emit = defineEmits<{
@@ -237,6 +275,12 @@ const emit = defineEmits<{
   "select-subtitle-clip": [clipId: string];
   /** 预览区字幕就地编辑提交（空文案由 Editor 拒绝并提示） */
   "update:subtitle-text": [payload: { clipId: string; text: string }];
+  /** 点视频画面，选中当前片段 */
+  "select-video-clip": [clipId: string];
+  /** 拖拽或缩放后的画面变换 */
+  "update:video-frame": [frame: VideoFrameTransform];
+  /** 活动视频的原始像素 */
+  "update:source-size": [payload: { clipId: string; width: number; height: number }];
 }>();
 
 /** 实际喂给预览引擎的 clip 列表 */
@@ -249,6 +293,42 @@ const videoARef = ref<HTMLVideoElement | null>(null);
 const videoBRef = ref<HTMLVideoElement | null>(null);
 const previewCanvasRef = ref<HTMLCanvasElement | null>(null);
 const playerContainerRef = ref<HTMLElement | null>(null);
+/** 画幅画布。字幕和贴图相对它的边缘定位 */
+const canvasHostRef = ref<HTMLElement | null>(null);
+/** 预览区内容盒，用来把画布等比放进去 */
+const stageBox = ref({ width: 0, height: 0 });
+let stageObserver: ResizeObserver | null = null;
+
+const stageFit = computed(() =>
+  containFrameStage(stageBox.value.width, stageBox.value.height, props.canvasWidth || 0, props.canvasHeight || 0),
+);
+
+const stageScale = computed(() => stageFit.value.scale);
+
+const stageStyle = computed(() => ({
+  width: `${stageFit.value.width}px`,
+  height: `${stageFit.value.height}px`,
+}));
+
+/** 黑色画布在预览区里的左上角。调整框按它偏移，才能画出画幅外 */
+const stageOffset = computed(() => ({
+  x: (stageBox.value.width - stageFit.value.width) / 2,
+  y: (stageBox.value.height - stageFit.value.height) / 2,
+}));
+
+const videoBoxStyle = computed(() => {
+  const frame = props.videoFrame;
+  if (!frame || stageScale.value <= 0) return undefined;
+  return frameBoxStyle(frame, props.canvasWidth || 0, props.canvasHeight || 0, stageScale.value);
+});
+
+/** 字幕和贴图用画布像素，不用视频元素的包围盒 */
+const canvasSizeRef = computed<PreviewVideoSize | null>(() => {
+  const width = props.canvasWidth || 0;
+  const height = props.canvasHeight || 0;
+  if (width <= 0 || height <= 0) return null;
+  return { width, height };
+});
 /** 模板 legacy BGM 元素；timeline 多轨由 preview mixer 池播放 */
 const bgmAudioRef = ref<HTMLAudioElement | null>(null);
 
@@ -331,11 +411,15 @@ function readDirectVideoSize(el: HTMLMediaElement | null): PreviewVideoSize | nu
   return { width: el.videoWidth, height: el.videoHeight };
 }
 
-/** 活动层元数据就绪后记下贴图像素尺寸 */
+/** 活动层元数据就绪后记下原始像素，并交给画幅适配 */
 function onDirectVideoMetadata(event: Event): void {
   const target = event.currentTarget;
   if (!(target instanceof HTMLVideoElement) || target !== activeVideoEl.value) return;
   directVideoSize.value = readDirectVideoSize(target);
+  const clipId = effectiveClips.value[playingIdx.value]?.id;
+  const size = directVideoSize.value;
+  if (!clipId || !size) return;
+  emit("update:source-size", { clipId, width: size.width, height: size.height });
 }
 
 /** 切到另一层时，用该 video 上已经加载好的像素尺寸 */
@@ -350,25 +434,22 @@ function directVideoLayerClass(slot: 0 | 1): string {
   return visible ? "opacity-100" : "opacity-0";
 }
 
-/** 贴图像素尺寸：美颜用 Worker 回传，否则用活动 video */
+/** 贴图像素尺寸：美颜用 Worker 回传，否则用活动 video。画布定位不使用它 */
 const overlayVideoSize = computed<PreviewVideoSize | null>(() => (beautyPreviewOn.value ? videoSize.value : directVideoSize.value));
 
-/** 贴图 overlay 使用的视频原始尺寸 */
-const overlayVideoWidth = computed(() => overlayVideoSize.value?.width || 0);
-const overlayVideoHeight = computed(() => overlayVideoSize.value?.height || 0);
-
-/** 传给 overlay 的贴图列表 */
-const textClips = computed<ComposeTextOverlayClip[]>(() => props.textClips || []);
-
-/** 当前选中贴图 id */
-const selectedTextClipId = computed(() => props.selectedTextClipId ?? null);
-
-/** 添加贴图时用的视频像素尺寸。美颜关闭时取活动 video，打开时取 Worker */
+/** 添加贴图时用画布像素，使默认框钉在画幅上 */
 function getVideoSize(): { width: number; height: number } | null {
+  const width = props.canvasWidth || 0;
+  const height = props.canvasHeight || 0;
+  if (width > 0 && height > 0) return { width, height };
   const size = overlayVideoSize.value;
   if (!size || size.width <= 0 || size.height <= 0) return null;
   return { width: size.width, height: size.height };
 }
+const textClips = computed<ComposeTextOverlayClip[]>(() => props.textClips || []);
+
+/** 当前选中贴图 id */
+const selectedTextClipId = computed(() => props.selectedTextClipId ?? null);
 
 const {
   isAdjusting,
@@ -380,8 +461,8 @@ const {
   centerLineStyle,
   subtitleTextStyle,
 } = useVideoComposeSubtitleAdjust({
-  videoSize: overlayVideoSize,
-  containerEl: playerContainerRef,
+  videoSize: canvasSizeRef,
+  containerEl: canvasHostRef,
   style: props.subtitleStyle,
   onEnter: pause,
 });
@@ -536,7 +617,22 @@ watch(
   },
 );
 
+onMounted(() => {
+  const el = playerContainerRef.value;
+  if (!el) return;
+  const measure = () => {
+    const host = playerContainerRef.value;
+    if (!host) return;
+    stageBox.value = { width: host.clientWidth, height: host.clientHeight };
+  };
+  stageObserver = new ResizeObserver(measure);
+  stageObserver.observe(el);
+  measure();
+});
+
 onBeforeUnmount(() => {
+  stageObserver?.disconnect();
+  stageObserver = null;
   if (editingSubtitleId.value) {
     commitSubtitleEdit(editingSubtitleId.value);
   }

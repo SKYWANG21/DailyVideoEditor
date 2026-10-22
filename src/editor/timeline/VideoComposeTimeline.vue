@@ -149,6 +149,7 @@ import type {
   ComposeMediaClipConfig,
   ComposeSubtitleAsset,
   ComposeTextTemplateDrag,
+  ComposeFrameAspect,
 } from "@/types/videoCompose";
 import {
   DEFAULT_COMPOSE_TIMELINE_FPS,
@@ -165,6 +166,7 @@ import {
   createDefaultTextClipRect,
   normalizeComposeTimelineScale,
 } from "@/types/videoCompose";
+import { normalizeFrameAspect } from "../shared/videoFrame";
 import type { MediaClip, SubtitleClip, TextClip, Clip, ClipTypeConfig } from "@/clip-track";
 
 /** 可批量改属性的 clip 类型 */
@@ -211,8 +213,12 @@ interface VideoTrackExpose {
   reset: () => void;
 }
 
-/** 库 Track 上挂的整轨静音（updateTrack Object.assign 保留） */
-type TrackWithMute = Track & { muted?: boolean };
+type TrackWithMute = Track & {
+  muted?: boolean;
+  frameAspect?: ComposeFrameAspect;
+  nativeFrameWidth?: number;
+  nativeFrameHeight?: number;
+};
 
 const props = withDefaults(
   defineProps<{
@@ -695,6 +701,9 @@ function mapLibTrackToCompose(track: Track): ComposeTrack | null {
     muted: Boolean((track as TrackWithMute).muted),
     clips,
     order: track.order ?? 0,
+    frameAspect: readTrackFrameAspect(track),
+    nativeFrameWidth: readPositiveFrameSize(track, "nativeFrameWidth"),
+    nativeFrameHeight: readPositiveFrameSize(track, "nativeFrameHeight"),
   };
 }
 
@@ -2205,6 +2214,9 @@ function importTracks(tracks: ComposeTrack[]): void {
         muted: t.muted === true,
         order: t.order ?? order,
         clips: t.clips as Track["clips"],
+        frameAspect: t.frameAspect,
+        nativeFrameWidth: t.nativeFrameWidth,
+        nativeFrameHeight: t.nativeFrameHeight,
       };
       return row;
     });
@@ -2440,6 +2452,30 @@ watch(
   },
 );
 
+/** 视频轨画幅。非视频轨或未写过时不带上，读取方按原画处理 */
+function readTrackFrameAspect(track: Track): ComposeFrameAspect | undefined {
+  if (track.type !== "video") return undefined;
+  const raw = (track as TrackWithMute).frameAspect;
+  if (raw == null) return undefined;
+  return normalizeFrameAspect(raw);
+}
+
+/** 原画像素。非正数视为还没探到 */
+function readPositiveFrameSize(track: Track, key: "nativeFrameWidth" | "nativeFrameHeight"): number | undefined {
+  const value = (track as TrackWithMute)[key];
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return undefined;
+  return value;
+}
+
+/** 写入主视频轨画幅或原画像素。updateTrack 会保留这些额外字段 */
+function setMainTrackFrame(patch: { frameAspect?: ComposeFrameAspect; nativeFrameWidth?: number; nativeFrameHeight?: number }): void {
+  const api = videoTrackRef.value;
+  if (!api) return;
+  const main = ensureMainTrack();
+  api.updateTrack(main.id, patch as Partial<Track>);
+  onDataChanged();
+}
+
 defineExpose({
   getMainTrack: () => videoTrackRef.value?.getMainTrack(),
   addClipToMain,
@@ -2480,6 +2516,7 @@ defineExpose({
   patchClipsByType,
   getSelectedClipIds,
   getSelectedClips,
+  setMainTrackFrame,
 });
 </script>
 

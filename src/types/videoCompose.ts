@@ -84,12 +84,40 @@ export interface DetachAudioConfig {
   extractError?: string;
 }
 
+/** 一条视频轨共用的画幅。native 为原画，取该轨第一个视频 clip 的像素比 */
+export type ComposeFrameAspect = "native" | "16:9" | "9:16" | "4:3" | "3:4";
+
+/**
+ * 视频画面在画布中的变换。
+ * x/y 相对画布中心，w/h 为缩放前尺寸，scale 为百分比，rotate 为角度。
+ */
+export interface VideoFrameTransform {
+  /** 相对画布中心的水平偏移（画布像素） */
+  x: number;
+  /** 相对画布中心的垂直偏移（画布像素） */
+  y: number;
+  /** 缩放前宽度（画布像素） */
+  w: number;
+  /** 缩放前高度（画布像素） */
+  h: number;
+  /** 缩放百分比。100 为原始 w/h */
+  scale: number;
+  /** 旋转角度（度） */
+  rotate: number;
+}
+
 /** 视频/音频 clip 的 config 业务扩展 */
 export type ComposeMediaClipConfig = DetachAudioConfig & {
   /** Step3 视频生成任务 ID */
   taskId?: string;
   /** 预览美颜。只对视频 clip 有意义 */
   beauty?: BeautyParams;
+  /** 视频画面变换。没有则按当前画布等比适配，不写入 */
+  frame?: VideoFrameTransform;
+  /** 该片段视频原始宽度，供原画适配 */
+  sourceWidth?: number;
+  /** 该片段视频原始高度，供原画适配 */
+  sourceHeight?: number;
 };
 
 /** 安全读取 clip.config */
@@ -275,6 +303,12 @@ export interface ComposeTrack {
   clips: ComposeClip[];
   /** 轨道排序 */
   order: number;
+  /** 视频轨画幅。缺省原画。一条视频轨只有一种 */
+  frameAspect?: ComposeFrameAspect;
+  /** 原画宽度。取该轨第一个视频 clip 的 videoWidth */
+  nativeFrameWidth?: number;
+  /** 原画高度。取该轨第一个视频 clip 的 videoHeight */
+  nativeFrameHeight?: number;
 }
 
 /** 从 tracks 收集贴图轨上的 TextClip，供播放器按时间预览 */

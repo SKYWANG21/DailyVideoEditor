@@ -136,8 +136,6 @@ export interface ComposeEditorState {
   selectedSubtitleText: ComputedRef<string>;
   /** 播放器贴图 overlay 数据 */
   textOverlayClips: ComputedRef<ComposeTextOverlayClip[]>;
-  /** 画面变换只展示当前预览尺寸，不参与写回 */
-  frameSize: ComputedRef<{ width: number; height: number }>;
   /** 字幕轨可见 clip → 预览用 SubtitleItem */
   visiblePreviewSubtitles: ComputedRef<SubtitleItem[]>;
   adjustPreviewSubtitles: ComputedRef<SubtitleItem[]>;
@@ -251,15 +249,6 @@ export function createComposeEditorState(props: ComposeEditorProps): ComposeEdit
     return [{ id: "placeholder", start: "00:00.000", end: "00:00.000", text: "字幕预览" }];
   });
 
-  const frameSize = computed(() => {
-    void videoReady.value;
-    const size = playerRef.value?.getVideoSize?.() ?? null;
-    return {
-      width: size?.width ?? 0,
-      height: size?.height ?? 0,
-    };
-  });
-
   return {
     playerRef,
     sidebarRef: ref(null),
@@ -315,7 +304,6 @@ export function createComposeEditorState(props: ComposeEditorProps): ComposeEdit
     selectedTextClipProps,
     selectedSubtitleText,
     textOverlayClips: computed(() => mapTracksToTextOverlayClips(tracks.value)),
-    frameSize,
     visiblePreviewSubtitles,
     adjustPreviewSubtitles,
   };

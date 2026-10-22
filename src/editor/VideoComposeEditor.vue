@@ -47,6 +47,11 @@
           :text-clips="textOverlayClips"
           :selected-text-clip-id="activeTextClipId"
           :readonly="readonly"
+          :canvas-width="canvasSize.width"
+          :canvas-height="canvasSize.height"
+          :video-frame="visibleVideoFrame"
+          :show-video-frame-box="showVideoFrameBox"
+          :visible-clip-id="visibleClipId"
           @update:playing-idx="playingIdx = $event"
           @toggle-playback="onPreviewTogglePlayback"
           @seek-playback="onPreviewSeek"
@@ -58,6 +63,9 @@
           @select-text-clip="onSelectTextClip"
           @select-subtitle-clip="onSelectSubtitleClip"
           @update:subtitle-text="onPreviewSubtitleTextUpdate"
+          @select-video-clip="onSelectVideoClip"
+          @update:video-frame="onVisibleFrameChange"
+          @update:source-size="onVideoSourceSize"
         />
 
         <div
@@ -85,8 +93,9 @@
           :is-adjusting="isAdjusting"
           :video-ready="videoReady"
           :inspector-kind="inspectorKind"
-          :frame-width="frameSize.width"
-          :frame-height="frameSize.height"
+          :frame-aspect="frameAspect"
+          :video-frame="inspectorVideoFrame"
+          :can-edit-video-frame="canEditVideoFrame"
           :selected-text-clip="selectedTextClipProps"
           :selected-subtitle-text="selectedSubtitleText"
           :selected-subtitle-id="activeSubtitleId"
@@ -102,6 +111,8 @@
           @font-popover-toggle="onFontPopoverToggle"
           @toggle-adjust-position="toggleAdjustSubPosition"
           @apply-global="onApplyGlobal"
+          @update:frame-aspect="onFrameAspectChange"
+          @update:video-frame="onInspectorFrameChange"
         />
       </div>
 
@@ -220,7 +231,6 @@ const {
   videoVolumeLabel,
   audioVolumeLabel,
   inspectorKind,
-  frameSize,
   selectedTextClipProps,
   selectedSubtitleText,
   activeSubtitleId,
@@ -289,6 +299,18 @@ const {
   onTimelineScaleUpdate,
   onTimelineDetachAudio,
   onRegenerateSubtitles,
+  frameAspect,
+  canvasSize,
+  visibleClipId,
+  visibleVideoFrame,
+  inspectorVideoFrame,
+  canEditVideoFrame,
+  showVideoFrameBox,
+  onSelectVideoClip,
+  onInspectorFrameChange,
+  onVisibleFrameChange,
+  onFrameAspectChange,
+  onVideoSourceSize,
 } = useComposeEditorSession(props, emit);
 </script>
 

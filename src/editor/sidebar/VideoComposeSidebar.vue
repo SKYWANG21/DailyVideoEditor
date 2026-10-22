@@ -8,7 +8,14 @@
         <VideoComposeUnderlineTabs :tabs="tabLabels" :model-value="tabIndex" @update:model-value="onTabChange" />
       </div>
       <div class="compose-scroll flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 pt-4 pb-4">
-        <VideoComposeTransformPanel v-if="showTransform" :width="frameWidth || 0" :height="frameHeight || 0" />
+        <VideoComposeTransformPanel
+          v-if="showTransform"
+          :aspect="frameAspect"
+          :frame="videoFrame"
+          :can-edit="canEditVideoFrame"
+          @update:aspect="emit('update:frame-aspect', $event)"
+          @update:frame="emit('update:video-frame', $event)"
+        />
 
         <template v-else-if="inspectorKind === 'video'">
           <div class="flex flex-col gap-2">
@@ -145,7 +152,7 @@
 import { computed, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
 import { ChevronDown, Eye, EyeOff, Move, SlidersHorizontal } from "@lucide/vue";
-import type { BeautyParams, SubtitleStyleConfig } from "@/types/videoCompose";
+import type { BeautyParams, ComposeFrameAspect, SubtitleStyleConfig, VideoFrameTransform } from "@/types/videoCompose";
 import VideoComposeBeautyControls from "./VideoComposeBeautyControls.vue";
 import VideoComposeTextTemplateProps from "./VideoComposeTextTemplateProps.vue";
 import VideoComposeTransformPanel from "./VideoComposeTransformPanel.vue";
@@ -203,10 +210,12 @@ const props = defineProps<{
   videoReady: boolean;
   /** 当前编辑对象；空则提示先选择轨道或片段 */
   inspectorKind?: ComposeInspectorKind | null;
-  /** 画面宽，只给画面变换展示 */
-  frameWidth?: number;
-  /** 画面高，只给画面变换展示 */
-  frameHeight?: number;
+  /** 主视频轨画幅 */
+  frameAspect: ComposeFrameAspect;
+  /** 画面变换正在编辑的片段变换 */
+  videoFrame: VideoFrameTransform;
+  /** 有视频片段时才允许改位置和尺寸 */
+  canEditVideoFrame?: boolean;
   /** 选中的贴图属性；有值时展示属性 */
   selectedTextClip?: SelectedTextClipProps | null;
   /** 当前选中字幕 clip 的文案；未选中为空 */
@@ -232,6 +241,8 @@ const emit = defineEmits<{
   "font-popover-toggle": [type: "family" | "style"];
   "toggle-adjust-position": [];
   "apply-global": [scope: ComposeApplyGlobalScope];
+  "update:frame-aspect": [value: ComposeFrameAspect];
+  "update:video-frame": [patch: Partial<VideoFrameTransform>];
 }>();
 
 /** 视频 clip 才有「画面变换」，记住上次页签 */

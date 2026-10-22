@@ -10,6 +10,7 @@ import { useComposeInspector } from "./useComposeInspector";
 import { useComposePlaybackBridge } from "./useComposePlaybackBridge";
 import { useComposeProject } from "./useComposeProject";
 import { useComposeShellLayout } from "./useComposeShellLayout";
+import { useComposeVideoFrame } from "./useComposeVideoFrame";
 
 /**
  * 视频剪辑会话。
@@ -35,6 +36,7 @@ export function useComposeEditorSession(props: ComposeEditorProps, emit: Compose
   const inspector = useComposeInspector(props, state, ports);
   const catalog = useComposeCatalog(props, state, ports);
   const project = useComposeProject(props, state, ports, emit);
+  const videoFrame = useComposeVideoFrame(props, state);
 
   onMounted(() => {
     void loadTextTemplateCatalog();
@@ -93,7 +95,6 @@ export function useComposeEditorSession(props: ComposeEditorProps, emit: Compose
     videoVolumeLabel: state.videoVolumeLabel,
     audioVolumeLabel: state.audioVolumeLabel,
     inspectorKind: state.inspectorKind,
-    frameSize: state.frameSize,
     selectedTextClipProps: state.selectedTextClipProps,
     selectedSubtitleText: state.selectedSubtitleText,
     activeSubtitleId: state.activeSubtitleId,
@@ -113,5 +114,6 @@ export function useComposeEditorSession(props: ComposeEditorProps, emit: Compose
     onTimelineScaleUpdate: project.onTimelineScaleUpdate,
     onTimelineDetachAudio: project.onTimelineDetachAudio,
     onRegenerateSubtitles: project.onRegenerateSubtitles,
+    ...videoFrame,
   };
 }
