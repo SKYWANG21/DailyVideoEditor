@@ -49,6 +49,7 @@
             </TrackArea>
           </div>
         </div>
+        <div v-if="seamLineStyle" class="tracks__seam-line" :style="seamLineStyle" />
       </div>
     </div>
   </div>
@@ -106,6 +107,26 @@ const firstControlCell = ref<HTMLElement | null>(null);
 
 // Computed
 const sortedTracks = computed(() => tracksStore.sortedTracks);
+
+/** 拖到轨道缝上时，横贯轨道区的高亮线 */
+const seamLineStyle = computed((): { top: string; left: string } | null => {
+  const preview = dragStore.previewPosition;
+  if (!dragStore.isDragging || !preview.needNewTrack || preview.insertIndex < 0) return null;
+  const table = tableRef.value;
+  if (!table) return null;
+  const rows = table.querySelectorAll<HTMLElement>(".tracks__track");
+  if (!rows.length) return null;
+  const index = preview.insertIndex;
+  const tableTop = table.getBoundingClientRect().top;
+  const edge =
+    index <= 0
+      ? rows[0].getBoundingClientRect().top
+      : index >= rows.length
+        ? rows[rows.length - 1].getBoundingClientRect().bottom
+        : rows[index].getBoundingClientRect().top;
+  const control = firstControlCell.value?.getBoundingClientRect().width ?? 0;
+  return { top: `${edge - tableTop}px`, left: `${control}px` };
+});
 
 // 控制栏宽度
 const trackControlWidth = ref(200);
@@ -314,9 +335,22 @@ provide("config", config);
 }
 
 .tracks__table {
+  position: relative;
   display: flex;
   flex-direction: column;
   width: 100%;
+}
+
+.tracks__seam-line {
+  position: absolute;
+  right: 0;
+  z-index: 40;
+  height: 2px;
+  margin-top: -1px;
+  border-radius: 999px;
+  background: var(--color-primary);
+  box-shadow: 0 0 8px var(--color-primary);
+  pointer-events: none;
 }
 
 .tracks__track {
