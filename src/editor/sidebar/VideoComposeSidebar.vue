@@ -8,11 +8,7 @@
         <VideoComposeUnderlineTabs :tabs="tabLabels" :model-value="tabIndex" @update:model-value="onTabChange" />
       </div>
       <div class="compose-scroll flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 pt-4 pb-4">
-        <VideoComposeTransformPanel
-          v-if="showTransform"
-          :width="frameWidth || 0"
-          :height="frameHeight || 0"
-        />
+        <VideoComposeTransformPanel v-if="showTransform" :width="frameWidth || 0" :height="frameHeight || 0" />
 
         <template v-else-if="inspectorKind === 'video'">
           <div class="flex flex-col gap-2">
@@ -44,28 +40,59 @@
             @blur="onSubtitleTextBlur"
           />
           <div class="grid grid-cols-2 gap-3">
-            <button ref="fontFamilyBtnRef" type="button" class="compose-field flex items-center justify-between px-3 text-left" @click.stop="emit('font-popover-toggle', 'family')">
+            <button
+              ref="fontFamilyBtnRef"
+              type="button"
+              class="compose-field flex items-center justify-between px-3 text-left"
+              @click.stop="emit('font-popover-toggle', 'family')"
+            >
               <span class="truncate">{{ fontLabel }}</span>
               <ChevronDown :size="16" class="shrink-0 text-[var(--compose-fg-3)]" />
             </button>
-            <button ref="fontStyleBtnRef" type="button" class="compose-field flex items-center justify-between px-3 text-left" @click.stop="emit('font-popover-toggle', 'style')">
+            <button
+              ref="fontStyleBtnRef"
+              type="button"
+              class="compose-field flex items-center justify-between px-3 text-left"
+              @click.stop="emit('font-popover-toggle', 'style')"
+            >
               <span class="truncate">{{ styleLabel }}</span>
               <ChevronDown :size="16" class="shrink-0 text-[var(--compose-fg-3)]" />
             </button>
             <div class="relative">
-              <input :value="subtitleStyle.fontSize" type="number" min="1" class="compose-field w-full pr-10 pl-3" placeholder="字号" @input="onFontSizeInput" />
+              <input
+                :value="subtitleStyle.fontSize"
+                type="number"
+                min="1"
+                class="compose-field w-full pr-10 pl-3"
+                placeholder="字号"
+                @input="onFontSizeInput"
+              />
               <span class="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-[12px] text-[var(--compose-fg-3)]">px</span>
             </div>
             <div class="flex items-center gap-2">
               <div class="relative h-10 w-10 shrink-0 overflow-hidden rounded-[8px] bg-[var(--compose-surface-2)]">
-                <input type="color" :value="subtitleStyle.color" class="absolute -inset-2.5 h-[60px] w-[60px] cursor-pointer border-0 p-0" @input="onColorInput" />
+                <input
+                  type="color"
+                  :value="subtitleStyle.color"
+                  class="absolute -inset-2.5 h-[60px] w-[60px] cursor-pointer border-0 p-0"
+                  @input="onColorInput"
+                />
               </div>
-              <input :value="subtitleStyle.color" maxlength="7" class="compose-field min-w-0 flex-1 px-3 font-mono" @input="onColorTextInput" />
+              <input
+                :value="subtitleStyle.color"
+                maxlength="7"
+                class="compose-field min-w-0 flex-1 px-3 font-mono"
+                @input="onColorTextInput"
+              />
             </div>
             <button
               type="button"
               class="col-span-2 flex h-10 items-center justify-center gap-2 rounded-[8px] text-[13px] font-semibold transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-50"
-              :class="isAdjusting ? 'bg-[var(--compose-accent-soft)] text-[var(--compose-accent)]' : 'bg-[var(--compose-surface-3)] text-[var(--compose-fg)] hover:brightness-110'"
+              :class="
+                isAdjusting
+                  ? 'bg-[var(--compose-accent-soft)] text-[var(--compose-accent)]'
+                  : 'bg-[var(--compose-surface-3)] text-[var(--compose-fg)] hover:brightness-110'
+              "
               :disabled="!videoReady"
               @click="emit('toggle-adjust-position')"
             >
@@ -78,7 +105,11 @@
             <button
               type="button"
               class="col-span-2 flex h-10 items-center justify-center gap-2 rounded-[8px] text-[13px] font-semibold transition-colors duration-200"
-              :class="subtitleVisible ? 'bg-[var(--compose-accent-soft)] text-[var(--compose-accent)]' : 'bg-[var(--compose-surface-3)] text-[var(--compose-fg)] hover:brightness-110'"
+              :class="
+                subtitleVisible
+                  ? 'bg-[var(--compose-accent-soft)] text-[var(--compose-accent)]'
+                  : 'bg-[var(--compose-surface-3)] text-[var(--compose-fg)] hover:brightness-110'
+              "
               @click="emit('update:subtitleVisible', !subtitleVisible)"
             >
               <Eye v-if="subtitleVisible" :size="16" />
@@ -118,7 +149,7 @@ import type { BeautyParams, SubtitleStyleConfig } from "@/types/videoCompose";
 import VideoComposeBeautyControls from "./VideoComposeBeautyControls.vue";
 import VideoComposeTextTemplateProps from "./VideoComposeTextTemplateProps.vue";
 import VideoComposeTransformPanel from "./VideoComposeTransformPanel.vue";
-import VideoComposeUnderlineTabs from "./VideoComposeUnderlineTabs.vue";
+import VideoComposeUnderlineTabs from "../shared/VideoComposeUnderlineTabs.vue";
 import VolumeDbControl from "./VolumeDbControl.vue";
 
 /** 右栏编辑对象，由时间轴选中的片段或轨道决定 */
@@ -347,7 +378,9 @@ defineExpose({
   font-size: 14px;
   color: var(--compose-fg);
   outline: none;
-  transition: border-color 150ms cubic-bezier(0.25, 0.8, 0.25, 1), box-shadow 150ms cubic-bezier(0.25, 0.8, 0.25, 1);
+  transition:
+    border-color 150ms cubic-bezier(0.25, 0.8, 0.25, 1),
+    box-shadow 150ms cubic-bezier(0.25, 0.8, 0.25, 1);
 }
 
 textarea.compose-field {

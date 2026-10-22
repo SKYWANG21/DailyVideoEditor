@@ -23,7 +23,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { COMPOSE_TEXT_TEMPLATE_DRAG_MIME, type ComposeTextTemplateDrag } from "@/types/videoCompose";
-import type { TextTemplateItem } from "./textTemplateCatalog";
+import type { TextTemplateItem } from "../shared/textTemplateCatalog";
 
 const props = defineProps<{
   /** 父组件传入的花字列表 */

@@ -42,7 +42,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { isCssHexColor } from "./textTemplateCatalog";
+import { isCssHexColor } from "../shared/textTemplateCatalog";
 
 const props = defineProps<{
   /** 贴图文案 */

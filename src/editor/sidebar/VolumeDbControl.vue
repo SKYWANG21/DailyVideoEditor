@@ -36,15 +36,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { primePreviewAudioContext } from "@/hooks/previewMediaGain";
-import {
-  VOLUME_DB_INPUT_STEP,
-  VOLUME_DB_MAX,
-  VOLUME_DB_MIN,
-  clampDb,
-  dbToSliderRatio,
-  roundDb,
-  sliderRatioToDb,
-} from "./volumeDb";
+import { VOLUME_DB_INPUT_STEP, VOLUME_DB_MAX, VOLUME_DB_MIN, clampDb, dbToSliderRatio, roundDb, sliderRatioToDb } from "../shared/volumeDb";
 
 const props = defineProps<{
   /** 当前音量（dB）；null 为静音 */

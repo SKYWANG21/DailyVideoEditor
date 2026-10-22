@@ -116,8 +116,8 @@ import {
 import VideoComposeAssetCard from "./VideoComposeAssetCard.vue";
 import VideoComposeClipCatalog from "./VideoComposeClipCatalog.vue";
 import VideoComposeTextTemplateCatalog from "./VideoComposeTextTemplateCatalog.vue";
-import VideoComposeUnderlineTabs from "./VideoComposeUnderlineTabs.vue";
-import type { TextTemplateItem } from "./textTemplateCatalog";
+import VideoComposeUnderlineTabs from "../shared/VideoComposeUnderlineTabs.vue";
+import type { TextTemplateItem } from "../shared/textTemplateCatalog";
 
 /** 左栏分类。不含图片、转场 */
 const cats = [

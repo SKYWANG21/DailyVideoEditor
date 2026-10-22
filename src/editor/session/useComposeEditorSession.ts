@@ -1,0 +1,117 @@
+import { defineExpose, nextTick, onBeforeUnmount, onMounted } from "vue";
+import { useComposeDetachAudio } from "@/hooks/useComposeDetachAudio";
+import { useComposeExtractAudioCleanup } from "@/hooks/useComposeExtractAudioCleanup";
+import { loadTextTemplateCatalog } from "../shared/textTemplateCatalog";
+import type { ComposeEditorEmit, ComposeEditorProps } from "./createComposeEditorState";
+import { createComposeEditorState } from "./createComposeEditorState";
+import { createComposeEditorPorts } from "./ports";
+import { useComposeCatalog } from "./useComposeCatalog";
+import { useComposeInspector } from "./useComposeInspector";
+import { useComposePlaybackBridge } from "./useComposePlaybackBridge";
+import { useComposeProject } from "./useComposeProject";
+import { useComposeShellLayout } from "./useComposeShellLayout";
+
+/**
+ * 视频剪辑会话。
+ * 接线顺序固定：播放桥 → 右栏 → 素材库 → 草稿。后注册的 immediate watch 才能用到已经接好的交接函数。
+ * 区域组件仍由外壳用 props / 事件连接，不在子组件里注入，避免改掉播放和写回的调用顺序。
+ */
+export function useComposeEditorSession(props: ComposeEditorProps, emit: ComposeEditorEmit) {
+  const state = createComposeEditorState(props);
+  const ports = createComposeEditorPorts();
+
+  const extract = useComposeExtractAudioCleanup(props.modelValue.composeExtractAudioUrls || []);
+  state.composeExtractAudioUrls = extract.composeExtractAudioUrls;
+  state.registerComposeExtractAudioUrl = extract.registerComposeExtractAudioUrl;
+  state.syncRegistryFromTracks = extract.syncRegistryFromTracks;
+  state.scheduleOrphanComposeExtractCleanup = extract.scheduleOrphanComposeExtractCleanup;
+
+  const detach = useComposeDetachAudio(() => state.timelineRef.value, state.registerComposeExtractAudioUrl);
+  state.detachAudioForVideoClip = detach.detachAudioForVideoClip;
+  state.detachingClipIds = detach.detachingClipIds;
+
+  const layout = useComposeShellLayout(props);
+  const playback = useComposePlaybackBridge(state, ports);
+  const inspector = useComposeInspector(props, state, ports);
+  const catalog = useComposeCatalog(props, state, ports);
+  const project = useComposeProject(props, state, ports, emit);
+
+  onMounted(() => {
+    void loadTextTemplateCatalog();
+    layout.mountLayout();
+    nextTick(() => {
+      state.timelineRef.value?.recoverStaleExtractStatuses?.();
+      console.log("props.modelValue", props.modelValue);
+    });
+  });
+
+  onBeforeUnmount(() => {
+    layout.disposeLayout();
+    ports.flush();
+  });
+
+  defineExpose({
+    validate: project.validate,
+    flush: project.flush,
+    getResolvedClips: () => state.timelineRef.value?.getMainVideoClips?.() || state.derivedMainClips.value,
+    validateBeforeCompose: project.validate,
+    syncBeforeCompose: project.flush,
+    getComposeClips: () => state.timelineRef.value?.getMainVideoClips?.() || state.derivedMainClips.value,
+    /** 打开上传视频片段弹窗（供顶栏按钮调用） */
+    openUploadClipModal: () => {
+      if (props.readonly) return;
+      state.uploadClipModalOpen.value = true;
+    },
+  });
+
+  return {
+    shellRef: layout.shellRef,
+    shellGridStyle: layout.shellGridStyle,
+    topGridStyle: layout.topGridStyle,
+    onSplitPointerDown: layout.onSplitPointerDown,
+    playerRef: state.playerRef,
+    sidebarRef: state.sidebarRef,
+    timelineRef: state.timelineRef,
+    derivedMainClips: state.derivedMainClips,
+    derivedAudioClips: state.derivedAudioClips,
+    playingIdx: state.playingIdx,
+    globalTime: state.globalTime,
+    isAdjusting: state.isAdjusting,
+    videoReady: state.videoReady,
+    previewDurationSec: state.previewDurationSec,
+    isTranscribing: state.isTranscribing,
+    tracks: state.tracks,
+    audioAssets: state.audioAssets,
+    sfxAssets: state.sfxAssets,
+    subtitleAssets: state.subtitleAssets,
+    audioClipCount: state.audioClipCount,
+    subtitleStyle: state.subtitleStyle,
+    subtitleVisible: state.subtitleVisible,
+    videoVolume: state.videoVolume,
+    beauty: state.beauty,
+    bgmVolume: state.bgmVolume,
+    videoVolumeLabel: state.videoVolumeLabel,
+    audioVolumeLabel: state.audioVolumeLabel,
+    inspectorKind: state.inspectorKind,
+    frameSize: state.frameSize,
+    selectedTextClipProps: state.selectedTextClipProps,
+    selectedSubtitleText: state.selectedSubtitleText,
+    activeSubtitleId: state.activeSubtitleId,
+    activeTextClipId: state.activeTextClipId,
+    textOverlayClips: state.textOverlayClips,
+    derivedComposeConfig: state.derivedComposeConfig,
+    previewCatalogVariant: state.previewCatalogVariant,
+    detachingClipIds: state.detachingClipIds,
+    uploadAudioModalOpen: state.uploadAudioModalOpen,
+    uploadClipModalOpen: state.uploadClipModalOpen,
+    visiblePreviewSubtitles: state.visiblePreviewSubtitles,
+    adjustPreviewSubtitles: state.adjustPreviewSubtitles,
+    ...playback,
+    ...inspector,
+    ...catalog,
+    onTracksUpdate: project.onTracksUpdate,
+    onTimelineScaleUpdate: project.onTimelineScaleUpdate,
+    onTimelineDetachAudio: project.onTimelineDetachAudio,
+    onRegenerateSubtitles: project.onRegenerateSubtitles,
+  };
+}

@@ -13,7 +13,7 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { ElMessage } from "element-plus";
-import VideoComposeEditor from "@/editor/VideoComposeEditor.vue";
+import { VideoComposeEditor } from "@/editor";
 import { createDefaultVideoComposeEditorModel, type VideoComposeClipInput, type VideoComposeEditorModel } from "@/types/videoCompose";
 
 /** 本地工程没有上游片段，素材从侧栏上传进入内存 */
