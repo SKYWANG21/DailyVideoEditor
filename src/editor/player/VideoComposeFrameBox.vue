@@ -9,8 +9,6 @@
       <div v-if="guides.includes('top')" class="absolute top-0 right-0 left-0 h-px bg-[var(--compose-accent)]" />
       <div v-if="guides.includes('bottom')" class="absolute right-0 bottom-0 left-0 h-px bg-[var(--compose-accent)]" />
 
-      <div class="pointer-events-auto absolute cursor-move" :style="boxStyle" @pointerdown="onPointerDown($event, 'move')" />
-
       <div v-if="active" class="pointer-events-none absolute z-30" :style="boxStyle">
         <span class="absolute inset-0 border border-[var(--compose-accent)]" />
         <button
@@ -142,4 +140,9 @@ function pointerAngle(event: PointerEvent, frame: VideoFrameTransform): number {
   const cy = props.canvasHeight / 2 + frame.y;
   return Math.atan2(y - cy, x - cx);
 }
+
+defineExpose({
+  /** 供画布内热区调用。热区在贴图和字幕之下，避免整块画面把它们的点击吃掉 */
+  startDrag: onPointerDown,
+});
 </script>

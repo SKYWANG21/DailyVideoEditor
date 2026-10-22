@@ -42,6 +42,14 @@
           />
         </div>
 
+        <!-- 拖动热区在贴图、字幕之下。点空白画面才移动视频；画幅外靠浮层手柄 -->
+        <div
+          v-if="!catalogPreviewActive && !readonly && videoFrame"
+          class="absolute z-[1] cursor-move"
+          :style="videoBoxStyle"
+          @pointerdown="onVideoFramePointerDown"
+        />
+
         <VideoComposeTextStickerOverlay
           v-if="!catalogPreviewActive && (canvasWidth || 0) > 0"
           :class="isAdjusting ? '[&_*]:!pointer-events-none' : undefined"
@@ -109,6 +117,7 @@
       </div>
 
       <VideoComposeFrameBox
+        ref="frameBoxRef"
         v-if="effectiveClips.length && stageFit.width && !catalogPreviewActive && !readonly && videoFrame"
         :frame="videoFrame"
         :canvas-width="canvasWidth || 0"
@@ -205,7 +214,7 @@ import type { PreviewVideoSize } from "@/types/beautyPreview";
 import { useVideoComposePreview } from "@/hooks/useVideoComposePreview";
 import { useComposePreviewFrame } from "@/hooks/useComposePreviewFrame";
 import { useVideoComposeSubtitleAdjust } from "@/hooks/useVideoComposeSubtitleAdjust";
-import { GPU_PIXEL_CANVAS_ID } from "@/service/beauty/gpuPixelPreview";
+import { GPU_PIXEL_CANVAS_ID } from "@/utils/beauty/gpuPixelPreview";
 import VideoComposeTextStickerOverlay from "./VideoComposeTextStickerOverlay.vue";
 import VideoComposeFrameBox from "./VideoComposeFrameBox.vue";
 import { containFrameStage, frameBoxStyle } from "../shared/videoFrame";
@@ -295,6 +304,7 @@ const previewCanvasRef = ref<HTMLCanvasElement | null>(null);
 const playerContainerRef = ref<HTMLElement | null>(null);
 /** 画幅画布。字幕和贴图相对它的边缘定位 */
 const canvasHostRef = ref<HTMLElement | null>(null);
+const frameBoxRef = ref<InstanceType<typeof VideoComposeFrameBox> | null>(null);
 /** 预览区内容盒，用来把画布等比放进去 */
 const stageBox = ref({ width: 0, height: 0 });
 let stageObserver: ResizeObserver | null = null;
@@ -321,6 +331,11 @@ const videoBoxStyle = computed(() => {
   if (!frame || stageScale.value <= 0) return undefined;
   return frameBoxStyle(frame, props.canvasWidth || 0, props.canvasHeight || 0, stageScale.value);
 });
+
+/** 空白画面上的拖动。贴图和字幕盖在这层上面，不会被它抢走 */
+function onVideoFramePointerDown(event: PointerEvent): void {
+  frameBoxRef.value?.startDrag(event, "move");
+}
 
 /** 字幕和贴图用画布像素，不用视频元素的包围盒 */
 const canvasSizeRef = computed<PreviewVideoSize | null>(() => {

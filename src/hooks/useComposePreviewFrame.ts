@@ -1,5 +1,5 @@
 import { onUnmounted, ref, watch, type Ref } from "vue";
-import { acquireGpuPixelPreview, type GpuPixelPreview } from "@/service/beauty/gpuPixelPreview";
+import { acquireGpuPixelPreview, type GpuPixelPreview } from "@/utils/beauty/gpuPixelPreview";
 import type { BeautyParams } from "@/types/composeMedia";
 import { readBeautyParams } from "@/types/composeMedia";
 import { beautyNeedsFace, type BeautyFrameEvent, type BeautyWorkerEvent, type PreviewVideoSize } from "@/types/beautyPreview";
