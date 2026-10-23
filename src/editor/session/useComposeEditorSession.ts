@@ -47,12 +47,10 @@ export function useComposeEditorSession(props: ComposeEditorProps, emit: Compose
     validate: project.validate,
     flush: project.flush,
     reload: project.reload,
-    getResolvedClips: () => state.timelineRef.value?.getMainVideoClips?.() || state.derivedMainClips.value,
-    validateBeforeCompose: project.validate,
-    syncBeforeCompose: project.flush,
-    getComposeClips: () => state.timelineRef.value?.getMainVideoClips?.() || state.derivedMainClips.value,
-    /** 打开上传视频：有宿主回调则调回调，否则开内置弹窗 */
-    openUploadClipModal: () => {
+    exportComposePayload: project.exportComposePayload,
+    getMainVideoClips: () => state.timelineRef.value?.getMainVideoClips?.() || state.derivedMainClips.value,
+    /** 触发上传视频：onRequestUploadClip → uploadAdapter → 提示 */
+    requestUploadClip: () => {
       catalog.onUploadClipClick();
     },
   });

@@ -24,8 +24,27 @@ import {
   setHostTextTemplates,
   textTemplateCatalog,
 } from "../shared/textTemplateCatalog";
-import type { ComposeEditorEmit, ComposeEditorProps, ComposeEditorState } from "./createComposeEditorState";
+import type {
+  ComposeBgmUploadResult,
+  ComposeEditorEmit,
+  ComposeEditorProps,
+  ComposeEditorState,
+} from "./createComposeEditorState";
 import type { ComposeEditorPorts } from "./ports";
+
+/** 浏览器选文件（供 uploadAdapter 路径使用） */
+function pickLocalFiles(accept: string, multiple: boolean): Promise<File[]> {
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = accept;
+    input.multiple = multiple;
+    input.onchange = () => {
+      resolve(Array.from(input.files ?? []));
+    };
+    input.click();
+  });
+}
 
 /** 素材库预览、上传和拖入时间轴。退出预览后的 nextTick 仍由这里发出，播放桥只负责接着播 */
 export function useComposeCatalog(
@@ -320,8 +339,8 @@ export function useComposeCatalog(
     ports.onAddTextTemplate(item, payload.startTime);
   }
 
-  /** 侧栏上传音频 → 音频轨追加 clip；列表由宿主 props 或内部 state 维护 */
-  function onAudioUploaded(bgm: BgmItem): void {
+  /** 将音频条目写入时间轴与侧栏列表 */
+  function commitAudioAsset(bgm: BgmItem): void {
     const clipId = state.timelineRef.value?.addAudioClip({ ...bgm });
     if (props.audioAssets !== undefined) {
       emit("audio-uploaded", bgm);
@@ -329,6 +348,22 @@ export function useComposeCatalog(
       state.audioAssets.value = [...state.audioAssets.value, bgm];
     }
     void probeAndWidenAudioClip(clipId, bgm);
+  }
+
+  /** 侧栏上传音频弹窗确认；有 adapter.uploadAudio 则先走宿主上传 */
+  async function onAudioUploaded(payload: ComposeBgmUploadResult): Promise<void> {
+    let bgm = payload.item;
+    const uploadAudio = props.uploadAdapter?.uploadAudio;
+    if (uploadAudio) {
+      try {
+        bgm = await uploadAudio(payload.file);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "音频上传失败";
+        ElMessage.warning(message);
+        return;
+      }
+    }
+    commitAudioAsset(bgm);
   }
 
   /** 切换侧栏视频的喜欢态，并立即写入工程 */
@@ -350,11 +385,12 @@ export function useComposeCatalog(
     ports.persistUploadCatalogNow();
   }
 
-  /** 本地 SVG 进入花字列表：宿主 props 则 emit，否则写会话目录 */
+  /** 本地 SVG 进入花字列表：adapter → 本地解析；宿主 props 则 emit */
   async function onFancyUploaded(file: File): Promise<void> {
     if (props.onRequestUploadFancy) return;
     try {
-      const item = await createTextTemplateFromFile(file);
+      const uploadFancy = props.uploadAdapter?.uploadFancy;
+      const item = uploadFancy ? await uploadFancy(file) : await createTextTemplateFromFile(file);
       if (props.textTemplates !== undefined) {
         emit("text-template-uploaded", item);
       } else {
@@ -367,8 +403,19 @@ export function useComposeCatalog(
     }
   }
 
-  /** 上传音效进入侧栏列表，不直接上轴 */
-  function onSfxUploaded(bgm: BgmItem): void {
+  /** 上传音效弹窗确认；有 adapter.uploadSfx 则先走宿主上传 */
+  async function onSfxUploaded(payload: ComposeBgmUploadResult): Promise<void> {
+    let bgm = payload.item;
+    const uploadSfx = props.uploadAdapter?.uploadSfx;
+    if (uploadSfx) {
+      try {
+        bgm = await uploadSfx(payload.file);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "音效上传失败";
+        ElMessage.warning(message);
+        return;
+      }
+    }
     if (props.sfxAssets !== undefined) {
       emit("sfx-uploaded", bgm);
       return;
@@ -380,17 +427,37 @@ export function useComposeCatalog(
     state.timelineRef.value?.addSubtitleClip({ text: "新建字幕", durationSec: 2 });
   }
 
-  /** 点击上传视频：须由宿主 onRequestUploadClip 处理并维护 videoAssets */
-  function onUploadClipClick(): void {
+  /**
+   * 点击上传视频。
+   * 优先级：onRequestUploadClip → uploadAdapter.uploadVideo → 提示。
+   */
+  async function onUploadClipClick(): Promise<void> {
     if (props.readonly) return;
     if (props.onRequestUploadClip) {
       props.onRequestUploadClip();
       return;
     }
-    ElMessage.info("请由宿主提供 onRequestUploadClip 并维护 videoAssets");
+    const uploadVideo = props.uploadAdapter?.uploadVideo;
+    if (uploadVideo) {
+      const files = await pickLocalFiles("video/*", true);
+      for (const file of files) {
+        try {
+          const asset = await uploadVideo(file);
+          emit("video-uploaded", asset);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "视频上传失败";
+          ElMessage.warning(message);
+        }
+      }
+      if (files.length) {
+        ElMessage.success(files.length > 1 ? `已添加 ${files.length} 个视频` : "已添加到视频片段列表");
+      }
+      return;
+    }
+    ElMessage.info("请提供 onRequestUploadClip 或 uploadAdapter.uploadVideo");
   }
 
-  /** 点击上传音频 */
+  /** 点击上传音频：onRequestUploadAudio → 内置弹窗（可再走 adapter.uploadAudio） */
   function onUploadAudioClick(): void {
     if (props.readonly) return;
     if (props.onRequestUploadAudio) {
@@ -400,7 +467,7 @@ export function useComposeCatalog(
     state.uploadAudioModalOpen.value = true;
   }
 
-  /** 点击上传音效 */
+  /** 点击上传音效：onRequestUploadSfx → 内置弹窗（可再走 adapter.uploadSfx） */
   function onUploadSfxClick(): void {
     if (props.readonly) return;
     if (props.onRequestUploadSfx) {
@@ -410,7 +477,7 @@ export function useComposeCatalog(
     state.uploadSfxModalOpen.value = true;
   }
 
-  /** 点击上传花字：宿主回调优先，否则由外壳选文件 */
+  /** 点击上传花字：onRequestUploadFancy → 外壳选文件（可再走 adapter.uploadFancy） */
   function onUploadFancyClick(): void {
     if (props.readonly) return;
     if (props.onRequestUploadFancy) {

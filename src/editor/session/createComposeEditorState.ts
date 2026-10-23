@@ -49,6 +49,11 @@ export interface ComposeEditorProps {
   sfxAssets?: BgmItem[];
   /** 侧栏花字模板；传入则覆盖会话目录 */
   textTemplates?: TextTemplateItem[];
+  /**
+   * 可选上传适配器：无 onRequestUpload* 时，Editor 选文件并调用 adapter，再 emit *-uploaded。
+   * 有 onRequestUpload* 时仍只回调宿主（全权 UX）。
+   */
+  uploadAdapter?: ComposeUploadAdapter;
   /** 点击「上传视频」；传入则不再打开内置上传弹窗 */
   onRequestUploadClip?: () => void;
   /** 点击「上传音频」；传入则不再打开内置上传弹窗 */
@@ -59,17 +64,41 @@ export interface ComposeEditorProps {
   onRequestUploadFancy?: () => void;
 }
 
+/**
+ * 可选上传适配器：Editor 负责选文件，宿主实现上传并返回侧栏条目。
+ */
+export interface ComposeUploadAdapter {
+  /** 上传视频，返回侧栏视频条目 */
+  uploadVideo(file: File): Promise<ComposeSegmentClipAssets>;
+  /** 上传音频 */
+  uploadAudio?(file: File): Promise<BgmItem>;
+  /** 上传音效 */
+  uploadSfx?(file: File): Promise<BgmItem>;
+  /** 上传花字 */
+  uploadFancy?(file: File): Promise<TextTemplateItem>;
+}
+
+/** 内置音频/音效弹窗确认后的载荷（含原始 File，供 adapter 使用） */
+export interface ComposeBgmUploadResult {
+  /** 本地预览用条目（无 adapter 时直接入列表） */
+  item: BgmItem;
+  /** 用户选中的文件 */
+  file: File;
+}
+
 /** 外壳向外抛出的事件 */
 export interface ComposeEditorEmit {
   (event: "update:modelValue", value: VideoComposeEditorModel): void;
   (event: "ready"): void;
   /** 侧栏移除视频素材（宿主维护 videoAssets 时据此改列表） */
   (event: "remove-catalog-clip", variant: ComposeSegmentClipAssets): void;
-  /** 内置上传音频完成；宿主维护 audioAssets 时追加 */
+  /** adapter / 内置上传视频完成 */
+  (event: "video-uploaded", item: ComposeSegmentClipAssets): void;
+  /** 内置或 adapter 上传音频完成；宿主维护 audioAssets 时追加 */
   (event: "audio-uploaded", item: BgmItem): void;
-  /** 内置上传音效完成；宿主维护 sfxAssets 时追加 */
+  /** 内置或 adapter 上传音效完成；宿主维护 sfxAssets 时追加 */
   (event: "sfx-uploaded", item: BgmItem): void;
-  /** 内置上传花字完成；宿主维护 textTemplates 时追加 */
+  /** 内置或 adapter 上传花字完成；宿主维护 textTemplates 时追加 */
   (event: "text-template-uploaded", item: TextTemplateItem): void;
 }
 

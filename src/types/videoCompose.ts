@@ -437,6 +437,18 @@ export interface VideoComposeEditorModel {
   scale?: number;
 }
 
+/** 合成请求用工程快照（渲染侧主要消费 tracks） */
+export interface ComposeExportPayload {
+  /** 合成草稿主键 */
+  id: string;
+  /** 业务类型 */
+  bizType: MediaBizType;
+  /** 业务实体 id */
+  bizId: string | number;
+  /** 多轨列表（来自时间轴 exportTracks） */
+  tracks: ComposeTrack[];
+}
+
 /** 媒体引用：url 与 mediaId 二选一 */
 export interface MediaRef {
   /** 可直接播放的 URL */

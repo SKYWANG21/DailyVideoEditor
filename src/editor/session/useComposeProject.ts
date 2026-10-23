@@ -1,5 +1,5 @@
 import { nextTick, onBeforeUnmount, watch } from "vue";
-import type { ComposeTrack, VideoClipItem, VideoComposeEditorModel } from "@/types/videoCompose";
+import type { ComposeExportPayload, ComposeTrack, VideoClipItem, VideoComposeEditorModel } from "@/types/videoCompose";
 import { hasTimelineSubtitles, normalizeComposeTimelineScale } from "@/types/videoCompose";
 import {
   COMPOSE_CLIP_PLACEHOLDER_DURATION_SEC,
@@ -154,6 +154,21 @@ export function useComposeProject(
     state.scheduleOrphanComposeExtractCleanup(exported);
   }
 
+  /**
+   * 成片导出：立刻 flush 对齐 v-model，并从时间轴 exportTracks 取最新 tracks。
+   * 宿主应先 validate()，再调用本方法提交合成 API。
+   */
+  function exportComposePayload(): ComposeExportPayload {
+    flush();
+    const tracks = state.timelineRef.value?.exportTracks?.() || state.tracks.value;
+    return {
+      id: props.modelValue.id,
+      bizType: props.modelValue.bizType,
+      bizId: props.modelValue.bizId,
+      tracks: JSON.parse(JSON.stringify(tracks)),
+    };
+  }
+
   function clearDurationProbeRetry(): void {
     if (durationProbeRetryTimer != null) {
       window.clearTimeout(durationProbeRetryTimer);
@@ -302,5 +317,6 @@ export function useComposeProject(
     validate,
     flush,
     reload,
+    exportComposePayload,
   };
 }

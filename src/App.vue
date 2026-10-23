@@ -13,6 +13,7 @@
         :text-templates="textTemplates"
         :on-request-upload-clip="() => (uploadClipOpen = true)"
         @remove-catalog-clip="onRemoveVideoAsset"
+        @video-uploaded="onVideoAssetUploaded"
         @audio-uploaded="onAudioUploaded"
         @sfx-uploaded="onSfxUploaded"
         @text-template-uploaded="onTextTemplateUploaded"
@@ -81,6 +82,11 @@ function onRemoveVideoAsset(variant: ComposeSegmentClipAssets): void {
   videoAssets.value = videoAssets.value.filter((item) => item.id !== variant.id);
 }
 
+/** uploadAdapter 上传视频成功（demo 当前用 onRequestUploadClip；此事件供 adapter 路径） */
+function onVideoAssetUploaded(item: ComposeSegmentClipAssets): void {
+  videoAssets.value = [...videoAssets.value, item];
+}
+
 /** 编辑器内置上传音频 → 写入 audioAssets */
 function onAudioUploaded(item: BgmItem): void {
   audioAssets.value = [...audioAssets.value, item];
@@ -96,8 +102,11 @@ function onTextTemplateUploaded(item: TextTemplateItem): void {
   textTemplates.value = [...textTemplates.value, item];
 }
 
-/** 合成不对接后端 */
+/**
+ * 合成：validate → exportComposePayload。
+ * demo 未挂 ref；宿主集成时对 VideoComposeEditor 取 ref 调用即可。
+ */
 function onCompose(): void {
-  ElMessage.info("暂无");
+  ElMessage.info("暂无（宿主：validate() 后 exportComposePayload()）");
 }
 </script>

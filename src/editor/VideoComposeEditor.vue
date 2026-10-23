@@ -188,6 +188,7 @@ import BgmUploadModal from "./modals/BgmUploadModal.vue";
 import SubtitleFontPopover from "./sidebar/SubtitleFontPopover.vue";
 import type { TextTemplateItem } from "./shared/textTemplateCatalog";
 import { useComposeEditorSession } from "./session/useComposeEditorSession";
+import type { ComposeUploadAdapter } from "./session/createComposeEditorState";
 import type { BgmItem, ComposeSegmentClipAssets, VideoComposeEditorModel } from "@/types/videoCompose";
 
 const props = withDefaults(
@@ -204,7 +205,9 @@ const props = withDefaults(
     sfxAssets?: BgmItem[];
     /** 侧栏花字模板 */
     textTemplates?: TextTemplateItem[];
-    /** 点击「上传视频」；传入则不再打开内置弹窗 */
+    /** 可选上传适配器（无 onRequestUpload* 时由 Editor 选文件并调用） */
+    uploadAdapter?: ComposeUploadAdapter;
+    /** 点击「上传视频」；传入则不再走 adapter / 内置选文件 */
     onRequestUploadClip?: () => void;
     /** 点击「上传音频」 */
     onRequestUploadAudio?: () => void;
@@ -222,6 +225,7 @@ const emit = defineEmits<{
   "update:modelValue": [value: VideoComposeEditorModel];
   ready: [];
   "remove-catalog-clip": [variant: ComposeSegmentClipAssets];
+  "video-uploaded": [item: ComposeSegmentClipAssets];
   "audio-uploaded": [item: BgmItem];
   "sfx-uploaded": [item: BgmItem];
   "text-template-uploaded": [item: TextTemplateItem];

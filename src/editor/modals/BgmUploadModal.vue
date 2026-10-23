@@ -71,7 +71,7 @@
 import { computed, ref, watch } from "vue";
 import { Music, UploadCloud, X } from "@lucide/vue";
 import { ElMessage } from "element-plus";
-import type { BgmItem } from "@/types/videoCompose";
+import type { ComposeBgmUploadResult } from "../session/createComposeEditorState";
 
 const props = withDefaults(
   defineProps<{
@@ -95,7 +95,8 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   "update:open": [value: boolean];
-  uploaded: [bgm: BgmItem];
+  /** 确认上传：含本地预览条目与原始 File */
+  uploaded: [payload: ComposeBgmUploadResult];
 }>();
 
 const uploadAudioName = ref("");
@@ -160,9 +161,10 @@ async function confirmUpload(): Promise<void> {
     ElMessage.warning("请输入音频名称");
     return;
   }
+  const file = uploadAudioFile.value;
   const durationSec = await readAudioDuration(url);
   uploadAudioPreview.value = null;
-  emit("uploaded", { name, url, durationSec });
+  emit("uploaded", { item: { name, url, durationSec }, file });
   emit("update:open", false);
   ElMessage.success(props.successText);
 }
