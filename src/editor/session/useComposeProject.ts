@@ -1,13 +1,10 @@
 import { nextTick, onBeforeUnmount, watch } from "vue";
-import { ElMessage } from "element-plus";
 import type { ComposeTrack, VideoClipItem, VideoComposeEditorModel } from "@/types/videoCompose";
 import { hasTimelineSubtitles, normalizeComposeTimelineScale } from "@/types/videoCompose";
 import {
-  buildComposeClipInputsSignature,
   COMPOSE_CLIP_PLACEHOLDER_DURATION_SEC,
   isComposeClipDurationProbeable,
   probeClipDurationsWithRetry,
-  resolveComposeClips,
 } from "@/hooks/useResolveComposeClips";
 import { buildMockVideoClips, isVideoComposeMockEnabled } from "../shared/videoComposeMockClips";
 import type { ComposeEditorEmit, ComposeEditorProps, ComposeEditorState } from "./createComposeEditorState";
@@ -23,8 +20,7 @@ export function useComposeProject(
 ) {
   /** 主轨布局签名：拖动/裁剪/换序等会影响预览定位 */
   let lastMainLayoutSig = "";
-  /** 防止重复触发；首次 clips 就绪后尝试一次自动转录 */
-  let didAttemptAutoTranscribe = false;
+  /** 同会话只 import 一次 tracks，不因 clips 变化重置 */
   let didBootstrap = false;
   /** 占位时长二次探测间隔（ms） */
   const DURATION_PROBE_RETRY_MS = 1000;
@@ -67,15 +63,6 @@ export function useComposeProject(
   /** 时间轴倍率变更：写入工程 JSON（与 tracks 共用 debounce persist） */
   function onTimelineScaleUpdate(_scale: number): void {
     scheduleTracksPersist();
-  }
-
-  /** 时间轴右键「分离音轨」：唯一分离入口 */
-  async function onTimelineDetachAudio(payload: { clipId: string; sourceUrl: string }): Promise<void> {
-    void payload.sourceUrl;
-    await state.detachAudioForVideoClip(payload.clipId);
-    ports.syncDerivedClipsFromTimeline();
-    ports.syncSidebarFromTracks();
-    flush();
   }
 
   function buildModelValue(): VideoComposeEditorModel {
@@ -124,16 +111,6 @@ export function useComposeProject(
     state.scheduleOrphanComposeExtractCleanup(exported);
   }
 
-  /** 重新识别：清空字幕轨后按主轨顺序写入全局时间 */
-  async function onRegenerateSubtitles(): Promise<void> {
-    await transcribeMainTrackToSubtitles(true);
-  }
-
-  /** 本地不请求转录 */
-  async function transcribeMainTrackToSubtitles(_showSuccess: boolean): Promise<void> {
-    ElMessage.info("暂无");
-  }
-
   function clearDurationProbeRetry(): void {
     if (durationProbeRetryTimer != null) {
       window.clearTimeout(durationProbeRetryTimer);
@@ -169,20 +146,6 @@ export function useComposeProject(
     });
   }
 
-  /**
-   * 把 resolveComposeClips 已探到的时长写回仍占位的主轨 clip，避免 import 后再探一轮和抽帧抢 video。
-   */
-  function applyResolvedDurationsToMain(resolved: VideoClipItem[]): void {
-    const byId = new Map(resolved.map((clip) => [clip.id, clip]));
-    const mains = state.timelineRef.value?.getMainVideoClips?.() || [];
-    for (const clip of mains) {
-      if (!isComposeClipDurationProbeable(clip.durationSec)) continue;
-      const hit = byId.get(clip.id);
-      if (!hit || isComposeClipDurationProbeable(hit.durationSec)) continue;
-      rebuildMainClipThumbnail(clip.id, hit.durationSec);
-    }
-  }
-
   /** 等到时间轴挂载清空结束再上轴，避免 reset 抹掉刚写入的主轨 */
   function waitForTimeline(): Promise<void> {
     return new Promise((resolve) => {
@@ -204,7 +167,8 @@ export function useComposeProject(
     });
   }
 
-  async function loadClips(): Promise<void> {
+  /** 会话启动一次建轨。Mock 用样片建主轨；非 mock 只 import tracks，空轨不建主轨 */
+  async function bootstrapTimeline(): Promise<void> {
     state.playerRef.value?.pause();
     await nextTick();
     await waitForTimeline();
@@ -213,21 +177,17 @@ export function useComposeProject(
     durationProbeSeq += 1;
     const seq = durationProbeSeq;
 
-    let clips: VideoClipItem[];
-
     if (isVideoComposeMockEnabled()) {
-      clips = buildMockVideoClips();
+      const clips = buildMockVideoClips();
       await probeClipDurationsWithRetry(clips);
       state.timelineRef.value?.bootstrapMainFromClips(clips);
-    } else {
-      clips = await resolveComposeClips(props.clips);
-      const hasPersisted = Boolean(props.modelValue.tracks?.some((track) => track.clips.length > 0));
-      if (hasPersisted && !didBootstrap) {
-        state.timelineRef.value?.importTracks(props.modelValue.tracks);
-        state.tracks.value = JSON.parse(JSON.stringify(props.modelValue.tracks));
-        applyResolvedDurationsToMain(clips);
-      } else if (!hasPersisted) {
-        state.timelineRef.value?.bootstrapMainFromClips(clips);
+    } else if (!didBootstrap) {
+      didBootstrap = true;
+      const tracks = props.modelValue.tracks;
+      const hasTracks = Boolean(tracks?.some((track) => track.clips.length > 0));
+      if (hasTracks && tracks) {
+        state.timelineRef.value?.importTracks(tracks);
+        state.tracks.value = JSON.parse(JSON.stringify(tracks));
       }
     }
 
@@ -239,40 +199,19 @@ export function useComposeProject(
 
     await applyProbedMainClipDurations();
     if (seq !== durationProbeSeq) return;
-
-    const hasClips = clips.length > 0;
-    if (!didAttemptAutoTranscribe && hasClips && !mainClipsStillProbeable()) {
-      didAttemptAutoTranscribe = true;
-      await maybeAutoTranscribe();
-    }
-    if (seq !== durationProbeSeq) return;
     if (!mainClipsStillProbeable()) return;
 
     durationProbeRetryTimer = window.setTimeout(() => {
       durationProbeRetryTimer = null;
       if (seq !== durationProbeSeq) return;
-      void applyProbedMainClipDurations().then(() => {
-        if (seq !== durationProbeSeq) return;
-        if (!didAttemptAutoTranscribe && hasClips && !mainClipsStillProbeable()) {
-          didAttemptAutoTranscribe = true;
-          void maybeAutoTranscribe();
-        }
-      });
+      void applyProbedMainClipDurations();
     }, DURATION_PROBE_RETRY_MS);
-  }
-
-  async function maybeAutoTranscribe(): Promise<void> {
-    if (!props.autoTranscribe || hasTimelineSubtitles(props.modelValue.tracks)) return;
-    const clips = state.timelineRef.value?.getMainVideoClips?.() || state.derivedMainClips.value;
-    if (clips.some((clip) => isComposeClipDurationProbeable(clip.durationSec))) return;
-    await transcribeMainTrackToSubtitles(false);
   }
 
   function validate(): string | null {
     const clips = state.timelineRef.value?.getMainVideoClips?.() || state.derivedMainClips.value;
     if (!clips.length) return "尚未生成视频内容，请先完成片段生成";
     if (clips.some((clip) => !clip.url)) return "存在未就绪的视频片段，请返回上一步检查";
-    if (state.isTranscribing.value) return "正在识别字幕，请稍候";
     if (hasTimelineSubtitles(state.tracks.value) && clips.length > 1 && clips.some((clip) => !clip.durationSec)) {
       return "视频时长加载中，请稍候再试";
     }
@@ -301,19 +240,11 @@ export function useComposeProject(
     { deep: true },
   );
 
+  /** 只在会话启动时建轨一次。不监听 clips，避免入参变化重灌主轨 */
   watch(
-    () => buildComposeClipInputsSignature(props.clips),
-    (sig) => {
-      if (isVideoComposeMockEnabled()) {
-        void loadClips();
-        return;
-      }
-      if (!sig) {
-        state.derivedMainClips.value = [];
-        return;
-      }
-      didBootstrap = false;
-      void loadClips();
+    () => true,
+    () => {
+      void bootstrapTimeline();
     },
     { immediate: true },
   );
@@ -325,8 +256,6 @@ export function useComposeProject(
   return {
     onTracksUpdate,
     onTimelineScaleUpdate,
-    onTimelineDetachAudio,
-    onRegenerateSubtitles,
     validate,
     flush,
   };

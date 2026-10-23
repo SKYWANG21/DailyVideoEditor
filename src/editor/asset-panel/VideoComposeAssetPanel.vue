@@ -69,10 +69,6 @@
         <template v-else-if="catId === 'subtitle'">
           <div class="grid gap-2" :style="cardGridStyle">
             <slot name="subtitle-actions">
-              <button type="button" :class="addCardClass" :disabled="isTranscribing" @click="emit('regenerate-subtitles')">
-                <Sparkles :size="24" />
-                {{ isTranscribing ? "识别中…" : "重新识别字幕" }}
-              </button>
               <button v-if="!readonly" type="button" :class="addCardClass" @click="emit('add-subtitle')">
                 <Plus :size="24" />
                 添加字幕
@@ -131,7 +127,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { ChevronLeft, ChevronRight, Plus, Sparkles, UploadCloud } from "@lucide/vue";
+import { ChevronLeft, ChevronRight, Plus, UploadCloud } from "@lucide/vue";
 import {
   COMPOSE_AUDIO_ASSET_DRAG_MIME,
   COMPOSE_SUBTITLE_ASSET_DRAG_MIME,
@@ -172,8 +168,6 @@ const props = defineProps<{
   previewClipId?: string;
   /** 只读：隐藏上传，卡片不可拖 */
   readonly?: boolean;
-  /** 字幕识别中 */
-  isTranscribing?: boolean;
   /** 时间轴上的音频段数 */
   audioClipCount: number;
   /** 音频素材。拖入后进音频轨 */
@@ -191,7 +185,6 @@ const emit = defineEmits<{
   "open-upload-bgm": [];
   "upload-sfx": [];
   "upload-fancy": [file: File];
-  "regenerate-subtitles": [];
   "add-subtitle": [];
   "preview-clip": [variant: ComposeSegmentClipVariant];
   "remove-catalog-clip": [variant: ComposeSegmentClipVariant];

@@ -1,5 +1,4 @@
 import { defineExpose, nextTick, onBeforeUnmount, onMounted } from "vue";
-import { useComposeDetachAudio } from "@/hooks/useComposeDetachAudio";
 import { useComposeExtractAudioCleanup } from "@/hooks/useComposeExtractAudioCleanup";
 import { loadTextTemplateCatalog } from "../shared/textTemplateCatalog";
 import type { ComposeEditorEmit, ComposeEditorProps } from "./createComposeEditorState";
@@ -27,10 +26,6 @@ export function useComposeEditorSession(props: ComposeEditorProps, emit: Compose
   state.syncRegistryFromTracks = extract.syncRegistryFromTracks;
   state.scheduleOrphanComposeExtractCleanup = extract.scheduleOrphanComposeExtractCleanup;
 
-  const detach = useComposeDetachAudio(() => state.timelineRef.value, state.registerComposeExtractAudioUrl);
-  state.detachAudioForVideoClip = detach.detachAudioForVideoClip;
-  state.detachingClipIds = detach.detachingClipIds;
-
   const layout = useComposeShellLayout(props);
   const playback = useComposePlaybackBridge(state, ports);
   const inspector = useComposeInspector(props, state, ports);
@@ -42,7 +37,6 @@ export function useComposeEditorSession(props: ComposeEditorProps, emit: Compose
     void loadTextTemplateCatalog();
     layout.mountLayout();
     nextTick(() => {
-      state.timelineRef.value?.recoverStaleExtractStatuses?.();
       console.log("props.modelValue", props.modelValue);
     });
   });
@@ -81,7 +75,6 @@ export function useComposeEditorSession(props: ComposeEditorProps, emit: Compose
     isAdjusting: state.isAdjusting,
     videoReady: state.videoReady,
     previewDurationSec: state.previewDurationSec,
-    isTranscribing: state.isTranscribing,
     tracks: state.tracks,
     audioAssets: state.audioAssets,
     sfxAssets: state.sfxAssets,
@@ -102,7 +95,6 @@ export function useComposeEditorSession(props: ComposeEditorProps, emit: Compose
     textOverlayClips: state.textOverlayClips,
     derivedComposeConfig: state.derivedComposeConfig,
     previewCatalogVariant: state.previewCatalogVariant,
-    detachingClipIds: state.detachingClipIds,
     uploadAudioModalOpen: state.uploadAudioModalOpen,
     uploadSfxModalOpen: state.uploadSfxModalOpen,
     uploadClipModalOpen: state.uploadClipModalOpen,
@@ -113,8 +105,6 @@ export function useComposeEditorSession(props: ComposeEditorProps, emit: Compose
     ...catalog,
     onTracksUpdate: project.onTracksUpdate,
     onTimelineScaleUpdate: project.onTimelineScaleUpdate,
-    onTimelineDetachAudio: project.onTimelineDetachAudio,
-    onRegenerateSubtitles: project.onRegenerateSubtitles,
     ...videoFrame,
   };
 }

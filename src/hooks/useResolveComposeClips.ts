@@ -1,60 +1,4 @@
-import type { ComposeTrack, VideoClipItem, VideoComposeClipInput } from "@/types/videoCompose";
-
-/** 片段入参签名：仅 id / 媒体引用变化时触发重载 */
-export function buildComposeClipInputsSignature(inputs: VideoComposeClipInput[]): string {
-  return inputs
-    .map((c) => [c.id, c.taskId ?? "", c.video.url ?? "", c.video.mediaId ?? "", c.video.bizType ?? "", c.video.field ?? ""].join(":"))
-    .join("|");
-}
-
-/** 去掉 query/hash，避免签名 URL 刷新导致媒体身份误判 */
-function normalizeComposeMediaUrl(url: string): string {
-  const trimmed = url.trim();
-  if (!trimmed) return "";
-  const hashIdx = trimmed.indexOf("#");
-  const withoutHash = hashIdx >= 0 ? trimmed.slice(0, hashIdx) : trimmed;
-  const queryIdx = withoutHash.indexOf("?");
-  return queryIdx >= 0 ? withoutHash.slice(0, queryIdx) : withoutHash;
-}
-
-/** 从 clip.config 读取 Step3 taskId（bootstrap 时写入） */
-function readClipTaskId(config: unknown): string {
-  if (!config || typeof config !== "object") return "";
-  const taskId = (config as { taskId?: unknown }).taskId;
-  return taskId != null && String(taskId).trim() ? String(taskId).trim() : "";
-}
-
-/**
- * 判断持久化主轨媒体是否与当前 clips 入参一致，从而可安全 importTracks。
- * 仅按入参 id 对齐比对；主轨上多出的上传片段不参与判断。
- * 双方 taskId 均非空且相等时视为同片（忽略 URL 漂移）；否则比归一化 URL。
- */
-export function mainTrackMatchesClipInputs(tracks: ComposeTrack[] | undefined, inputs: VideoComposeClipInput[]): boolean {
-  if (!inputs.length) return false;
-  const main =
-    (tracks || []).find((t) => t.isMain && t.clips.some((c) => c.type === "video")) ||
-    (tracks || []).find((t) => t.type === "video" && t.clips.some((c) => c.type === "video"));
-  if (!main) return false;
-
-  const byId = new Map(main.clips.filter((c) => c.type === "video").map((c) => [c.id, c] as const));
-
-  for (const input of inputs) {
-    const clip = byId.get(input.id);
-    if (!clip || clip.type !== "video") return false;
-
-    const inputTaskId = (input.taskId || "").trim();
-    const trackTaskId = readClipTaskId(clip.config);
-    if (inputTaskId && trackTaskId) {
-      if (inputTaskId !== trackTaskId) return false;
-      continue;
-    }
-
-    const inputUrl = normalizeComposeMediaUrl(input.video.url || "");
-    const trackUrl = normalizeComposeMediaUrl(clip.sourceUrl || "");
-    if (!inputUrl || !trackUrl || inputUrl !== trackUrl) return false;
-  }
-  return true;
-}
+import type { VideoClipItem } from "@/types/videoCompose";
 
 /** 占位时长（秒）：addClipToMain 在 metadata 未就绪时使用 */
 export const COMPOSE_CLIP_PLACEHOLDER_DURATION_SEC = 0.1;
@@ -126,6 +70,43 @@ export function probeVideoDuration(url: string): Promise<number> {
       } catch {
         // ignore
       }
+    };
+    probe.onerror = () => finish(0);
+    probe.src = url;
+  });
+}
+
+/**
+ * 异步探测单个音频 URL 的真实时长（秒）。
+ * @param url 音频地址
+ * @returns 时长；失败或超时仍无有效值时返回 0
+ */
+export function probeAudioDuration(url: string): Promise<number> {
+  return new Promise((resolve) => {
+    if (!url?.trim()) {
+      resolve(0);
+      return;
+    }
+    const probe = document.createElement("audio");
+    probe.preload = "metadata";
+    let settled = false;
+    const finish = (sec: number) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      probe.onloadedmetadata = null;
+      probe.onerror = null;
+      probe.removeAttribute("src");
+      probe.load();
+      resolve(sec);
+    };
+    const timer = window.setTimeout(() => {
+      const duration = probe.duration;
+      finish(Number.isFinite(duration) && duration > 0 ? duration : 0);
+    }, DURATION_PROBE_TIMEOUT_MS);
+    probe.onloadedmetadata = () => {
+      const duration = probe.duration;
+      finish(Number.isFinite(duration) && duration > 0 ? duration : 0);
     };
     probe.onerror = () => finish(0);
     probe.src = url;
@@ -209,32 +190,4 @@ export async function probeClipDurationsWithRetry(clips: VideoClipItem[], onClip
       probeClipDurations(pending, resolve, onClipReady);
     });
   }
-}
-
-/** 本地只使用已有可播放地址，不请求签名 URL */
-async function resolveMediaRef(ref: VideoComposeClipInput["video"], fallbackRawUrl?: string): Promise<string> {
-  return (ref.url || fallbackRawUrl || "").trim();
-}
-
-/**
- * 将编辑器片段入参解析为可播放的 VideoClipItem 列表。
- * 返回前等待时长探测完成，避免 bootstrap 时仍用占位 0.1s 把片段画成细线。
- */
-export async function resolveComposeClips(inputs: VideoComposeClipInput[]): Promise<VideoClipItem[]> {
-  const clips: VideoClipItem[] = [];
-  for (let idx = 0; idx < inputs.length; idx += 1) {
-    const input = inputs[idx];
-    const url = await resolveMediaRef(input.video);
-    if (!url) continue;
-    clips.push({
-      id: input.id,
-      taskId: input.taskId,
-      title: input.title || `片段 ${idx + 1}`,
-      url,
-      durationSec: 0,
-      src: input.poster || "",
-    });
-  }
-  await probeClipDurationsWithRetry(clips);
-  return clips;
 }

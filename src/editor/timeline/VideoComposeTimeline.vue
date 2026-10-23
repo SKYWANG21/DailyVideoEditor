@@ -27,7 +27,6 @@
       :clip-configs="clipTypeConfigs"
       :track-context-menu="trackContextMenuConfig"
       :clip-context-menu="clipContextMenuConfig"
-      @clip-context-menu-select="onClipContextMenuSelect"
       @data:changed="scheduleDataChanged"
       @track:added="onTrackAdded"
       @track:removed="onTrackRemoved"
@@ -226,14 +225,11 @@ const props = withDefaults(
     tracks: ComposeTrack[];
     /** 只读：隐藏工具栏操作与菜单 */
     readonly?: boolean;
-    /** 正在分离的 video clip id（Editor Hook 传入，用于菜单/loading） */
-    detachingClipIds?: Set<string>;
     /** 工程持久化的时间轴倍率；缺省 1 */
     scale?: number;
   }>(),
   {
     readonly: false,
-    detachingClipIds: () => new Set<string>(),
     scale: 1,
   },
 );
@@ -260,8 +256,6 @@ const emit = defineEmits<{
   "drop-text-template": [payload: { item: ComposeTextTemplateDrag; startTime: number }];
   /** 本地媒体文件拖入轨道（vue-clip-track 原生） */
   "drop-media": [payload: { mediaData: unknown; trackId: string; startTime: number }];
-  /** 右键「分离音轨」：由 Editor 调抽轨 API */
-  "detach-audio": [payload: { clipId: string; sourceUrl: string }];
   /** 时间轴显示倍率变更（写入工程 JSON） */
   "update:scale": [scale: number];
   /** 点轨道头或片段时，把轨道/片段类型交给右栏 */
@@ -340,75 +334,8 @@ const clipTypeConfigs: ClipTypeConfig = {
   },
 };
 
-/** 右键菜单：分离音轨 */
-const DETACH_AUDIO_MENU_KEY = "detach-audio";
-/** 分离进行中 clip 名称后缀 */
-const EXTRACTING_NAME_SUFFIX = " · 分离中";
-
-/** 去掉分离进行中的名称后缀 */
-function stripExtractingNameSuffix(name: string | undefined): string {
-  const raw = name?.trim() || "视频";
-  return raw.endsWith(EXTRACTING_NAME_SUFFIX) ? raw.slice(0, -EXTRACTING_NAME_SUFFIX.length) : raw;
-}
-
 /** clip 删除前 config 快照，供删除联动 */
 const clipConfigBeforeRemove = new Map<string, ComposeMediaClipConfig>();
-
-/**
- * 判断 video 是否处于有效分离态（标记已分离且 linked 原声 clip 仍在时间轴上）。
- */
-function hasActiveDetachedAudio(videoClipId: string): boolean {
-  const videoClip = findMediaClipById(videoClipId);
-  if (!videoClip || videoClip.type !== "video") return false;
-  const config = readClipConfig(videoClip.config);
-  if (!config.audioDetached || !config.linkedAudioClipId) return false;
-  return Boolean(findMediaClipById(config.linkedAudioClipId));
-}
-
-/**
- * 分离已成功但 extractStatus / 名称后缀未清时的修复（持久化中断或 apply 与 clear 非原子）。
- */
-function clearStaleExtractStatusIfDetached(videoClipId: string): void {
-  if (!hasActiveDetachedAudio(videoClipId)) return;
-  const api = videoTrackRef.value;
-  if (!api) return;
-  const videoClip = findMediaClipById(videoClipId);
-  if (!videoClip || videoClip.type !== "video") return;
-  const config = readClipConfig(videoClip.config);
-  const baseName = stripExtractingNameSuffix(videoClip.name);
-  const nameStale = (videoClip.name?.trim() || "") !== baseName;
-  if (config.extractStatus !== "extracting" && !nameStale) return;
-  suppressEmit = true;
-  api.updateClip(videoClipId, {
-    name: baseName,
-    config: {
-      ...config,
-      extractStatus: undefined,
-      extractError: undefined,
-    },
-  });
-  suppressEmit = false;
-}
-
-/** 清除 video 上过期/无效的分离标记，便于删原声轨后再次分离；保持当前音量（分离后为 0） */
-function clearStaleDetachedAudioState(videoClipId: string): void {
-  if (hasActiveDetachedAudio(videoClipId)) return;
-  const api = videoTrackRef.value;
-  if (!api) return;
-  const videoClip = findMediaClipById(videoClipId);
-  if (!videoClip || videoClip.type !== "video") return;
-  const videoConfig = readClipConfig(videoClip.config);
-  if (!videoConfig.audioDetached && !videoConfig.linkedAudioClipId) return;
-  suppressEmit = true;
-  api.updateClip(videoClipId, {
-    config: {
-      ...videoConfig,
-      audioDetached: false,
-      linkedAudioClipId: undefined,
-    },
-  });
-  suppressEmit = false;
-}
 
 /** 删除原声 clip / 原声轨后：解除 video 分离关联，保持静音不恢复内嵌原声 */
 function restoreVideoAfterAudioRemoved(videoClipId: string): void {
@@ -443,43 +370,14 @@ function orphanDetachedAudioAfterVideoRemoved(audioClipId: string): void {
   });
 }
 
-/** 解析 video clip 分离菜单项（文案/禁用态） */
-function resolveDetachMenuItem(clip: Clip): { key: string; label: string; disabled?: boolean } {
-  if (clip.type !== "video") {
-    return { key: DETACH_AUDIO_MENU_KEY, label: "分离音轨" };
-  }
-  const mediaClip = clip as MediaClip;
-  const config = readClipConfig(mediaClip.config);
-  if (props.detachingClipIds?.has(mediaClip.id)) {
-    return { key: DETACH_AUDIO_MENU_KEY, label: "分离中…", disabled: true };
-  }
-  if (hasActiveDetachedAudio(mediaClip.id)) {
-    return { key: DETACH_AUDIO_MENU_KEY, label: "音轨已分离", disabled: true };
-  }
-  if (config.extractStatus === "extracting") {
-    return { key: DETACH_AUDIO_MENU_KEY, label: "分离中…", disabled: true };
-  }
-  if (config.hasEmbeddedAudio === false) {
-    return { key: DETACH_AUDIO_MENU_KEY, label: "该视频无音轨", disabled: true };
-  }
-  if (config.extractStatus === "failed") {
-    return { key: DETACH_AUDIO_MENU_KEY, label: "重试分离" };
-  }
-  return { key: DETACH_AUDIO_MENU_KEY, label: "分离音轨" };
-}
-
-/** 内置复制/剪切/删除 + video 右键分离（文案在 resolveDetachMenuItem，库仅支持静态 byType） */
+/** 内置复制/剪切/删除 */
 const clipContextMenuConfig = computed((): ClipContextMenuConfig => {
   if (props.readonly) {
     return { showCommonItems: false, commonItems: [] };
   }
-  void props.detachingClipIds;
   return {
     showCommonItems: true,
     commonItems: ["copy", "cut", "delete"],
-    byType: {
-      video: [{ key: DETACH_AUDIO_MENU_KEY, label: "分离音轨" }],
-    },
   };
 });
 
@@ -1470,26 +1368,6 @@ function ensureNextAudioTrack(): Track {
   return api.getTracks().find((t) => t.id === id) || track;
 }
 
-/** 获取或创建唯一的「原声」轨（所有分离音轨 clip 共用，与 BGM 轨区分） */
-function ensureOriginalAudioTrack(): Track {
-  const api = videoTrackRef.value!;
-  const existing = api.getTracks().find((t) => t.type === "audio" && t.name.startsWith("原声"));
-  if (existing) return existing;
-
-  const id = `track-original-audio-${generateId()}`;
-  const track: Track = {
-    id,
-    type: "audio",
-    name: "原声",
-    visible: true,
-    locked: false,
-    clips: [],
-    order: 50,
-  };
-  api.addTrack(track);
-  return api.getTracks().find((t) => t.id === id) || track;
-}
-
 /** 按 id 查找 video/audio clip */
 function findMediaClipById(clipId: string): MediaClip | null {
   const api = videoTrackRef.value;
@@ -1501,283 +1379,6 @@ function findMediaClipById(clipId: string): MediaClip | null {
     }
   }
   return null;
-}
-
-/** 「原声」轨上 audioRole=original 的 clip 列表 */
-function listOriginalAudioClips(): MediaClip[] {
-  const api = videoTrackRef.value;
-  if (!api) return [];
-  const track = api.getTracks().find((t) => t.type === "audio" && t.name.startsWith("原声"));
-  if (!track) return [];
-  return track.clips.filter((c): c is MediaClip => c.type === "audio" && readClipConfig(c.config).audioRole === "original");
-}
-
-/** 原声轨末尾时间（秒） */
-function originalAudioTrackEndTime(): number {
-  const clips = listOriginalAudioClips();
-  if (!clips.length) return 0;
-  return Math.max(...clips.map((c) => c.endTime));
-}
-
-/** 两段时间轴区间是否重叠 */
-function rangesOverlap(aStart: number, aEnd: number, bStart: number, bEnd: number): boolean {
-  return aStart < bEnd && bStart < aEnd;
-}
-
-/**
- * 分离原声写入位置：原声轨空则与 video 对齐；已有 clip 且与 video 时段重叠则接到原声轨末尾。
- */
-function resolveDetachedAudioPlacement(videoStart: number, videoEnd: number, timelineDur: number): { startTime: number; endTime: number } {
-  const existing = listOriginalAudioClips();
-  if (!existing.length) {
-    return { startTime: videoStart, endTime: videoEnd };
-  }
-  const wouldOverlap = existing.some((c) => rangesOverlap(videoStart, videoEnd, c.startTime, c.endTime));
-  if (!wouldOverlap) {
-    return { startTime: videoStart, endTime: videoEnd };
-  }
-  const audioStart = originalAudioTrackEndTime();
-  return { startTime: audioStart, endTime: audioStart + timelineDur };
-}
-
-/**
- * 分离成功后：video volume=0，原声写入独立 audio clip，互写 config 关联。
- * @returns 新建 audio clip id
- */
-function applyDetachedAudioPair(videoClipId: string, audioUrl: string, durationSec: number): string | null {
-  const api = videoTrackRef.value;
-  if (!api) return null;
-  const videoClip = findMediaClipById(videoClipId);
-  if (!videoClip || videoClip.type !== "video") return null;
-
-  if (hasActiveDetachedAudio(videoClipId)) {
-    clearStaleExtractStatusIfDetached(videoClipId);
-    return readClipConfig(videoClip.config).linkedAudioClipId || null;
-  }
-  clearStaleDetachedAudioState(videoClipId);
-
-  const refreshedVideoClip = findMediaClipById(videoClipId);
-  if (!refreshedVideoClip || refreshedVideoClip.type !== "video") return null;
-  const videoConfig = readClipConfig(refreshedVideoClip.config);
-  const baseVideoName = stripExtractingNameSuffix(refreshedVideoClip.name);
-
-  const track = ensureOriginalAudioTrack();
-  const trimStart = Math.max(0, refreshedVideoClip.trimStart ?? 0);
-  const timelineDur = Math.max(0.1, refreshedVideoClip.endTime - refreshedVideoClip.startTime);
-  const rate = refreshedVideoClip.playbackRate > 0 ? refreshedVideoClip.playbackRate : 1;
-  const trimEnd =
-    refreshedVideoClip.trimEnd != null && refreshedVideoClip.trimEnd > trimStart
-      ? refreshedVideoClip.trimEnd
-      : trimStart + timelineDur * rate;
-  const audioClipId = `audio-orig-${generateId()}`;
-  const inheritedVolume = refreshedVideoClip.volume != null && Number.isFinite(refreshedVideoClip.volume) ? refreshedVideoClip.volume : 0.8;
-
-  const { startTime: audioStartTime, endTime: audioEndTime } = resolveDetachedAudioPlacement(
-    refreshedVideoClip.startTime,
-    refreshedVideoClip.endTime,
-    timelineDur,
-  );
-
-  suppressEmit = true;
-  api.addClip(track.id, {
-    id: audioClipId,
-    trackId: track.id,
-    type: "audio",
-    name: `${baseVideoName || "原声"} · 音轨`,
-    sourceUrl: audioUrl,
-    originalDuration: Math.max(0.1, durationSec),
-    trimStart,
-    trimEnd,
-    playbackRate: rate,
-    startTime: audioStartTime,
-    endTime: audioEndTime,
-    selected: false,
-    volume: inheritedVolume,
-    config: {
-      audioRole: "original",
-      linkedVideoClipId: videoClipId,
-      sourceVideoUrl: refreshedVideoClip.sourceUrl || "",
-    },
-  });
-  api.updateClip(videoClipId, {
-    name: baseVideoName,
-    volume: 0,
-    config: {
-      ...videoConfig,
-      audioDetached: true,
-      linkedAudioClipId: audioClipId,
-      hasEmbeddedAudio: true,
-      extractStatus: undefined,
-      extractError: undefined,
-    },
-  });
-  suppressEmit = false;
-  onDataChanged();
-  return audioClipId;
-}
-
-/** 标记 video clip 无内嵌音轨（API 返回 hasAudio=false） */
-function markVideoClipNoEmbeddedAudio(videoClipId: string): void {
-  const api = videoTrackRef.value;
-  if (!api) return;
-  const videoClip = findMediaClipById(videoClipId);
-  if (!videoClip || videoClip.type !== "video") return;
-  const videoConfig = readClipConfig(videoClip.config);
-  suppressEmit = true;
-  api.updateClip(videoClipId, {
-    config: { ...videoConfig, hasEmbeddedAudio: false },
-  });
-  suppressEmit = false;
-  onDataChanged();
-}
-
-function getClipSourceUrl(clipId: string): string | null {
-  return findMediaClipById(clipId)?.sourceUrl?.trim() || null;
-}
-
-function getClipConfig(clipId: string): ComposeMediaClipConfig {
-  return readClipConfig(findMediaClipById(clipId)?.config);
-}
-
-/**
- * 写入/清除 video clip 分离状态（仅 extracting/failed；成功分离后清 null）。
- */
-function setVideoExtractStatus(clipId: string, status: "extracting" | "failed" | null, error?: string): void {
-  const api = videoTrackRef.value;
-  if (!api) return;
-  const videoClip = findMediaClipById(clipId);
-  if (!videoClip || videoClip.type !== "video") return;
-  const videoConfig = readClipConfig(videoClip.config);
-  const baseName = stripExtractingNameSuffix(videoClip.name);
-
-  suppressEmit = true;
-  if (status === null) {
-    api.updateClip(clipId, {
-      name: baseName,
-      config: {
-        ...videoConfig,
-        extractStatus: undefined,
-        extractError: undefined,
-      },
-    });
-  } else if (status === "extracting") {
-    api.updateClip(clipId, {
-      name: `${baseName}${EXTRACTING_NAME_SUFFIX}`,
-      config: {
-        ...videoConfig,
-        extractStatus: "extracting",
-        extractError: undefined,
-      },
-    });
-  } else {
-    api.updateClip(clipId, {
-      name: baseName,
-      config: {
-        ...videoConfig,
-        extractStatus: "failed",
-        extractError: error?.trim() || "分离失败，请重试",
-      },
-    });
-  }
-  suppressEmit = false;
-  onDataChanged();
-}
-
-/** 刷新/重进编辑器：清理残留分离态；extracting 且无 linked audio → failed */
-function recoverStaleExtractStatuses(): void {
-  const api = videoTrackRef.value;
-  if (!api) return;
-  let changed = false;
-  suppressEmit = true;
-  for (const track of api.getTracks()) {
-    if (track.type !== "video" && !track.isMain) continue;
-    for (const clip of track.clips) {
-      if (clip.type !== "video") continue;
-      const config = readClipConfig(clip.config);
-      const baseName = stripExtractingNameSuffix(clip.name);
-      const nameStale = (clip.name?.trim() || "") !== baseName;
-
-      if (hasActiveDetachedAudio(clip.id)) {
-        if (config.extractStatus !== "extracting" && !nameStale) continue;
-        api.updateClip(clip.id, {
-          name: baseName,
-          config: {
-            ...config,
-            extractStatus: undefined,
-            extractError: undefined,
-          },
-        });
-        changed = true;
-        continue;
-      }
-
-      if (config.extractStatus !== "extracting") continue;
-      api.updateClip(clip.id, {
-        name: baseName,
-        config: {
-          ...config,
-          extractStatus: "failed",
-          extractError: "分离中断，请重试",
-        },
-      });
-      changed = true;
-    }
-  }
-  for (const track of api.getTracks()) {
-    if (track.type !== "audio") continue;
-    for (const clip of track.clips) {
-      if (clip.type !== "audio") continue;
-      const config = readClipConfig(clip.config);
-      if (config.audioRole !== "original") continue;
-      const rawName = clip.name?.trim() || "";
-      if (!rawName.includes(EXTRACTING_NAME_SUFFIX)) continue;
-      const basePart = stripExtractingNameSuffix(rawName.replace(/ · 音轨$/, "") || "原声");
-      const fixedName = `${basePart} · 音轨`;
-      if (fixedName === rawName) continue;
-      api.updateClip(clip.id, { name: fixedName });
-      changed = true;
-    }
-  }
-  suppressEmit = false;
-  if (changed) {
-    onDataChanged();
-  }
-}
-
-/** 右键菜单：分离音轨（唯一入口，由 Editor 调后端） */
-function onClipContextMenuSelect(key: string, clip: Clip): void {
-  if (props.readonly || key !== DETACH_AUDIO_MENU_KEY) return;
-  const mediaClip = clip as MediaClip;
-  if (mediaClip.type !== "video") return;
-
-  const menuItem = resolveDetachMenuItem(mediaClip);
-  if (menuItem.disabled) {
-    if (menuItem.label === "音轨已分离") {
-      ElMessage.info("音轨已分离");
-    } else if (menuItem.label === "该视频无音轨") {
-      ElMessage.info("该视频无音轨");
-    } else if (menuItem.label === "分离中…") {
-      ElMessage.info("分离进行中…");
-    }
-    return;
-  }
-
-  clearStaleDetachedAudioState(mediaClip.id);
-  if (hasActiveDetachedAudio(mediaClip.id)) {
-    ElMessage.info("音轨已分离");
-    return;
-  }
-  const config = readClipConfig(mediaClip.config);
-  if (config.hasEmbeddedAudio === false) {
-    ElMessage.info("该视频无音轨");
-    return;
-  }
-  const sourceUrl = mediaClip.sourceUrl?.trim();
-  if (!sourceUrl) {
-    ElMessage.warning("无法获取视频地址");
-    return;
-  }
-  emit("detach-audio", { clipId: mediaClip.id, sourceUrl });
 }
 
 /** 删除 clip 时同步清理 linked video/audio 关联 */
@@ -2344,6 +1945,50 @@ function updateMainClipDuration(clipId: string, durationSec: number): void {
   onDataChanged();
 }
 
+/** 音频轨 clip 时长回填（拖入后异步探测），保留 startTime 并后移同轨后续片段 */
+function updateAudioClipDuration(clipId: string, durationSec: number): void {
+  const api = videoTrackRef.value;
+  if (!api || durationSec <= 0.1) return;
+
+  let hostTrack: Track | null = null;
+  let clip: Clip | null = null;
+  for (const track of api.getTracks()) {
+    if (track.type !== "audio") continue;
+    const hit = track.clips.find((c) => c.id === clipId);
+    if (hit && hit.type === "audio") {
+      hostTrack = track;
+      clip = hit;
+      break;
+    }
+  }
+  if (!hostTrack || !clip) return;
+
+  const oldEnd = clip.endTime;
+  const newEnd = clip.startTime + durationSec;
+  const delta = newEnd - oldEnd;
+
+  suppressEmit = true;
+  api.updateClip(clipId, {
+    originalDuration: durationSec,
+    trimStart: 0,
+    trimEnd: durationSec,
+    endTime: newEnd,
+  });
+  if (Math.abs(delta) > 0.001) {
+    for (const c of hostTrack.clips) {
+      if (c.id === clipId) continue;
+      if (c.startTime >= oldEnd - 0.001) {
+        api.updateClip(c.id, {
+          startTime: c.startTime + delta,
+          endTime: c.endTime + delta,
+        });
+      }
+    }
+  }
+  suppressEmit = false;
+  onDataChanged();
+}
+
 /** 按 sourceUrl 移除主轨上全部视频 clip */
 function removeMainClipsByUrl(url: string): void {
   const api = videoTrackRef.value;
@@ -2369,7 +2014,7 @@ const timelineReady: Promise<void> = new Promise((resolve) => {
   resolveTimelineReady = resolve;
 });
 
-/** 只放行一次，卸载时也要解开，避免 loadClips 一直等 */
+/** 只放行一次，卸载时也要解开，避免 bootstrapTimeline 一直等 */
 function settleTimelineReady(): void {
   resolveTimelineReady?.();
   resolveTimelineReady = null;
@@ -2493,15 +2138,6 @@ defineExpose({
   getMainVideoClips,
   ensureSubtitleTrack,
   ensureNextAudioTrack,
-  ensureOriginalAudioTrack,
-  applyDetachedAudioPair,
-  markVideoClipNoEmbeddedAudio,
-  hasActiveDetachedAudio,
-  clearStaleDetachedAudioState,
-  setVideoExtractStatus,
-  recoverStaleExtractStatuses,
-  getClipSourceUrl,
-  getClipConfig,
   getCurrentTime: () => videoTrackRef.value?.getCurrentTime?.() ?? 0,
   getDuration: () => videoTrackRef.value?.getDuration?.() ?? 0,
   getScale: () => normalizeComposeTimelineScale(videoTrackRef.value?.getScale?.()),
@@ -2511,6 +2147,7 @@ defineExpose({
   isPlaying: () => videoTrackRef.value?.isPlaying?.() ?? false,
   setPlaybackRate: (rate: number) => videoTrackRef.value?.setPlaybackRate?.(rate),
   updateMainClipDuration,
+  updateAudioClipDuration,
   rebuildMainClipAt,
   removeMainClipsByUrl,
   patchClipsByType,

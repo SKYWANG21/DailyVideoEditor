@@ -1,24 +1,7 @@
-/** 侧栏文字模板：读取本地 SVG，不请求素材库 */
+/** 侧栏文字模板：默认空目录；mock 或上传时写入，不请求素材库 */
 
 import { shallowRef } from "vue";
-import coolRaw from "@/assets/svg/TextTemplate/cool.svg?raw";
-import hiRaw from "@/assets/svg/TextTemplate/hi.svg?raw";
-import likeRaw from "@/assets/svg/TextTemplate/like.svg?raw";
-import lolRaw from "@/assets/svg/TextTemplate/lol.svg?raw";
-import ooopsRaw from "@/assets/svg/TextTemplate/ooops.svg?raw";
-import pleaseRaw from "@/assets/svg/TextTemplate/please.svg?raw";
-import selfieRaw from "@/assets/svg/TextTemplate/selfie.svg?raw";
-import yepRaw from "@/assets/svg/TextTemplate/yep.svg?raw";
-import yesRaw from "@/assets/svg/TextTemplate/yes.svg?raw";
-import coolUrl from "@/assets/svg/TextTemplate/cool.svg";
-import hiUrl from "@/assets/svg/TextTemplate/hi.svg";
-import likeUrl from "@/assets/svg/TextTemplate/like.svg";
-import lolUrl from "@/assets/svg/TextTemplate/lol.svg";
-import ooopsUrl from "@/assets/svg/TextTemplate/ooops.svg";
-import pleaseUrl from "@/assets/svg/TextTemplate/please.svg";
-import selfieUrl from "@/assets/svg/TextTemplate/selfie.svg";
-import yepUrl from "@/assets/svg/TextTemplate/yep.svg";
-import yesUrl from "@/assets/svg/TextTemplate/yes.svg";
+import { getMockTextTemplateFiles, isVideoComposeMockEnabled } from "./videoComposeMockClips";
 
 /** 文字模板目录中的一项资源 */
 export interface TextTemplateItem {
@@ -113,27 +96,6 @@ export function loadTextTemplateSvg(sourceUrl: string): Promise<string> {
   return Promise.resolve(getCachedTextTemplateSvg(sourceUrl));
 }
 
-interface LocalSvgFile {
-  /** 文件名，同时作为模板 id */
-  id: string;
-  /** SVG 原文 */
-  raw: string;
-  /** 打包后的资源地址 */
-  url: string;
-}
-
-const LOCAL_SVG_FILES: LocalSvgFile[] = [
-  { id: "cool", raw: coolRaw, url: coolUrl },
-  { id: "hi", raw: hiRaw, url: hiUrl },
-  { id: "like", raw: likeRaw, url: likeUrl },
-  { id: "lol", raw: lolRaw, url: lolUrl },
-  { id: "ooops", raw: ooopsRaw, url: ooopsUrl },
-  { id: "please", raw: pleaseRaw, url: pleaseUrl },
-  { id: "selfie", raw: selfieRaw, url: selfieUrl },
-  { id: "yep", raw: yepRaw, url: yepUrl },
-  { id: "yes", raw: yesRaw, url: yesUrl },
-];
-
 /** 解析 SVG 并写入原文缓存，供拖入贴图轨后读取 */
 function buildTemplate(id: string, name: string, raw: string, url: string): TextTemplateItem {
   const defaults = parseFirstTextDefaults(raw);
@@ -152,10 +114,6 @@ function buildTemplate(id: string, name: string, raw: string, url: string): Text
     sourceUrl: url,
     raw,
   };
-}
-
-function buildLocalTemplate(file: LocalSvgFile): TextTemplateItem {
-  return buildTemplate(file.id, file.id, file.raw, file.url);
 }
 
 /** 把本地 SVG 追加进当前会话的花字列表。刷新页面后消失 */
@@ -177,10 +135,11 @@ export async function appendUploadedTextTemplate(file: File): Promise<TextTempla
   return item;
 }
 
-textTemplateCatalog.value = LOCAL_SVG_FILES.map(buildLocalTemplate);
-
-/** 返回已解析的本地文字模板 */
+/** 返回文字模板；mock 开且目录为空时注入调试花字 */
 export async function loadTextTemplateCatalog(): Promise<TextTemplateItem[]> {
+  if (isVideoComposeMockEnabled() && textTemplateCatalog.value.length === 0) {
+    textTemplateCatalog.value = getMockTextTemplateFiles().map((file) => buildTemplate(file.id, file.id, file.raw, file.url));
+  }
   return textTemplateCatalog.value;
 }
 

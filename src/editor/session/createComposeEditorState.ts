@@ -33,6 +33,7 @@ import type VideoComposeSidebar from "../sidebar/VideoComposeSidebar.vue";
 import type VideoComposeTimeline from "../timeline/VideoComposeTimeline.vue";
 import type { SelectedTextClipProps, ComposeInspectorKind } from "../sidebar/VideoComposeSidebar.vue";
 import { findTextTemplateById, isCssHexColor } from "../shared/textTemplateCatalog";
+import { buildMockSfxAssets, isVideoComposeMockEnabled } from "../shared/videoComposeMockClips";
 import { gainToDb } from "../shared/volumeDb";
 import { findClipById, findSelectedIdOfType, firstClipOfType, getLinkedOriginalAudioIdForVideo, tracksStructureSig } from "./trackLookup";
 
@@ -42,8 +43,6 @@ export interface ComposeEditorProps {
   clips: VideoComposeClipInput[];
   /** 编辑器聚合状态 */
   modelValue: VideoComposeEditorModel;
-  /** 无已有字幕时挂载后自动转录 */
-  autoTranscribe?: boolean;
   /** 只读模式 */
   readonly?: boolean;
   /** 各片段历史版本素材库 */
@@ -92,7 +91,6 @@ export interface ComposeEditorState {
   videoReady: Ref<boolean>;
   /** 播放条总时长，跟时间轴 getDuration */
   previewDurationSec: Ref<number>;
-  isTranscribing: Ref<boolean>;
   /** 多轨副本。日常编辑以时间轴内部 store 为准，这里只接 emit，不回灌 */
   tracks: Ref<ComposeTrack[]>;
   /** 上次已写入 model 的轨道结构签名 */
@@ -125,8 +123,6 @@ export interface ComposeEditorState {
   registerComposeExtractAudioUrl: (url: string | undefined | null) => void;
   syncRegistryFromTracks: (tracks: ComposeTrack[]) => void;
   scheduleOrphanComposeExtractCleanup: (tracks: ComposeTrack[]) => void;
-  detachAudioForVideoClip: (videoClipId: string) => Promise<string | null>;
-  detachingClipIds: Ref<Set<string>>;
   audioClipCount: ComputedRef<number>;
   activeAudioId: ComputedRef<string | undefined>;
   activeVideoId: ComputedRef<string | undefined>;
@@ -273,11 +269,10 @@ export function createComposeEditorState(props: ComposeEditorProps): ComposeEdit
     isAdjusting: ref(false),
     videoReady,
     previewDurationSec: ref(0),
-    isTranscribing: ref(false),
     tracks,
     lastPersistedStructureSig: tracksStructureSig(tracks.value),
     audioAssets: ref<BgmItem[]>([]),
-    sfxAssets: ref<BgmItem[]>([]),
+    sfxAssets: ref<BgmItem[]>(isVideoComposeMockEnabled() ? buildMockSfxAssets() : []),
     subtitleAssets: ref<ComposeSubtitleAsset[]>([]),
     selectedClipIds,
     inspectorKind: ref<ComposeInspectorKind | null>(null),
@@ -297,8 +292,6 @@ export function createComposeEditorState(props: ComposeEditorProps): ComposeEdit
     registerComposeExtractAudioUrl: () => undefined,
     syncRegistryFromTracks: () => undefined,
     scheduleOrphanComposeExtractCleanup: () => undefined,
-    detachAudioForVideoClip: () => Promise.resolve(null),
-    detachingClipIds: ref<Set<string>>(new Set()),
     audioClipCount: computed(() => countAudioClips(tracks.value)),
     activeAudioId,
     activeVideoId,

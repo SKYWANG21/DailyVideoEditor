@@ -5,7 +5,7 @@
       <button type="button" class="h-9 rounded-md bg-primary px-4 text-sm text-primary-foreground" @click="onCompose">合成</button>
     </header>
     <div class="min-h-0 flex-1">
-      <VideoComposeEditor v-model="model" :clips="clips" :auto-transcribe="false" />
+      <VideoComposeEditor v-model="model" :clips="clips" />
     </div>
   </div>
 </template>

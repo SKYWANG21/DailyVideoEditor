@@ -17,7 +17,13 @@ import {
   mergeUploadedCatalogVariants,
   resolveCatalogVariantPlayUrl,
 } from "@/hooks/useComposeUploadCatalog";
-import { COMPOSE_CLIP_PLACEHOLDER_DURATION_SEC, probeClipDurationsWithRetry, probeVideoDuration } from "@/hooks/useResolveComposeClips";
+import {
+  COMPOSE_CLIP_PLACEHOLDER_DURATION_SEC,
+  isComposeClipDurationProbeable,
+  probeAudioDuration,
+  probeClipDurationsWithRetry,
+  probeVideoDuration,
+} from "@/hooks/useResolveComposeClips";
 import { appendUploadedTextTemplate, findTextTemplateById } from "../shared/textTemplateCatalog";
 import type { UploadedComposeClip } from "../modals/VideoClipUploadModal.vue";
 import type { ComposeEditorProps, ComposeEditorState } from "./createComposeEditorState";
@@ -280,11 +286,31 @@ export function useComposeCatalog(props: ComposeEditorProps, state: ComposeEdito
     await addCatalogVariantToTimeline(payload.variant, { startTime: payload.startTime });
   }
 
-  /** 音频或音效拖入音频轨 */
+  /**
+   * 占位时长的音频 clip：异步探测真实时长后拉宽，并回写侧栏同 URL 条目。
+   */
+  async function probeAndWidenAudioClip(clipId: string | undefined, item: BgmItem): Promise<void> {
+    if (!clipId || !item.url?.trim()) return;
+    if (!isComposeClipDurationProbeable(item.durationSec)) return;
+
+    const durationSec = await probeAudioDuration(item.url);
+    if (durationSec <= COMPOSE_CLIP_PLACEHOLDER_DURATION_SEC) return;
+
+    state.timelineRef.value?.updateAudioClipDuration?.(clipId, durationSec);
+    ports.syncDerivedClipsFromTimeline();
+
+    const patchList = (list: BgmItem[]): BgmItem[] =>
+      list.map((entry) => (entry.url === item.url ? { ...entry, durationSec } : entry));
+    state.sfxAssets.value = patchList(state.sfxAssets.value);
+    state.audioAssets.value = patchList(state.audioAssets.value);
+  }
+
+  /** 音频或音效拖入音频轨；时长未就绪时上轴后再探并拉宽 */
   function onTimelineDropAudioAsset(payload: { item: BgmItem; startTime: number }): void {
     if (props.readonly) return;
-    state.timelineRef.value?.addAudioClip({ ...payload.item }, payload.startTime);
+    const clipId = state.timelineRef.value?.addAudioClip({ ...payload.item }, payload.startTime);
     ElMessage.success("已添加到时间轴");
+    void probeAndWidenAudioClip(clipId, payload.item);
   }
 
   /** 字幕素材拖入字幕轨 */
@@ -308,9 +334,10 @@ export function useComposeCatalog(props: ComposeEditorProps, state: ComposeEdito
     ports.onAddTextTemplate(item, payload.startTime);
   }
 
-  /** 侧栏上传音频 → 音频轨追加 clip */
+  /** 侧栏上传音频 → 音频轨追加 clip；若时长仍占位则异步探测拉宽 */
   function onAudioUploaded(bgm: BgmItem): void {
-    state.timelineRef.value?.addAudioClip({ ...bgm });
+    const clipId = state.timelineRef.value?.addAudioClip({ ...bgm });
+    void probeAndWidenAudioClip(clipId, bgm);
   }
 
   /** 切换侧栏视频的喜欢态，并立即写入工程 */

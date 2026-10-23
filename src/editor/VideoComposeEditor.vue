@@ -10,7 +10,6 @@
           :timeline-clip-urls="timelineClipUrls"
           :preview-clip-id="previewCatalogVariant?.id"
           :readonly="readonly"
-          :is-transcribing="isTranscribing"
           :audio-clip-count="audioClipCount"
           :audio-assets="audioAssets"
           :sfx-assets="sfxAssets"
@@ -20,7 +19,6 @@
           @upload-clip="uploadClipModalOpen = true"
           @upload-sfx="uploadSfxModalOpen = true"
           @upload-fancy="onFancyUploaded"
-          @regenerate-subtitles="onRegenerateSubtitles"
           @add-subtitle="onAddSubtitle"
           @preview-clip="onCatalogPreview"
           @remove-catalog-clip="onRemoveCatalogVariant"
@@ -137,7 +135,6 @@
         class="h-full min-h-0 w-full min-w-0"
         :tracks="tracks"
         :readonly="readonly"
-        :detaching-clip-ids="detachingClipIds"
         :scale="modelValue.scale"
         @update:tracks="onTracksUpdate"
         @update:scale="onTimelineScaleUpdate"
@@ -151,7 +148,6 @@
         @drop-audio-asset="onTimelineDropAudioAsset"
         @drop-subtitle-asset="onTimelineDropSubtitleAsset"
         @drop-text-template="onTimelineDropTextTemplate"
-        @detach-audio="onTimelineDetachAudio"
         @inspect-track="onInspectTrack"
       />
     </div>
@@ -202,15 +198,12 @@ const props = withDefaults(
     clips: VideoComposeClipInput[];
     /** 编辑器聚合状态 */
     modelValue: VideoComposeEditorModel;
-    /** 无已有字幕时挂载后自动转录 */
-    autoTranscribe?: boolean;
     /** 只读模式 */
     readonly?: boolean;
     /** 各片段历史版本素材库（侧栏展示，不自动上轴） */
     segmentCatalog?: ComposeSegmentClipGroup[];
   }>(),
   {
-    autoTranscribe: true,
     readonly: false,
     segmentCatalog: () => [],
   },
@@ -243,7 +236,6 @@ const {
   isAdjusting,
   videoReady,
   previewDurationSec,
-  isTranscribing,
   tracks,
   audioAssets,
   sfxAssets,
@@ -264,7 +256,6 @@ const {
   textOverlayClips,
   derivedComposeConfig,
   previewCatalogVariant,
-  detachingClipIds,
   uploadAudioModalOpen,
   uploadSfxModalOpen,
   uploadClipModalOpen,
@@ -328,8 +319,6 @@ const {
   onAddSubtitle,
   onTracksUpdate,
   onTimelineScaleUpdate,
-  onTimelineDetachAudio,
-  onRegenerateSubtitles,
   frameAspect,
   canvasSize,
   visibleClipId,
