@@ -63,6 +63,7 @@
           @seek-playback="onPreviewSeek"
           @global-time-update="onPlayerGlobalTimeUpdate"
           @update:is-adjusting="onIsAdjustingUpdate"
+          @update:subtitle-position="onSubtitlePositionChange"
           @update:video-ready="videoReady = $event"
           @clear-catalog-preview="clearCatalogPreview"
           @update:text-clip-rect="onTextClipRectUpdate"
@@ -91,13 +92,12 @@
           :video-volume-label="videoVolumeLabel"
           :audio-volume-label="audioVolumeLabel"
           :bgm-volume="bgmVolume"
+          :video-playback-rate="videoPlaybackRate"
+          :audio-playback-rate="audioPlaybackRate"
           :audio-clip-count="audioClipCount"
           :font-label="fontLabel"
           :style-label="styleLabel"
           :subtitle-style="subtitleStyle"
-          :subtitle-visible="subtitleVisible"
-          :is-adjusting="isAdjusting"
-          :video-ready="videoReady"
           :inspector-kind="inspectorKind"
           :frame-aspect="frameAspect"
           :video-frame="inspectorVideoFrame"
@@ -109,13 +109,13 @@
           @update:video-volume="onVideoVolumeChange"
           @update:beauty="onBeautyChange"
           @update:bgm-volume="onBgmVolumeChange"
+          @update:video-playback-rate="onVideoPlaybackRateChange"
+          @update:audio-playback-rate="onAudioPlaybackRateChange"
           @update:subtitle-style="onSubtitleStyleChange"
-          @update:subtitle-visible="onSubtitleVisibleChange"
           @update:subtitle-text="onSubtitleTextChange"
           @commit:subtitle-text="onSubtitleTextCommit"
           @update:text-clip-props="onTextClipPropsChange"
           @font-popover-toggle="onFontPopoverToggle"
-          @toggle-adjust-position="toggleAdjustSubPosition"
           @apply-global="onApplyGlobal"
           @update:frame-aspect="onFrameAspectChange"
           @update:video-frame="onInspectorFrameChange"
@@ -233,7 +233,6 @@ const {
   derivedMainClips,
   derivedAudioClips,
   playingIdx,
-  isAdjusting,
   videoReady,
   previewDurationSec,
   tracks,
@@ -242,10 +241,11 @@ const {
   subtitleAssets,
   audioClipCount,
   subtitleStyle,
-  subtitleVisible,
   videoVolume,
   beauty,
   bgmVolume,
+  videoPlaybackRate,
+  audioPlaybackRate,
   videoVolumeLabel,
   audioVolumeLabel,
   inspectorKind,
@@ -272,17 +272,18 @@ const {
   onVideoVolumeChange,
   onBeautyChange,
   onBgmVolumeChange,
+  onVideoPlaybackRateChange,
+  onAudioPlaybackRateChange,
   onSubtitleStyleChange,
-  onSubtitleVisibleChange,
   onSubtitleTextChange,
   onSubtitleTextCommit,
   onSelectSubtitleClip,
   onPreviewSubtitleTextUpdate,
+  onSubtitlePositionChange,
   onApplyGlobal,
   onTextClipPropsChange,
   onTextClipRectUpdate,
   onSelectTextClip,
-  toggleAdjustSubPosition,
   onIsAdjustingUpdate,
   onSelectionChanged,
   onInspectTrack,

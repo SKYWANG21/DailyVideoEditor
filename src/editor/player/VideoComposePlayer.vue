@@ -62,19 +62,16 @@
           @select="emit('select-text-clip', $event)"
         />
 
-        <!-- 字幕钉在画幅上，不放进视频变换盒子 -->
-        <div
-          v-if="!isAdjusting"
-          class="pointer-events-none absolute inset-x-0 overflow-hidden"
-          :class="editingSubtitleId ? 'z-[20]' : 'z-[5]'"
-          :style="overlayStyle"
-        >
+        <!-- 按时间命中的字幕各一层；正在调位置的那条改由 draft 框绘制 -->
+        <template v-if="showSubtitles">
           <div
-            v-if="showSubtitles && previewSubtitles.length"
-            class="flex flex-col items-center justify-end text-center"
-            :style="subtitleTextStyle"
+            v-for="sub in passivePreviewSubtitles"
+            :key="sub.id"
+            class="pointer-events-none absolute overflow-hidden"
+            :class="editingSubtitleId === sub.id ? 'z-[20]' : 'z-[5]'"
+            :style="subtitleLayerStyle(sub)"
           >
-            <template v-for="sub in previewSubtitles" :key="sub.id">
+            <div class="flex flex-col items-center justify-end text-center" :style="subtitleLayerTextStyle(sub)">
               <div
                 v-if="editingSubtitleId === sub.id"
                 :ref="(el) => setEditingEl(el)"
@@ -95,23 +92,53 @@
               >
                 {{ sub.text }}
               </div>
-            </template>
+            </div>
           </div>
-        </div>
-        <template v-else>
-          <div class="pointer-events-none absolute z-[5]" :style="centerLineStyle" />
+        </template>
+        <template v-if="isAdjusting">
+          <div class="pointer-events-none absolute z-[6]" :style="centerLineStyle" />
           <div
-            class="absolute z-[5] flex cursor-move flex-col items-center justify-end select-none"
+            class="absolute z-[6] flex cursor-move flex-col items-center justify-end select-none"
             :style="draftBoxStyle"
             @mousedown="startBoxDrag($event, 'move')"
           >
-            <div class="pointer-events-none w-full overflow-hidden text-center" :style="subtitleTextStyle">
-              <div v-for="sub in adjustPreviewSubtitles" :key="sub.id">{{ sub.text }}</div>
+            <div
+              ref="adjustSubtitleContentRef"
+              class="w-full overflow-visible text-center break-words"
+              :style="subtitleTextStyle"
+            >
+              <template v-for="sub in adjustPreviewSubtitles" :key="sub.id">
+                <div
+                  v-if="editingSubtitleId === sub.id"
+                  :ref="(el) => setEditingEl(el)"
+                  class="w-full cursor-text whitespace-pre-wrap break-words outline-none"
+                  contenteditable="true"
+                  @mousedown.stop
+                  @input="onSubtitleEditInput"
+                  @keydown.enter="onSubtitleEditEnter($event, sub.id)"
+                  @keydown.esc.prevent="cancelSubtitleEdit"
+                  @blur="commitSubtitleEdit(sub.id)"
+                />
+                <div
+                  v-else
+                  class="w-full cursor-move whitespace-pre-wrap break-words outline-none"
+                  @dblclick.stop="beginSubtitleEdit(sub, true)"
+                >
+                  {{ sub.text }}
+                </div>
+              </template>
             </div>
-            <div class="absolute top-0 bottom-0 -left-1 w-2 cursor-ew-resize" @mousedown="startBoxDrag($event, 'left')" />
-            <div class="absolute top-0 -right-1 bottom-0 w-2 cursor-ew-resize" @mousedown="startBoxDrag($event, 'right')" />
-            <div class="absolute right-0 left-0 -top-1 h-2 cursor-ns-resize" @mousedown="startBoxDrag($event, 'top')" />
-            <div class="absolute right-0 -bottom-1 left-0 h-2 cursor-ns-resize" @mousedown="startBoxDrag($event, 'bottom')" />
+            <div class="absolute top-0 bottom-0 -left-1 w-2 cursor-ew-resize" @mousedown.stop="startBoxDrag($event, 'left')" />
+            <div class="absolute top-0 -right-1 bottom-0 w-2 cursor-ew-resize" @mousedown.stop="startBoxDrag($event, 'right')" />
+            <button
+              v-for="handle in subtitleCornerHandles"
+              :key="handle.mode"
+              type="button"
+              class="absolute z-10 size-2 -translate-x-1/2 -translate-y-1/2 rounded-[1px] border border-white p-0"
+              :style="{ left: handle.left, top: handle.top, cursor: handle.cursor, background: SUBTITLE_ADJUST_ACCENT }"
+              :aria-label="handle.mode"
+              @mousedown.stop="startBoxDrag($event, handle.mode)"
+            />
           </div>
         </template>
       </div>
@@ -198,7 +225,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, toRef, onBeforeUnmount, onMounted } from "vue";
+import { ref, computed, watch, nextTick, toRef, onBeforeUnmount, onMounted, type CSSProperties } from "vue";
 import { Pause, Play, SkipBack, SkipForward, Video, Volume2, VolumeX } from "@lucide/vue";
 import type {
   ComposeConfig,
@@ -213,7 +240,14 @@ import { readBeautyParams } from "@/types/composeMedia";
 import type { PreviewVideoSize } from "@/types/beautyPreview";
 import { useVideoComposePreview } from "@/hooks/useVideoComposePreview";
 import { useComposePreviewFrame } from "@/hooks/useComposePreviewFrame";
-import { useVideoComposeSubtitleAdjust } from "@/hooks/useVideoComposeSubtitleAdjust";
+import {
+  buildSubtitleOverlayStyle,
+  buildSubtitleTextStyle,
+  SUBTITLE_ADJUST_ACCENT,
+  useVideoComposeSubtitleAdjust,
+  type EnterSubtitleAdjustOptions,
+  type SubtitleAdjustCommit,
+} from "@/hooks/useVideoComposeSubtitleAdjust";
 import { GPU_PIXEL_CANVAS_ID } from "@/utils/beauty/gpuPixelPreview";
 import VideoComposeTextStickerOverlay from "./VideoComposeTextStickerOverlay.vue";
 import VideoComposeFrameBox from "./VideoComposeFrameBox.vue";
@@ -272,6 +306,8 @@ const emit = defineEmits<{
   "global-time-update": [timeSec: number];
   /** 进入/退出字幕位置调整模式 */
   "update:is-adjusting": [value: boolean];
+  /** 拖动字幕框结束，边距和字号属于当前选中字幕 */
+  "update:subtitle-position": [commit: SubtitleAdjustCommit];
   /** 视频元数据是否就绪 */
   "update:video-ready": [value: boolean];
   /** 退出素材库预览，恢复时间轴播放 */
@@ -466,12 +502,19 @@ const textClips = computed<ComposeTextOverlayClip[]>(() => props.textClips || []
 /** 当前选中贴图 id */
 const selectedTextClipId = computed(() => props.selectedTextClipId ?? null);
 
+/** 调整框测宽用文案（当前选中且命中时刻的字幕） */
+const adjustPreviewText = computed(() => props.adjustPreviewSubtitles.map((sub) => sub.text).join("\n"));
+/** 调整框文案容器，供换行后量高 */
+const adjustSubtitleContentRef = ref<HTMLElement | null>(null);
+
 const {
   isAdjusting,
   videoReady,
-  toggle: toggleAdjustSubPosition,
+  enter,
+  exit,
   startBoxDrag,
-  overlayStyle,
+  syncDraftHeightToContent,
+  contentRect,
   draftBoxStyle,
   centerLineStyle,
   subtitleTextStyle,
@@ -479,8 +522,40 @@ const {
   videoSize: canvasSizeRef,
   containerEl: canvasHostRef,
   style: props.subtitleStyle,
-  onEnter: pause,
+  previewText: adjustPreviewText,
+  contentEl: adjustSubtitleContentRef,
+  onPausePlayback: pause,
+  onPositionChange: (commit) => emit("update:subtitle-position", commit),
 });
+
+/** 进入字幕位置调整。pausePlayback 仅主动选中时传 true */
+function enterAdjustSubPosition(opts?: EnterSubtitleAdjustOptions): void {
+  if (props.readonly) return;
+  void enter(opts);
+}
+
+/** 取消选中或离开字幕时退出位置调整 */
+function exitAdjustSubPosition(): void {
+  exit();
+}
+
+/** 非调整态：该条字幕的 absolute 定位 */
+function subtitleLayerStyle(sub: SubtitleItem): CSSProperties {
+  return buildSubtitleOverlayStyle({ marginL: sub.marginL, marginR: sub.marginR, marginV: sub.marginV }, contentRect.value);
+}
+
+/** 非调整态：该条字幕的屏幕字号与字色 */
+function subtitleLayerTextStyle(sub: SubtitleItem): CSSProperties {
+  return buildSubtitleTextStyle(sub, contentRect.value?.scale ?? 1);
+}
+
+/** 调整框四角缩放手柄。拖拽等比改框并改字号 */
+const subtitleCornerHandles: Array<{ mode: "nw" | "ne" | "sw" | "se"; left: string; top: string; cursor: string }> = [
+  { mode: "nw", left: "0%", top: "0%", cursor: "nwse-resize" },
+  { mode: "ne", left: "100%", top: "0%", cursor: "nesw-resize" },
+  { mode: "sw", left: "0%", top: "100%", cursor: "nesw-resize" },
+  { mode: "se", left: "100%", top: "100%", cursor: "nwse-resize" },
+];
 
 /** 正在就地编辑的预览字幕 clip id；有值时渲染独立 contenteditable 节点 */
 const editingSubtitleId = ref<string | null>(null);
@@ -507,6 +582,14 @@ const previewSubtitles = computed<SubtitleItem[]>(() => {
   return [...list, pinned];
 });
 
+/** 调整态仍显示其他命中字幕；正在拖的那条只留在 draft 框里 */
+const passivePreviewSubtitles = computed<SubtitleItem[]>(() => {
+  if (!isAdjusting.value) return previewSubtitles.value;
+  const adjustingId = props.adjustPreviewSubtitles[0]?.id;
+  if (!adjustingId) return previewSubtitles.value;
+  return previewSubtitles.value.filter((sub) => sub.id !== adjustingId);
+});
+
 /** 绑定当前 contenteditable 节点；旧节点卸载时勿冲掉已挂上的新节点 */
 function setEditingEl(el: unknown): void {
   if (el instanceof HTMLElement) {
@@ -518,9 +601,9 @@ function setEditingEl(el: unknown): void {
   }
 }
 
-/** 是否允许预览区双击编辑字幕 */
+/** 是否允许预览区双击编辑字幕（调整态在 draft 框内改字） */
 function canEditPreviewSubtitle(): boolean {
-  return !props.readonly && !props.catalogPreviewActive && !isAdjusting.value;
+  return !props.readonly && !props.catalogPreviewActive;
 }
 
 /** 退出预览字幕编辑态 */
@@ -542,22 +625,24 @@ function selectElementText(el: HTMLElement): void {
   sel?.addRange(range);
 }
 
-/** 同步草稿，供卸载后 commit 使用 */
+/** 同步草稿，供卸载后 commit 使用；超长按框宽换行后钉底边长高 */
 function onSubtitleEditInput(e: Event): void {
   const target = e.currentTarget;
   if (!(target instanceof HTMLElement)) return;
   editingDraft = target.textContent || "";
+  void nextTick(() => syncDraftHeightToContent());
 }
 
-/** 双击预览字幕：暂停、选中 clip、挂载空编辑节点并全选 */
-function onSubtitleDblClick(sub: SubtitleItem): void {
-  if (!canEditPreviewSubtitle()) return;
+/**
+ * 进入预览字幕编辑。
+ * @param selectAll 是否全选；调整框点击进入时不全选，避免抢焦点打断拖框
+ */
+function beginSubtitleEdit(sub: SubtitleItem, selectAll: boolean): void {
+  if (props.readonly || props.catalogPreviewActive) return;
   if (editingSubtitleId.value === sub.id) return;
   if (editingSubtitleId.value) {
     commitSubtitleEdit(editingSubtitleId.value);
   }
-  pause();
-  emit("select-subtitle-clip", sub.id);
   editingOriginText = sub.text || "";
   editingDraft = editingOriginText;
   pinnedEditingSubtitle.value = sub;
@@ -566,16 +651,28 @@ function onSubtitleDblClick(sub: SubtitleItem): void {
     const el = editingEl.value;
     if (!el) return;
     el.textContent = editingOriginText;
-    selectElementText(el);
+    if (selectAll) selectElementText(el);
   });
 }
 
-/** Esc：还原原文并退出，不写回 */
+/** 双击预览字幕：暂停、选中 clip、挂载编辑节点并全选 */
+function onSubtitleDblClick(sub: SubtitleItem): void {
+  if (!canEditPreviewSubtitle() || isAdjusting.value) return;
+  pause();
+  emit("select-subtitle-clip", sub.id);
+  beginSubtitleEdit(sub, true);
+}
+
+/** Esc：还原原文；调整态保留编辑节点，非调整态退出 */
 function cancelSubtitleEdit(): void {
   if (!editingSubtitleId.value) return;
   const el = editingEl.value;
   if (el) el.textContent = editingOriginText;
   editingDraft = editingOriginText;
+  if (isAdjusting.value) {
+    el?.blur();
+    return;
+  }
   exitSubtitleEdit();
 }
 
@@ -588,7 +685,7 @@ function onSubtitleEditEnter(e: KeyboardEvent, clipId: string): void {
 
 /**
  * Enter / blur：读 textContent（或草稿）提交；空文案仍 emit 以便 Editor 提示。
- * expectedId 与当前编辑 id 不一致时视为旧节点残留 blur，忽略。
+ * 调整态提交后保留编辑节点，便于继续改字。
  */
 function commitSubtitleEdit(expectedId?: string): void {
   if (subtitleEditCommitting) return;
@@ -600,14 +697,24 @@ function commitSubtitleEdit(expectedId?: string): void {
   try {
     const el = editingEl.value;
     const text = (el?.textContent ?? editingDraft).trim();
+    const stayAdjustEdit = isAdjusting.value;
     if (!text) {
       emit("update:subtitle-text", { clipId, text: "" });
       if (el) el.textContent = editingOriginText;
-      exitSubtitleEdit();
+      editingDraft = editingOriginText;
+      if (!stayAdjustEdit) exitSubtitleEdit();
       return;
     }
     if (text !== editingOriginText.trim()) {
       emit("update:subtitle-text", { clipId, text });
+    }
+    if (stayAdjustEdit) {
+      editingOriginText = text;
+      editingDraft = text;
+      if (pinnedEditingSubtitle.value?.id === clipId) {
+        pinnedEditingSubtitle.value = { ...pinnedEditingSubtitle.value, text };
+      }
+      return;
     }
     exitSubtitleEdit();
   } finally {
@@ -617,11 +724,25 @@ function commitSubtitleEdit(expectedId?: string): void {
   }
 }
 
-watch(isAdjusting, (adjusting) => {
-  if (adjusting && editingSubtitleId.value) {
-    cancelSubtitleEdit();
-  }
-});
+/** 退出调整或换选中条时提交编辑；进调整不自动改字，需双击框内文案 */
+watch(
+  () => [isAdjusting.value, props.adjustPreviewSubtitles[0]?.id ?? ""] as const,
+  ([adjusting, subId], previous) => {
+    if (!adjusting) {
+      if (previous?.[0] && editingSubtitleId.value) {
+        commitSubtitleEdit(editingSubtitleId.value);
+      }
+      return;
+    }
+    if (!subId) {
+      if (editingSubtitleId.value) exitSubtitleEdit();
+      return;
+    }
+    if (editingSubtitleId.value && editingSubtitleId.value !== subId) {
+      commitSubtitleEdit(editingSubtitleId.value);
+    }
+  },
+);
 
 watch(
   () => props.catalogPreviewActive,
@@ -726,7 +847,8 @@ defineExpose({
   refreshBgm,
   isPlaying,
   init,
-  toggleAdjustSubPosition,
+  enterAdjustSubPosition,
+  exitAdjustSubPosition,
   startBoxDrag,
   isAdjusting,
   videoReady,

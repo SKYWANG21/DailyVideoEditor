@@ -166,6 +166,7 @@ import {
   normalizeComposeTimelineScale,
 } from "@/types/videoCompose";
 import { normalizeFrameAspect } from "../shared/videoFrame";
+import { clampPlaybackRate } from "../shared/playbackRate";
 import type { MediaClip, SubtitleClip, TextClip, Clip, ClipTypeConfig } from "@/clip-track";
 
 /** 可批量改属性的 clip 类型 */
@@ -1067,7 +1068,7 @@ function setEditingEl(el: unknown): void {
 }
 
 /**
- * 双击 clip：仅字幕进入就地编辑（库仍会 seek）。
+ * 双击 clip：仅字幕进入就地编辑（字幕类型不 seek 播放头）。
  */
 function onClipDblClick(clip: Clip): void {
   if (props.readonly || clip.type !== "subtitle") return;
@@ -1989,6 +1990,54 @@ function updateAudioClipDuration(clipId: string, durationSec: number): void {
   onDataChanged();
 }
 
+/** 改 video/audio clip 倍速：保持源 trim，按倍率重算时间轴长度，并后移同轨后续片段 */
+function setMediaClipPlaybackRate(clipId: string, rate: number): void {
+  const api = videoTrackRef.value;
+  if (!api || !clipId) return;
+  const nextRate = clampPlaybackRate(rate);
+
+  let hostTrack: Track | null = null;
+  let clip: MediaClip | null = null;
+  for (const track of api.getTracks()) {
+    const hit = track.clips.find((item) => item.id === clipId);
+    if (hit && (hit.type === "video" || hit.type === "audio")) {
+      hostTrack = track;
+      clip = hit as MediaClip;
+      break;
+    }
+  }
+  if (!hostTrack || !clip) return;
+
+  const oldRate = clip.playbackRate > 0 ? clip.playbackRate : 1;
+  const trimStart = Math.max(0, clip.trimStart ?? 0);
+  const timelineDur = Math.max(0.1, clip.endTime - clip.startTime);
+  const trimEnd = clip.trimEnd != null && clip.trimEnd > trimStart ? clip.trimEnd : trimStart + timelineDur * oldRate;
+  const sourceDur = Math.max(0.1, trimEnd - trimStart);
+  const newDur = Math.max(0.1, sourceDur / nextRate);
+  const oldEnd = clip.endTime;
+  const newEnd = clip.startTime + newDur;
+  const delta = newEnd - oldEnd;
+
+  suppressEmit = true;
+  api.updateClip(clipId, {
+    playbackRate: nextRate,
+    endTime: newEnd,
+  });
+  if (Math.abs(delta) > 0.001) {
+    for (const item of hostTrack.clips) {
+      if (item.id === clipId || item.type === "transition") continue;
+      if (item.startTime >= oldEnd - 0.001) {
+        api.updateClip(item.id, {
+          startTime: item.startTime + delta,
+          endTime: item.endTime + delta,
+        });
+      }
+    }
+  }
+  suppressEmit = false;
+  onDataChanged();
+}
+
 /** 按 sourceUrl 移除主轨上全部视频 clip */
 function removeMainClipsByUrl(url: string): void {
   const api = videoTrackRef.value;
@@ -2148,6 +2197,7 @@ defineExpose({
   setPlaybackRate: (rate: number) => videoTrackRef.value?.setPlaybackRate?.(rate),
   updateMainClipDuration,
   updateAudioClipDuration,
+  setMediaClipPlaybackRate,
   rebuildMainClipAt,
   removeMainClipsByUrl,
   patchClipsByType,

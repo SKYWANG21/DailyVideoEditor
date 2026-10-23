@@ -180,10 +180,12 @@ function handleClipClick(clip: Clip, _event: MouseEvent) {
   tracksStore.selectClip(clip.id);
 }
 
-// 处理 Clip 双击（改变播放时间）
+// 处理 Clip 双击：非字幕跳播放头；字幕仅上报，由上层进就地编辑
 function handleClipDblClick(clip: Clip, time: number) {
-  playbackStore.seekTo(time);
-  emit("seek", time);
+  if (clip.type !== "subtitle") {
+    playbackStore.seekTo(time);
+    emit("seek", time);
+  }
   emit("clip:dblclick", clip, time);
 }
 

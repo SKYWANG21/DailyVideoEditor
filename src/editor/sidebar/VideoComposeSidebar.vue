@@ -22,6 +22,10 @@
             <span class="text-[12px] text-[var(--compose-fg-2)]">{{ videoVolumeLabel || "原视频音量" }}</span>
             <VolumeDbControl :db="videoVolume" @update:db="emit('update:videoVolume', $event)" />
           </div>
+          <div class="flex flex-col gap-2">
+            <span class="text-[12px] text-[var(--compose-fg-2)]">变速</span>
+            <PlaybackRateControl :rate="videoPlaybackRate" @update:rate="emit('update:videoPlaybackRate', $event)" />
+          </div>
           <VideoComposeBeautyControls :beauty="beauty" @update:beauty="emit('update:beauty', $event)" />
           <button type="button" :class="applyClass" @click="onApplyGlobal('video')">应用到全局</button>
         </template>
@@ -30,6 +34,10 @@
           <div class="flex flex-col gap-2">
             <span class="text-[12px] text-[var(--compose-fg-2)]">{{ audioVolumeLabel || "BGM 音量" }}</span>
             <VolumeDbControl :db="bgmVolume" @update:db="emit('update:bgmVolume', $event)" />
+          </div>
+          <div class="flex flex-col gap-2">
+            <span class="text-[12px] text-[var(--compose-fg-2)]">变速</span>
+            <PlaybackRateControl :rate="audioPlaybackRate" @update:rate="emit('update:audioPlaybackRate', $event)" />
           </div>
           <p v-if="audioClipCount > 0" class="text-[12px] text-[var(--compose-fg-3)]">已添加 {{ audioClipCount }} 段音频到时间轴</p>
           <button type="button" :class="applyClass" @click="onApplyGlobal('audio')">应用到全局</button>
@@ -92,37 +100,7 @@
                 @input="onColorTextInput"
               />
             </div>
-            <button
-              type="button"
-              class="col-span-2 flex h-10 items-center justify-center gap-2 rounded-[8px] text-[13px] font-semibold transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-50"
-              :class="
-                isAdjusting
-                  ? 'bg-[var(--compose-accent-soft)] text-[var(--compose-accent)]'
-                  : 'bg-[var(--compose-surface-3)] text-[var(--compose-fg)] hover:brightness-110'
-              "
-              :disabled="!videoReady"
-              @click="emit('toggle-adjust-position')"
-            >
-              <Move :size="16" />
-              {{ isAdjusting ? "完成" : "调整字幕位置" }}
-            </button>
-            <p class="col-span-2 text-[12px] text-[var(--compose-fg-3)]">
-              {{ hasSelectedSubtitle ? "完成后将应用到当前字幕轨" : "完成后将应用到全部字幕轨" }}
-            </p>
-            <button
-              type="button"
-              class="col-span-2 flex h-10 items-center justify-center gap-2 rounded-[8px] text-[13px] font-semibold transition-colors duration-200"
-              :class="
-                subtitleVisible
-                  ? 'bg-[var(--compose-accent-soft)] text-[var(--compose-accent)]'
-                  : 'bg-[var(--compose-surface-3)] text-[var(--compose-fg)] hover:brightness-110'
-              "
-              @click="emit('update:subtitleVisible', !subtitleVisible)"
-            >
-              <Eye v-if="subtitleVisible" :size="16" />
-              <EyeOff v-else :size="16" />
-              {{ subtitleVisible ? "隐藏字幕" : "显示字幕" }}
-            </button>
+            <p class="col-span-2 text-[12px] text-[var(--compose-fg-3)]">位置仅作用于当前字幕；点击应用到全局可同步到全部字幕</p>
           </div>
           <button type="button" :class="applyClass" @click="onApplyGlobal('subtitle')">应用到全局</button>
         </template>
@@ -151,12 +129,13 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
-import { ChevronDown, Eye, EyeOff, Move, SlidersHorizontal } from "@lucide/vue";
+import { ChevronDown, SlidersHorizontal } from "@lucide/vue";
 import type { BeautyParams, ComposeFrameAspect, SubtitleStyleConfig, VideoFrameTransform } from "@/types/videoCompose";
 import VideoComposeBeautyControls from "./VideoComposeBeautyControls.vue";
 import VideoComposeTextTemplateProps from "./VideoComposeTextTemplateProps.vue";
 import VideoComposeTransformPanel from "./VideoComposeTransformPanel.vue";
 import VideoComposeUnderlineTabs from "../shared/VideoComposeUnderlineTabs.vue";
+import PlaybackRateControl from "./PlaybackRateControl.vue";
 import VolumeDbControl from "./VolumeDbControl.vue";
 
 /** 右栏编辑对象，由时间轴选中的片段或轨道决定 */
@@ -194,6 +173,10 @@ const props = defineProps<{
   audioVolumeLabel?: string;
   /** BGM/音频轨音量（dB）；null 为静音 */
   bgmVolume: number | null;
+  /** 当前视频 clip 变速倍率 */
+  videoPlaybackRate: number;
+  /** 当前音频 clip 变速倍率 */
+  audioPlaybackRate: number;
   /** 已添加到时间轴的音频 clip 数量 */
   audioClipCount: number;
   /** 字体展示文案 */
@@ -202,12 +185,6 @@ const props = defineProps<{
   styleLabel: string;
   /** 字幕样式配置（字段对齐 SubtitleClip） */
   subtitleStyle: SubtitleStyleConfig;
-  /** 当前作用目标字幕是否可见（SubtitleClip.visible） */
-  subtitleVisible: boolean;
-  /** 是否处于字幕位置调整模式 */
-  isAdjusting: boolean;
-  /** 预览视频是否就绪 */
-  videoReady: boolean;
   /** 当前编辑对象；空则提示先选择轨道或片段 */
   inspectorKind?: ComposeInspectorKind | null;
   /** 主视频轨画幅 */
@@ -231,15 +208,15 @@ const emit = defineEmits<{
   /** 美颜开关或滑杆变化 */
   "update:beauty": [value: BeautyParams];
   "update:bgmVolume": [value: number | null];
+  "update:videoPlaybackRate": [value: number];
+  "update:audioPlaybackRate": [value: number];
   "update:subtitleStyle": [value: SubtitleStyleConfig];
-  "update:subtitleVisible": [value: boolean];
   /** 侧栏输入：非空时实时写回锁定的字幕 clip */
   "update:subtitle-text": [payload: SubtitleTextEditPayload];
   /** 侧栏失焦/切选中提交（空文案由 Editor 拒绝并提示） */
   "commit:subtitle-text": [payload: SubtitleTextEditPayload];
   "update:text-clip-props": [patch: { text?: string; fontSize?: number; color?: string }];
   "font-popover-toggle": [type: "family" | "style"];
-  "toggle-adjust-position": [];
   "apply-global": [scope: ComposeApplyGlobalScope];
   "update:frame-aspect": [value: ComposeFrameAspect];
   "update:video-frame": [patch: Partial<VideoFrameTransform>];

@@ -5,11 +5,13 @@ import type { BeautyParams, ComposeSubtitleClip, SubtitleStyleConfig } from "@/t
 import { createDefaultSubtitleStyle, pickSubtitleStyleFromClip, readBeautyParams, readClipConfig } from "@/types/videoCompose";
 import type { PatchableClipType } from "../timeline/VideoComposeTimeline.vue";
 import { dbToGain, gainToDb } from "../shared/volumeDb";
+import { clampPlaybackRate } from "../shared/playbackRate";
 import { getTextTemplateAspect, type TextTemplateItem } from "../shared/textTemplateCatalog";
 import type { ComposeApplyGlobalScope, SubtitleTextEditPayload } from "../sidebar/VideoComposeSidebar.vue";
 import type { ComposeEditorProps, ComposeEditorState } from "./createComposeEditorState";
 import type { ComposeEditorPorts } from "./ports";
-import { findClipById, findTrackIdByClipId, firstClipOfType, inspectorKindFromClipType, inspectorKindFromTrackType } from "./trackLookup";
+import { findClipById, firstClipOfType, inspectorKindFromClipType, inspectorKindFromTrackType } from "./trackLookup";
+import type { SubtitleAdjustCommit } from "@/hooks/useVideoComposeSubtitleAdjust";
 
 /** 右栏写回轨道。同步展示值时用 syncingFromTracks 挡住字号 watch 的反向写入 */
 export function useComposeInspector(props: ComposeEditorProps, state: ComposeEditorState, ports: ComposeEditorPorts) {
@@ -37,17 +39,17 @@ export function useComposeInspector(props: ComposeEditorProps, state: ComposeEdi
 
     state.videoVolume.value = volumeToDb(videoClip?.volume, 0.8);
     state.beauty.value = readBeautyParams(readClipConfig(videoClip?.config).beauty);
+    state.videoPlaybackRate.value = videoClip?.playbackRate && videoClip.playbackRate > 0 ? videoClip.playbackRate : 1;
     // 无音轨 clip 时保留用户侧栏已调值，避免 tracks 同步时用默认 -6 dB 覆盖
     if (audioClip) {
       state.bgmVolume.value = volumeToDb(audioClip.volume, 0.5);
+      state.audioPlaybackRate.value = audioClip.playbackRate > 0 ? audioClip.playbackRate : 1;
     }
 
     if (subClip && subClip.type === "subtitle") {
       Object.assign(state.subtitleStyle, pickSubtitleStyleFromClip(subClip));
-      state.subtitleVisible.value = subClip.visible !== false;
     } else {
       Object.assign(state.subtitleStyle, createDefaultSubtitleStyle());
-      state.subtitleVisible.value = true;
     }
     void nextTick(() => {
       state.clock.syncingFromTracks = false;
@@ -77,14 +79,34 @@ export function useComposeInspector(props: ComposeEditorProps, state: ComposeEdi
     patchClips("audio", { volume: dbToGain(db) }, target?.id);
   }
 
+  /** 把倍率写到指定 clip；未指定时写该类型全部 clip，并重算各自时间轴长度 */
+  function writePlaybackRate(type: "video" | "audio", rate: number, clipId?: string): void {
+    const next = clampPlaybackRate(rate);
+    const ids = clipId
+      ? [clipId]
+      : state.tracks.value.flatMap((track) => track.clips.filter((clip) => clip.type === type).map((clip) => clip.id));
+    for (const id of ids) {
+      state.timelineRef.value?.setMediaClipPlaybackRate?.(id, next);
+    }
+  }
+
+  /** 侧栏视频变速写回当前视频 clip */
+  function onVideoPlaybackRateChange(rate: number): void {
+    const next = clampPlaybackRate(rate);
+    state.videoPlaybackRate.value = next;
+    writePlaybackRate("video", next, state.activeVideoId.value);
+  }
+
+  /** 侧栏音频变速写回当前音频 clip */
+  function onAudioPlaybackRateChange(rate: number): void {
+    const next = clampPlaybackRate(rate);
+    state.audioPlaybackRate.value = next;
+    writePlaybackRate("audio", next, resolveActiveAudioVolumeClip()?.id);
+  }
+
   function onSubtitleStyleChange(style: SubtitleStyleConfig): void {
     Object.assign(state.subtitleStyle, style);
     patchClips("subtitle", { ...style }, state.activeSubtitleId.value);
-  }
-
-  function onSubtitleVisibleChange(visible: boolean): void {
-    state.subtitleVisible.value = visible;
-    patchClips("subtitle", { visible }, state.activeSubtitleId.value);
   }
 
   /** 侧栏输入非空时写回 payload.clipId（聚焦时锁定，避免切选中写到新 clip） */
@@ -104,12 +126,23 @@ export function useComposeInspector(props: ComposeEditorProps, state: ComposeEdi
     patchClips("subtitle", { text: trimmed }, payload.clipId);
   }
 
+  /** 退出调整并同步父级标记，避免 emit 滞后挡住下一次 enter */
+  function exitSubtitleAdjustNow(): void {
+    state.playerRef.value?.exitAdjustSubPosition?.();
+    state.isAdjusting.value = false;
+  }
+
   /** 预览区双击字幕：同步时间轴选中态，侧栏切到字幕设置 */
   function onSelectSubtitleClip(clipId: string): void {
     if (props.readonly) return;
+    const leavingId = state.activeSubtitleId.value;
+    if (leavingId && leavingId !== clipId) {
+      exitSubtitleAdjustNow();
+    }
     state.timelineRef.value?.selectClipById?.(clipId);
     state.selectedClipIds.value = [clipId];
     state.inspectorKind.value = "subtitle";
+    syncSubtitleAdjustMode({ pausePlayback: true });
   }
 
   /** 预览区字幕就地编辑提交；空文案拒绝并提示 */
@@ -126,6 +159,7 @@ export function useComposeInspector(props: ComposeEditorProps, state: ComposeEdi
   function onApplyGlobal(scope: ComposeApplyGlobalScope): void {
     if (scope === "audio") {
       patchClips("audio", { volume: dbToGain(state.bgmVolume.value) });
+      writePlaybackRate("audio", state.audioPlaybackRate.value);
       return;
     }
     if (scope === "video") {
@@ -133,11 +167,12 @@ export function useComposeInspector(props: ComposeEditorProps, state: ComposeEdi
         volume: dbToGain(state.videoVolume.value),
         config: { beauty: { ...state.beauty.value } },
       });
+      writePlaybackRate("video", state.videoPlaybackRate.value);
       return;
     }
+    // 不写 visible，避免「应用到全局」误改各条字幕可见性
     patchClips("subtitle", {
       ...state.subtitleStyle,
-      visible: state.subtitleVisible.value,
     });
   }
 
@@ -176,58 +211,95 @@ export function useComposeInspector(props: ComposeEditorProps, state: ComposeEdi
 
   /** 预览区点选贴图：同步时间轴选中态，侧栏切到属性面板 */
   function onSelectTextClip(clipId: string): void {
+    if (state.activeSubtitleId.value && state.activeSubtitleId.value !== clipId) {
+      exitSubtitleAdjustNow();
+    }
     state.timelineRef.value?.selectClipById?.(clipId);
     state.selectedClipIds.value = [clipId];
     state.inspectorKind.value = "text";
+    syncSubtitleAdjustMode();
   }
 
-  function toggleAdjustSubPosition(): void {
-    state.playerRef.value?.toggleAdjustSubPosition();
+  /** 拖动字幕框结束：边距和字号只写入当前选中字幕 */
+  function onSubtitlePositionChange(commit: SubtitleAdjustCommit): void {
+    const clipId = state.activeSubtitleId.value;
+    if (!clipId) return;
+    state.subtitleStyle.marginL = commit.marginL;
+    state.subtitleStyle.marginR = commit.marginR;
+    state.subtitleStyle.marginV = commit.marginV;
+    state.subtitleStyle.fontSize = commit.fontSize;
+    patchClips("subtitle", {
+      marginL: commit.marginL,
+      marginR: commit.marginR,
+      marginV: commit.marginV,
+      fontSize: commit.fontSize,
+    }, clipId);
   }
 
-  /** 退出调整模式时：位置写回整轨（未选中字幕则全部字幕轨），字号仍按原 clip 范围 */
-  function onIsAdjustingUpdate(next: boolean): void {
-    const wasAdjusting = state.isAdjusting.value;
-    state.isAdjusting.value = next;
-    if (wasAdjusting && !next) {
-      const positionPatch = {
-        marginL: state.subtitleStyle.marginL,
-        marginR: state.subtitleStyle.marginR,
-        marginV: state.subtitleStyle.marginV,
-      };
-      const selectedId = state.activeSubtitleId.value;
-      const trackId = findTrackIdByClipId(state.tracks.value, selectedId);
-      if (trackId) {
-        state.timelineRef.value?.patchClipsByType("subtitle", positionPatch, { trackId });
-      } else {
-        patchClips("subtitle", positionPatch, selectedId);
-      }
-      patchClips("subtitle", { fontSize: state.subtitleStyle.fontSize }, selectedId);
+  /** playhead 是否落在选中字幕上。半开区间，与预览过滤一致 */
+  function selectedSubtitleHitsPlayhead(): boolean {
+    const clip = findClipById(state.tracks.value, state.activeSubtitleId.value);
+    if (!clip || clip.type !== "subtitle" || clip.visible === false || !clip.text?.trim()) return false;
+    const timeSec = state.globalTime.value;
+    return timeSec >= clip.startTime && timeSec < clip.endTime;
+  }
+
+  /** 右栏停在字幕且 playhead 在该 clip 内才出调整框 */
+  function syncSubtitleAdjustMode(opts?: { pausePlayback?: boolean }): void {
+    const shouldAdjust = !props.readonly && state.inspectorKind.value === "subtitle" && selectedSubtitleHitsPlayhead();
+    if (shouldAdjust) {
+      // 总是 enter：换选中条要重铺 draft；exit 后 state.isAdjusting 可能仍滞后为 true
+      void state.playerRef.value?.enterAdjustSubPosition?.(opts);
+      return;
     }
+    exitSubtitleAdjustNow();
+  }
+
+  /** 播放路过区间：只显隐框，不暂停 */
+  watch(
+    () => [state.globalTime.value, state.activeSubtitleId.value, state.inspectorKind.value] as const,
+    () => {
+      syncSubtitleAdjustMode();
+    },
+  );
+
+  /** 调整态开关只同步标记。位置在拖动结束时已写入当前 clip */
+  function onIsAdjustingUpdate(next: boolean): void {
+    state.isAdjusting.value = next;
   }
 
   function onSelectionChanged(ids: string[]): void {
-    state.selectedClipIds.value = ids || [];
+    const nextIds = ids || [];
+    const leavingSubtitle = Boolean(state.activeSubtitleId.value && !nextIds.includes(state.activeSubtitleId.value));
+    if (leavingSubtitle) {
+      exitSubtitleAdjustNow();
+    }
+    state.selectedClipIds.value = nextIds;
     syncSidebarFromTracks();
-    if (!ids?.length) {
+    if (!nextIds.length) {
       state.inspectorKind.value = null;
+      syncSubtitleAdjustMode();
       return;
     }
-    for (const id of ids) {
+    for (const id of nextIds) {
       const clip = findClipById(state.tracks.value, id);
       if (!clip) continue;
       const kind = inspectorKindFromClipType(clip.type);
       if (kind) {
         state.inspectorKind.value = kind;
+        // 时间轴点选字幕：命中区间时进框并暂停；播放路过不走这里
+        syncSubtitleAdjustMode(kind === "subtitle" ? { pausePlayback: true } : undefined);
         return;
       }
     }
     state.inspectorKind.value = null;
+    syncSubtitleAdjustMode();
   }
 
   /** 点轨道头时切换右栏，不改轨道数据 */
   function onInspectTrack(trackType: string): void {
     state.inspectorKind.value = inspectorKindFromTrackType(trackType);
+    syncSubtitleAdjustMode();
   }
 
   const fontPopover = useFontPopover(state, onSubtitleStyleChange);
@@ -248,8 +320,9 @@ export function useComposeInspector(props: ComposeEditorProps, state: ComposeEdi
     onVideoVolumeChange,
     onBeautyChange,
     onBgmVolumeChange,
+    onVideoPlaybackRateChange,
+    onAudioPlaybackRateChange,
     onSubtitleStyleChange,
-    onSubtitleVisibleChange,
     onSubtitleTextChange,
     onSubtitleTextCommit,
     onSelectSubtitleClip,
@@ -258,7 +331,7 @@ export function useComposeInspector(props: ComposeEditorProps, state: ComposeEdi
     onTextClipPropsChange,
     onTextClipRectUpdate,
     onSelectTextClip,
-    toggleAdjustSubPosition,
+    onSubtitlePositionChange,
     onIsAdjustingUpdate,
     onSelectionChanged,
     onInspectTrack,

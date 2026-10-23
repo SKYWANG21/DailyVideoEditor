@@ -24,6 +24,7 @@ import {
   getDefaultSubtitleStyleSnapshot,
   mapTracksToComposeConfig,
   mapTracksToTextOverlayClips,
+  pickSubtitleStyleFromClip,
   readClipConfig,
   readTextClipConfig,
 } from "@/types/videoCompose";
@@ -103,13 +104,16 @@ export interface ComposeEditorState {
   /** 右栏当前编辑对象；未选中轨道或片段时为空 */
   inspectorKind: Ref<ComposeInspectorKind | null>;
   subtitleStyle: SubtitleStyleConfig;
-  subtitleVisible: Ref<boolean>;
   /** 侧栏视频音量（dB）；null 为静音 */
   videoVolume: Ref<number | null>;
   /** 侧栏美颜 */
   beauty: Ref<BeautyParams>;
   /** 侧栏音轨音量（dB）；null 为静音 */
   bgmVolume: Ref<number | null>;
+  /** 当前视频 clip 变速倍率 */
+  videoPlaybackRate: Ref<number>;
+  /** 当前音频 clip 变速倍率 */
+  audioPlaybackRate: Ref<number>;
   uploadedCatalogVariants: Ref<ComposeSegmentClipVariant[]>;
   /** 已喜欢的视频媒体，随工程保存 */
   likedMedia: Ref<MediaRef[]>;
@@ -146,6 +150,25 @@ function isSubtitleActive(sub: SubtitleItem, timeSec: number): boolean {
   const start = parseSubtitleClock(sub.start);
   const end = parseSubtitleClock(sub.end);
   return timeSec >= start && timeSec < end;
+}
+
+/** 字幕 clip → 预览条目。边距和字体从该条拷贝，同刻多条互不覆盖 */
+function subtitleItemFromClip(clip: ComposeSubtitleClip): SubtitleItem {
+  const style = pickSubtitleStyleFromClip(clip);
+  return {
+    id: clip.id,
+    start: formatSubtitleClock(clip.startTime),
+    end: formatSubtitleClock(clip.endTime),
+    text: clip.text,
+    marginL: style.marginL,
+    marginR: style.marginR,
+    marginV: style.marginV,
+    fontFamily: style.fontFamily,
+    fontSize: style.fontSize,
+    color: style.color,
+    bold: style.bold,
+    italic: style.italic,
+  };
 }
 
 /** 创建一次编辑会话的状态。调用方必须在 setup 里同步执行 */
@@ -213,40 +236,24 @@ export function createComposeEditorState(props: ComposeEditorProps): ComposeEdit
       if (track.type !== "subtitle") continue;
       for (const clip of track.clips) {
         if (clip.type !== "subtitle" || clip.visible === false || !clip.text?.trim()) continue;
-        items.push({
-          id: clip.id,
-          start: formatSubtitleClock(clip.startTime),
-          end: formatSubtitleClock(clip.endTime),
-          text: clip.text,
-        });
+        items.push(subtitleItemFromClip(clip));
       }
     }
     return items;
   });
 
+  /** 当前时刻命中的字幕。同刻多条（含多轨）全部保留 */
   const visiblePreviewSubtitles = computed(() => {
     const timeSec = globalTime.value;
     return subtitleItemsFromTrack.value.filter((sub) => sub.text.trim() && isSubtitleActive(sub, timeSec));
   });
 
+  /** 调整框文案：仅选中且当前时刻命中的那条 */
   const adjustPreviewSubtitles = computed<SubtitleItem[]>(() => {
-    if (visiblePreviewSubtitles.value.length) return visiblePreviewSubtitles.value;
-    for (const track of tracks.value) {
-      if (track.type !== "subtitle") continue;
-      for (const clip of track.clips) {
-        if (clip.type === "subtitle" && clip.text?.trim()) {
-          return [
-            {
-              id: clip.id,
-              start: formatSubtitleClock(clip.startTime),
-              end: formatSubtitleClock(clip.endTime),
-              text: clip.text,
-            },
-          ];
-        }
-      }
-    }
-    return [{ id: "placeholder", start: "00:00.000", end: "00:00.000", text: "字幕预览" }];
+    const selectedId = activeSubtitleId.value;
+    if (!selectedId) return [];
+    const hit = visiblePreviewSubtitles.value.find((sub) => sub.id === selectedId);
+    return hit ? [hit] : [];
   });
 
   return {
@@ -277,10 +284,11 @@ export function createComposeEditorState(props: ComposeEditorProps): ComposeEdit
     selectedClipIds,
     inspectorKind: ref<ComposeInspectorKind | null>(null),
     subtitleStyle,
-    subtitleVisible: ref(true),
     videoVolume: ref<number | null>(gainToDb(0.8)),
     beauty: ref<BeautyParams>(createDefaultBeautyParams()),
     bgmVolume: ref<number | null>(gainToDb(0.5)),
+    videoPlaybackRate: ref(1),
+    audioPlaybackRate: ref(1),
     uploadedCatalogVariants: ref<ComposeSegmentClipVariant[]>([]),
     likedMedia: ref<MediaRef[]>([]),
     previewCatalogVariant: ref<ComposeSegmentClipVariant | null>(null),

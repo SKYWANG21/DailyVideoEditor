@@ -126,7 +126,7 @@ export function createDefaultComposeConfig(): ComposeConfig {
   };
 }
 
-/** 单条字幕（start/end 为 MM:SS.mmm） */
+/** 单条字幕（start/end 为 MM:SS.mmm）。预览按本条边距和字体各自定位，不跟共享 subtitleStyle */
 export interface SubtitleItem {
   /** 字幕唯一 id */
   id: string;
@@ -136,6 +136,22 @@ export interface SubtitleItem {
   end: string;
   /** 字幕文本 */
   text: string;
+  /** 左边距（视频原生像素） */
+  marginL: number;
+  /** 右边距（视频原生像素） */
+  marginR: number;
+  /** 底边距（视频原生像素） */
+  marginV: number;
+  /** 字体名 */
+  fontFamily: string;
+  /** 字号（视频原生像素）；0 表示待预览换算 */
+  fontSize: number;
+  /** 字体颜色 #RRGGBB */
+  color: string;
+  /** 是否加粗 */
+  bold: boolean;
+  /** 是否斜体 */
+  italic: boolean;
 }
 
 /** 字幕样式，对齐 ASS 烧录字段 */
@@ -161,7 +177,7 @@ export interface SubtitleStyleConfig {
 }
 
 /** 预览区字幕默认屏幕字号（CSS px） */
-export const DEFAULT_SUBTITLE_SCREEN_FONT_PX = 20;
+export const DEFAULT_SUBTITLE_SCREEN_FONT_PX = 14;
 
 /** ASS Fontsize 相对同数值 CSS font-size 的视觉比例 */
 export const ASS_TO_CSS_VISUAL_RATIO = 0.72;
