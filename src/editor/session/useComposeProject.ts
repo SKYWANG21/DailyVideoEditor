@@ -86,6 +86,7 @@ export function useComposeProject(
       bizId: props.modelValue.bizId,
       tracks: JSON.parse(JSON.stringify(exported)),
       uploadedClipCatalog: JSON.parse(JSON.stringify(state.uploadedCatalogVariants.value)),
+      likedMedia: JSON.parse(JSON.stringify(state.likedMedia.value)),
       composeExtractAudioUrls: [...state.composeExtractAudioUrls.value],
       scale: normalizeComposeTimelineScale(state.timelineRef.value?.getScale?.() ?? props.modelValue.scale),
     };

@@ -5,7 +5,8 @@
         <VideoComposeAssetPanel
           v-if="!readonly"
           class="h-full min-h-0 w-full min-w-0"
-          :segment-catalog="mergedSegmentCatalog"
+          :video-variants="videoCatalogVariants"
+          :liked-media-keys="likedMediaKeys"
           :timeline-clip-urls="timelineClipUrls"
           :preview-clip-id="previewCatalogVariant?.id"
           :readonly="readonly"
@@ -17,11 +18,18 @@
           :text-templates="textTemplateCatalog"
           @open-upload-bgm="uploadAudioModalOpen = true"
           @upload-clip="uploadClipModalOpen = true"
+          @upload-sfx="uploadSfxModalOpen = true"
+          @upload-fancy="onFancyUploaded"
           @regenerate-subtitles="onRegenerateSubtitles"
           @add-subtitle="onAddSubtitle"
           @preview-clip="onCatalogPreview"
           @remove-catalog-clip="onRemoveCatalogVariant"
-        />
+          @toggle-like="onToggleCatalogLike"
+        >
+          <template v-for="name in forwardedActionSlots" :key="name" #[name]>
+            <slot :name="name" />
+          </template>
+        </VideoComposeAssetPanel>
         <div
           v-if="!readonly"
           class="compose-split compose-split--col"
@@ -150,6 +158,15 @@
 
     <BgmUploadModal v-model:open="uploadAudioModalOpen" :submitting="false" @uploaded="onAudioUploaded" />
 
+    <BgmUploadModal
+      v-model:open="uploadSfxModalOpen"
+      title="上传音效"
+      picker-text="点击或拖拽上传音效"
+      success-text="已添加音效"
+      :submitting="false"
+      @uploaded="onSfxUploaded"
+    />
+
     <VideoClipUploadModal v-if="!readonly" v-model:open="uploadClipModalOpen" @uploaded="onClipUploaded" />
 
     <SubtitleFontPopover
@@ -167,6 +184,7 @@
 </template>
 
 <script setup lang="ts">
+import { computed, useSlots } from "vue";
 import VideoComposeAssetPanel from "./asset-panel/VideoComposeAssetPanel.vue";
 import VideoComposePlayer from "./player/VideoComposePlayer.vue";
 import VideoComposeSidebar from "./sidebar/VideoComposeSidebar.vue";
@@ -202,6 +220,14 @@ const emit = defineEmits<{
   "update:modelValue": [value: VideoComposeEditorModel];
   ready: [];
 }>();
+
+/** 分类操作插槽名。外壳没传时不转发，面板保留默认上传按钮 */
+const actionSlotNames = ["video-actions", "audio-actions", "subtitle-actions", "fancy-actions", "sfx-actions"] as const;
+
+const editorSlots = useSlots();
+
+/** 只转发外壳真正传入的分类操作插槽 */
+const forwardedActionSlots = computed(() => actionSlotNames.filter((name) => editorSlots[name]));
 
 const {
   shellRef,
@@ -240,6 +266,7 @@ const {
   previewCatalogVariant,
   detachingClipIds,
   uploadAudioModalOpen,
+  uploadSfxModalOpen,
   uploadClipModalOpen,
   visiblePreviewSubtitles,
   adjustPreviewSubtitles,
@@ -279,7 +306,8 @@ const {
   onFontPopoverToggle,
   onFontOptionSelect,
   onStyleOptionSelect,
-  mergedSegmentCatalog,
+  videoCatalogVariants,
+  likedMediaKeys,
   catalogPreviewActive,
   previewOverrideClips,
   previewCatalogLabel,
@@ -293,6 +321,9 @@ const {
   onTimelineDropSubtitleAsset,
   onTimelineDropTextTemplate,
   onAudioUploaded,
+  onSfxUploaded,
+  onFancyUploaded,
+  onToggleCatalogLike,
   onClipUploaded,
   onAddSubtitle,
   onTracksUpdate,
@@ -330,6 +361,7 @@ const {
   --compose-success: #1fae69;
   --compose-warning: #e8960f;
   --compose-danger: #ef3347;
+  --compose-like: #f472b6;
   --compose-stage: #f1f1f5;
   --compose-thumb: #c9c9d4;
   --compose-shadow-card: 0 4px 24px rgba(14, 14, 17, 0.06);
@@ -354,6 +386,7 @@ const {
   --compose-success: #2fc77e;
   --compose-warning: #ffb547;
   --compose-danger: #ff4d5e;
+  --compose-like: #f472b6;
   --compose-stage: #08080c;
   --compose-thumb: #2e2e44;
   --compose-shadow-card: 0 4px 24px rgba(0, 0, 0, 0.3);

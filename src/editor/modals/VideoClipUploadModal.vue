@@ -5,7 +5,7 @@
         class="bg-card border border-border rounded-[10px] shadow-[0_10px_40px_rgba(0,0,0,0.2)] w-full max-w-[640px] mx-4 flex flex-col overflow-hidden"
       >
         <div class="px-6 pt-6 pb-4 shrink-0 flex items-start justify-between">
-          <p class="text-[18px] font-bold text-foreground">上传视频片段</p>
+          <p class="text-[18px] font-bold text-foreground">上传视频</p>
           <button
             class="w-8 h-8 rounded-full bg-muted hover:bg-muted/80 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors shrink-0 ml-4"
             @click="close"

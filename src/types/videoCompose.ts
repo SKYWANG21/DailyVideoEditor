@@ -423,6 +423,11 @@ export interface VideoComposeEditorModel {
   /** 侧栏「上传片段」素材库（持久化，避免步骤切换丢失） */
   uploadedClipCatalog?: ComposeSegmentClipVariant[];
   /**
+   * 侧栏视频的喜欢态。按 url 或 mediaId 匹配，随工程保存。
+   * 只保留已喜欢的媒体引用。
+   */
+  likedMedia?: MediaRef[];
+  /**
    * 本会话/工程内曾生成的 compose_extract 原声 OSS URL；
    * 离开/保存时与 tracks 对比，删除未引用孤儿文件（删 clip 不立刻删 OSS，便于 undo）。
    */
@@ -444,6 +449,17 @@ export interface MediaRef {
   bizType?: MediaBizType;
   /** 签名字段，默认 videoUrl */
   field?: string;
+  /** 是否喜欢。侧栏视频卡片切换后随工程保存 */
+  liked?: boolean;
+}
+
+/** 喜欢态匹配键。有 mediaId 时按素材库 id，否则按可播放地址 */
+export function composeMediaLikeKey(media: Pick<MediaRef, "url" | "mediaId">): string {
+  if (typeof media.mediaId === "number" && Number.isFinite(media.mediaId)) {
+    return `id:${media.mediaId}`;
+  }
+  const url = media.url?.trim();
+  return url ? `url:${url}` : "";
 }
 
 /** 编辑器视频片段入参 */

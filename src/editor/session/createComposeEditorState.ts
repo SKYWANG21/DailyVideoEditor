@@ -16,6 +16,7 @@ import type {
   VideoComposeClipInput,
   VideoComposeEditorModel,
   ComposeSegmentClipGroup,
+  MediaRef,
 } from "@/types/videoCompose";
 import {
   countAudioClips,
@@ -112,10 +113,13 @@ export interface ComposeEditorState {
   /** 侧栏音轨音量（dB）；null 为静音 */
   bgmVolume: Ref<number | null>;
   uploadedCatalogVariants: Ref<ComposeSegmentClipVariant[]>;
+  /** 已喜欢的视频媒体，随工程保存 */
+  likedMedia: Ref<MediaRef[]>;
   /** 侧栏素材库当前预览中的历史版本 */
   previewCatalogVariant: Ref<ComposeSegmentClipVariant | null>;
   previewClipDuration: Ref<number>;
   uploadAudioModalOpen: Ref<boolean>;
+  uploadSfxModalOpen: Ref<boolean>;
   uploadClipModalOpen: Ref<boolean>;
   composeExtractAudioUrls: Ref<string[]>;
   registerComposeExtractAudioUrl: (url: string | undefined | null) => void;
@@ -283,9 +287,11 @@ export function createComposeEditorState(props: ComposeEditorProps): ComposeEdit
     beauty: ref<BeautyParams>(createDefaultBeautyParams()),
     bgmVolume: ref<number | null>(gainToDb(0.5)),
     uploadedCatalogVariants: ref<ComposeSegmentClipVariant[]>([]),
+    likedMedia: ref<MediaRef[]>([]),
     previewCatalogVariant: ref<ComposeSegmentClipVariant | null>(null),
     previewClipDuration: ref(0),
     uploadAudioModalOpen: ref(false),
+    uploadSfxModalOpen: ref(false),
     uploadClipModalOpen: ref(false),
     composeExtractAudioUrls: ref<string[]>([]),
     registerComposeExtractAudioUrl: () => undefined,

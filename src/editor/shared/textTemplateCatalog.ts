@@ -134,23 +134,47 @@ const LOCAL_SVG_FILES: LocalSvgFile[] = [
   { id: "yes", raw: yesRaw, url: yesUrl },
 ];
 
-function buildLocalTemplate(file: LocalSvgFile): TextTemplateItem {
-  const defaults = parseFirstTextDefaults(file.raw);
-  const viewBox = parseViewBoxSize(file.raw);
-  svgRawCache.set(file.url, file.raw);
-  svgRawCache.set(file.id, file.raw);
+/** 解析 SVG 并写入原文缓存，供拖入贴图轨后读取 */
+function buildTemplate(id: string, name: string, raw: string, url: string): TextTemplateItem {
+  const defaults = parseFirstTextDefaults(raw);
+  const viewBox = parseViewBoxSize(raw);
+  svgRawCache.set(url, raw);
+  svgRawCache.set(id, raw);
   return {
-    id: file.id,
-    name: file.id,
-    defaultText: defaults.text || file.id,
+    id,
+    name,
+    defaultText: defaults.text || name,
     defaultColor: defaults.color,
     defaultFontSize: defaults.fontSize,
     viewBoxW: viewBox.w,
     viewBoxH: viewBox.h,
-    url: file.url,
-    sourceUrl: file.url,
-    raw: file.raw,
+    url,
+    sourceUrl: url,
+    raw,
   };
+}
+
+function buildLocalTemplate(file: LocalSvgFile): TextTemplateItem {
+  return buildTemplate(file.id, file.id, file.raw, file.url);
+}
+
+/** 把本地 SVG 追加进当前会话的花字列表。刷新页面后消失 */
+export async function appendUploadedTextTemplate(file: File): Promise<TextTemplateItem> {
+  const fileName = file.name.trim();
+  const isSvg = file.type === "image/svg+xml" || fileName.toLowerCase().endsWith(".svg");
+  if (!isSvg) {
+    throw new Error("请上传 SVG 文件");
+  }
+  const raw = (await file.text()).trim();
+  if (!/<svg[\s>]/i.test(raw)) {
+    throw new Error("文件不是有效的 SVG");
+  }
+  const baseName = fileName.replace(/\.svg$/i, "").trim() || "花字";
+  const id = `upload-fancy-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  const url = URL.createObjectURL(new Blob([raw], { type: "image/svg+xml" }));
+  const item = buildTemplate(id, baseName, raw, url);
+  textTemplateCatalog.value = [...textTemplateCatalog.value, item];
+  return item;
 }
 
 textTemplateCatalog.value = LOCAL_SVG_FILES.map(buildLocalTemplate);

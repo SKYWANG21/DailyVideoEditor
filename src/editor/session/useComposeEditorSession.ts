@@ -104,6 +104,7 @@ export function useComposeEditorSession(props: ComposeEditorProps, emit: Compose
     previewCatalogVariant: state.previewCatalogVariant,
     detachingClipIds: state.detachingClipIds,
     uploadAudioModalOpen: state.uploadAudioModalOpen,
+    uploadSfxModalOpen: state.uploadSfxModalOpen,
     uploadClipModalOpen: state.uploadClipModalOpen,
     visiblePreviewSubtitles: state.visiblePreviewSubtitles,
     adjustPreviewSubtitles: state.adjustPreviewSubtitles,

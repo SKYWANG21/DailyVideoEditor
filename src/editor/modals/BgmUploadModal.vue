@@ -5,7 +5,7 @@
         class="bg-card border border-border rounded-[10px] shadow-[0_10px_40px_rgba(0,0,0,0.2)] w-full max-w-[640px] mx-4 flex flex-col overflow-hidden"
       >
         <div class="px-6 pt-6 pb-4 shrink-0 flex items-start justify-between">
-          <p class="text-[18px] font-bold text-foreground">上传音频</p>
+          <p class="text-[18px] font-bold text-foreground">{{ title }}</p>
           <button
             class="w-8 h-8 rounded-full bg-muted hover:bg-muted/80 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors shrink-0 ml-4"
             @click="close"
@@ -45,7 +45,7 @@
             </template>
             <template v-else>
               <UploadCloud :size="32" class="text-muted-foreground mb-2" />
-              <p class="text-sm font-medium">点击或拖拽上传音频</p>
+              <p class="text-sm font-medium">{{ pickerText }}</p>
               <p class="text-xs text-muted-foreground">支持 MP3, WAV 格式</p>
             </template>
           </div>
@@ -68,17 +68,30 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, computed } from "vue";
+import { computed, ref, watch } from "vue";
 import { Music, UploadCloud, X } from "@lucide/vue";
 import { ElMessage } from "element-plus";
 import type { BgmItem } from "@/types/videoCompose";
 
-const props = defineProps<{
-  /** 弹窗是否打开 */
-  open: boolean;
-  /** 是否正在提交上传 */
-  submitting: boolean;
-}>();
+const props = withDefaults(
+  defineProps<{
+    /** 弹窗是否打开 */
+    open: boolean;
+    /** 是否正在提交上传 */
+    submitting: boolean;
+    /** 弹窗标题 */
+    title?: string;
+    /** 未选文件时的拖放提示 */
+    pickerText?: string;
+    /** 添加成功提示 */
+    successText?: string;
+  }>(),
+  {
+    title: "上传音频",
+    pickerText: "点击或拖拽上传音频",
+    successText: "已添加本地音频",
+  },
+);
 
 const emit = defineEmits<{
   "update:open": [value: boolean];
@@ -151,7 +164,7 @@ async function confirmUpload(): Promise<void> {
   uploadAudioPreview.value = null;
   emit("uploaded", { name, url, durationSec });
   emit("update:open", false);
-  ElMessage.success("已添加本地音频");
+  ElMessage.success(props.successText);
 }
 
 watch(
