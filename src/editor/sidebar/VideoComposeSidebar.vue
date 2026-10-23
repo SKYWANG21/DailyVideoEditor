@@ -27,6 +27,7 @@
             <PlaybackRateControl :rate="videoPlaybackRate" @update:rate="emit('update:videoPlaybackRate', $event)" />
           </div>
           <VideoComposeBeautyControls :beauty="beauty" @update:beauty="emit('update:beauty', $event)" />
+          <slot name="before-apply-video" />
           <button type="button" :class="applyClass" @click="onApplyGlobal('video')">应用到全局</button>
         </template>
 
@@ -40,6 +41,7 @@
             <PlaybackRateControl :rate="audioPlaybackRate" @update:rate="emit('update:audioPlaybackRate', $event)" />
           </div>
           <p v-if="audioClipCount > 0" class="text-[12px] text-[var(--compose-fg-3)]">已添加 {{ audioClipCount }} 段音频到时间轴</p>
+          <slot name="before-apply-audio" />
           <button type="button" :class="applyClass" @click="onApplyGlobal('audio')">应用到全局</button>
         </template>
 
@@ -102,6 +104,7 @@
             </div>
             <p class="col-span-2 text-[12px] text-[var(--compose-fg-3)]">位置仅作用于当前字幕；点击应用到全局可同步到全部字幕</p>
           </div>
+          <slot name="before-apply-subtitle" />
           <button type="button" :class="applyClass" @click="onApplyGlobal('subtitle')">应用到全局</button>
         </template>
 
@@ -114,6 +117,7 @@
             @change="emit('update:text-clip-props', $event)"
           />
           <p v-else class="text-[13px] leading-relaxed text-[var(--compose-fg-3)]">选择贴图后在此编辑。花字从左侧添加。</p>
+          <slot name="before-apply-text" />
         </template>
       </div>
     </template>
@@ -229,9 +233,9 @@ const tabLabels = computed(() => (props.inspectorKind === "video" ? ["基础", "
 const tabIndex = computed(() => (props.inspectorKind === "video" ? videoTab.value : 0));
 const showTransform = computed(() => props.inspectorKind === "video" && videoTab.value === 1);
 
-/** 次按钮：表面-3，不和主操作抢强调色 */
+/** 主题色主按钮中号：高 40、水平 padding 16，宽度跟文案，不随侧栏拉满 */
 const applyClass =
-  "h-10 w-full rounded-[8px] bg-[var(--compose-surface-3)] text-[13px] font-semibold text-[var(--compose-fg)] transition-[filter,background-color] duration-200 hover:brightness-110";
+  "h-10 shrink-0 w-auto whitespace-nowrap rounded-[8px] bg-[var(--compose-accent)] px-4 text-[13px] font-semibold text-white transition-[background-color,transform] duration-200 hover:bg-[var(--compose-accent-hover)] active:scale-[0.97]";
 
 /** 视频页签切换。其它类型只有基础 */
 function onTabChange(index: number): void {
