@@ -1,6 +1,5 @@
 import { defineExpose, onBeforeUnmount, onMounted } from "vue";
-import { useComposeExtractAudioCleanup } from "@/hooks/useComposeExtractAudioCleanup";
-import { loadTextTemplateCatalog } from "../shared/textTemplateCatalog";
+import { loadTextTemplateCatalog, setHostTextTemplates } from "../shared/textTemplateCatalog";
 import type { ComposeEditorEmit, ComposeEditorProps } from "./createComposeEditorState";
 import { createComposeEditorState } from "./createComposeEditorState";
 import { createComposeEditorPorts } from "./ports";
@@ -20,11 +19,7 @@ export function useComposeEditorSession(props: ComposeEditorProps, emit: Compose
   const state = createComposeEditorState(props);
   const ports = createComposeEditorPorts();
 
-  const extract = useComposeExtractAudioCleanup(props.modelValue.composeExtractAudioUrls || []);
-  state.composeExtractAudioUrls = extract.composeExtractAudioUrls;
-  state.registerComposeExtractAudioUrl = extract.registerComposeExtractAudioUrl;
-  state.syncRegistryFromTracks = extract.syncRegistryFromTracks;
-  state.scheduleOrphanComposeExtractCleanup = extract.scheduleOrphanComposeExtractCleanup;
+  setHostTextTemplates(state.textTemplates.value);
 
   const layout = useComposeShellLayout(props);
   const playback = useComposePlaybackBridge(state, ports);

@@ -1,4 +1,4 @@
-import { nextTick, onBeforeUnmount, watch } from "vue";
+import { nextTick, onBeforeUnmount, onMounted, watch } from "vue";
 import type { ComposeExportPayload, ComposeTrack, VideoClipItem, VideoComposeEditorModel } from "@/types/videoCompose";
 import { hasTimelineSubtitles, normalizeComposeTimelineScale } from "@/types/videoCompose";
 import {
@@ -108,7 +108,6 @@ export function useComposeProject(
     state.composeExtractAudioUrls.value = [...(model.composeExtractAudioUrls || [])];
 
     state.timelineRef.value?.importTracks(tracks);
-    state.syncRegistryFromTracks(tracks);
     ports.syncDerivedClipsFromTimeline();
     ports.syncSidebarFromTracks();
     syncPreviewDuration();
@@ -155,8 +154,6 @@ export function useComposeProject(
 
   function flush(): void {
     scheduleTracksPersist(true);
-    const exported = state.timelineRef.value?.exportTracks?.() || state.tracks.value;
-    state.scheduleOrphanComposeExtractCleanup(exported);
   }
 
   /**
@@ -259,7 +256,6 @@ export function useComposeProject(
     }
 
     didBootstrap = true;
-    state.syncRegistryFromTracks(state.tracks.value);
     ports.syncDerivedClipsFromTimeline();
     ports.syncSidebarFromTracks();
     emit("ready");
@@ -298,23 +294,10 @@ export function useComposeProject(
     { deep: true },
   );
 
-  /** 深监听整份 model，保持与拆分前相同的依赖收集 */
-  watch(
-    () => props.modelValue,
-    (val) => {
-      void val;
-    },
-    { deep: true },
-  );
-
-  /** 只在会话启动时建轨一次。不监听 clips，避免入参变化重灌主轨 */
-  watch(
-    () => true,
-    () => {
-      void bootstrapTimeline();
-    },
-    { immediate: true },
-  );
+  /** 挂载后建轨一次。外部换稿请调用 reload(model)，勿指望 v-model 自动回灌 */
+  onMounted(() => {
+    void bootstrapTimeline();
+  });
 
   onBeforeUnmount(() => {
     clearDurationProbeRetry();

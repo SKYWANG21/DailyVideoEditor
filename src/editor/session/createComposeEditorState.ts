@@ -41,13 +41,13 @@ export interface ComposeEditorProps {
   modelValue: VideoComposeEditorModel;
   /** 只读模式 */
   readonly?: boolean;
-  /** 侧栏视频素材（上传与生成由宿主统一维护；缺省空列表） */
+  /** 侧栏视频种子；传入后同步进 Editor 内部列表（不进 v-model） */
   videoAssets?: ComposeSegmentClipAssets[];
-  /** 侧栏音频库；传入则覆盖会话内列表 */
+  /** 侧栏音频种子；传入后同步进内部列表 */
   audioAssets?: BgmItem[];
-  /** 侧栏音效库；传入则覆盖会话内列表 */
+  /** 侧栏音效种子；传入后同步进内部列表 */
   sfxAssets?: BgmItem[];
-  /** 侧栏花字模板；传入则覆盖会话目录 */
+  /** 侧栏花字种子；传入后同步进内部列表 */
   textTemplates?: TextTemplateItem[];
   /**
    * 可选上传适配器：无 onRequestUpload* 时，Editor 选文件并调用 adapter，再 emit *-uploaded。
@@ -96,20 +96,30 @@ export interface ComposeBgmUploadResult {
   file: File;
 }
 
+/** 侧栏上传完成：原始 File + 新条目 + 当前侧栏全量（不进工程 JSON） */
+export interface ComposeCatalogUploadPayload<T> {
+  /** 用户选中的原始文件 */
+  file: File;
+  /** 已写入侧栏的新条目 */
+  item: T;
+  /** 写入后的完整侧栏列表快照 */
+  items: T[];
+}
+
 /** 外壳向外抛出的事件 */
 export interface ComposeEditorEmit {
   (event: "update:modelValue", value: VideoComposeEditorModel): void;
   (event: "ready"): void;
-  /** 侧栏移除视频素材（宿主维护 videoAssets 时据此改列表） */
+  /** 侧栏移除视频素材（内部列表已删；宿主可同步自己的种子） */
   (event: "remove-catalog-clip", variant: ComposeSegmentClipAssets): void;
-  /** adapter / 内置上传视频完成 */
-  (event: "video-uploaded", item: ComposeSegmentClipAssets): void;
-  /** 内置或 adapter 上传音频完成；宿主维护 audioAssets 时追加 */
-  (event: "audio-uploaded", item: BgmItem): void;
-  /** 内置或 adapter 上传音效完成；宿主维护 sfxAssets 时追加 */
-  (event: "sfx-uploaded", item: BgmItem): void;
-  /** 内置或 adapter 上传花字完成；宿主维护 textTemplates 时追加 */
-  (event: "text-template-uploaded", item: TextTemplateItem): void;
+  /** 内置选文件 / adapter 上传视频完成 */
+  (event: "video-uploaded", payload: ComposeCatalogUploadPayload<ComposeSegmentClipAssets>): void;
+  /** 内置或 adapter 上传音频完成 */
+  (event: "audio-uploaded", payload: ComposeCatalogUploadPayload<BgmItem>): void;
+  /** 内置或 adapter 上传音效完成 */
+  (event: "sfx-uploaded", payload: ComposeCatalogUploadPayload<BgmItem>): void;
+  /** 内置或 adapter 上传花字完成 */
+  (event: "text-template-uploaded", payload: ComposeCatalogUploadPayload<TextTemplateItem>): void;
 }
 
 /** 预览和时间轴对钟用的可变标志。必须留在同一次会话里，不能做成模块级变量 */
@@ -152,8 +162,14 @@ export interface ComposeEditorState {
   tracks: Ref<ComposeTrack[]>;
   /** 上次已写入 model 的轨道结构签名 */
   lastPersistedStructureSig: string;
+  /** 侧栏视频内部列表（可经 props 种子同步，不进 model） */
+  videoAssets: Ref<ComposeSegmentClipAssets[]>;
+  /** 侧栏音频内部列表 */
   audioAssets: Ref<BgmItem[]>;
+  /** 侧栏音效内部列表 */
   sfxAssets: Ref<BgmItem[]>;
+  /** 侧栏花字内部列表 */
+  textTemplates: Ref<TextTemplateItem[]>;
   subtitleAssets: Ref<ComposeSubtitleAsset[]>;
   /** 时间轴当前选中 clip id 列表 */
   selectedClipIds: Ref<string[]>;
@@ -177,10 +193,8 @@ export interface ComposeEditorState {
   previewClipDuration: Ref<number>;
   uploadAudioModalOpen: Ref<boolean>;
   uploadSfxModalOpen: Ref<boolean>;
+  /** 兼容旧工程字段；本地库不登记、不清理远端抽轨 */
   composeExtractAudioUrls: Ref<string[]>;
-  registerComposeExtractAudioUrl: (url: string | undefined | null) => void;
-  syncRegistryFromTracks: (tracks: ComposeTrack[]) => void;
-  scheduleOrphanComposeExtractCleanup: (tracks: ComposeTrack[]) => void;
   audioClipCount: ComputedRef<number>;
   activeAudioId: ComputedRef<string | undefined>;
   activeVideoId: ComputedRef<string | undefined>;
@@ -332,8 +346,10 @@ export function createComposeEditorState(props: ComposeEditorProps): ComposeEdit
     previewDurationSec: ref(0),
     tracks,
     lastPersistedStructureSig: tracksStructureSig(tracks.value),
-    audioAssets: ref<BgmItem[]>([]),
-    sfxAssets: ref<BgmItem[]>([]),
+    videoAssets: ref<ComposeSegmentClipAssets[]>([...(props.videoAssets ?? [])]),
+    audioAssets: ref<BgmItem[]>([...(props.audioAssets ?? [])]),
+    sfxAssets: ref<BgmItem[]>([...(props.sfxAssets ?? [])]),
+    textTemplates: ref<TextTemplateItem[]>([...(props.textTemplates ?? [])]),
     subtitleAssets: ref<ComposeSubtitleAsset[]>([]),
     selectedClipIds,
     inspectorKind: ref<ComposeInspectorKind | null>(null),
@@ -348,10 +364,7 @@ export function createComposeEditorState(props: ComposeEditorProps): ComposeEdit
     previewClipDuration: ref(0),
     uploadAudioModalOpen: ref(false),
     uploadSfxModalOpen: ref(false),
-    composeExtractAudioUrls: ref<string[]>([]),
-    registerComposeExtractAudioUrl: () => undefined,
-    syncRegistryFromTracks: () => undefined,
-    scheduleOrphanComposeExtractCleanup: () => undefined,
+    composeExtractAudioUrls: ref<string[]>([...(props.modelValue.composeExtractAudioUrls ?? [])]),
     audioClipCount: computed(() => countAudioClips(tracks.value)),
     activeAudioId,
     activeVideoId,

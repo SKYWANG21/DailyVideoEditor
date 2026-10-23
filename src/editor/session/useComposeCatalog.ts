@@ -22,7 +22,7 @@ import {
   createTextTemplateFromFile,
   findTextTemplateById,
   setHostTextTemplates,
-  textTemplateCatalog,
+  type TextTemplateItem,
 } from "../shared/textTemplateCatalog";
 import type {
   ComposeBgmUploadResult,
@@ -71,15 +71,48 @@ export function useComposeCatalog(
   }
 
   restoreLikedMediaFromModel();
-  setHostTextTemplates(props.textTemplates);
+  setHostTextTemplates(state.textTemplates.value);
 
-  /** 侧栏视频：仅宿主 props.videoAssets（缺省空） */
-  const videoCatalogVariants = computed<ComposeSegmentClipAssets[]>(() => props.videoAssets ?? []);
+  /** 侧栏四类列表：只读内部数组（props 作种子经 watch 同步） */
+  const videoCatalogVariants = computed(() => state.videoAssets.value);
+  const panelAudioAssets = computed(() => state.audioAssets.value);
+  const panelSfxAssets = computed(() => state.sfxAssets.value);
+  const panelTextTemplates = computed(() => state.textTemplates.value);
 
-  /** 侧栏音频 / 音效 / 花字：宿主 props 优先 */
-  const panelAudioAssets = computed(() => props.audioAssets ?? state.audioAssets.value);
-  const panelSfxAssets = computed(() => props.sfxAssets ?? state.sfxAssets.value);
-  const panelTextTemplates = computed(() => props.textTemplates ?? textTemplateCatalog.value);
+  /** 宿主种子覆盖内部列表（可重置侧栏） */
+  watch(
+    () => props.videoAssets,
+    (list) => {
+      if (list === undefined) return;
+      state.videoAssets.value = [...list];
+    },
+    { deep: true },
+  );
+  watch(
+    () => props.audioAssets,
+    (list) => {
+      if (list === undefined) return;
+      state.audioAssets.value = [...list];
+    },
+    { deep: true },
+  );
+  watch(
+    () => props.sfxAssets,
+    (list) => {
+      if (list === undefined) return;
+      state.sfxAssets.value = [...list];
+    },
+    { deep: true },
+  );
+  watch(
+    () => props.textTemplates,
+    (list) => {
+      if (list === undefined) return;
+      state.textTemplates.value = [...list];
+      setHostTextTemplates(state.textTemplates.value);
+    },
+    { deep: true },
+  );
 
   /** 已喜欢媒体的匹配键，供侧栏卡片点亮爱心 */
   const likedMediaKeys = computed(() => {
@@ -293,6 +326,7 @@ export function useComposeCatalog(
       clearCatalogPreview();
     }
 
+    state.videoAssets.value = state.videoAssets.value.filter((item) => item.id !== variant.id);
     emit("remove-catalog-clip", variant);
     ElMessage.success("已从片段列表移除");
   }
@@ -314,9 +348,6 @@ export function useComposeCatalog(
 
     state.timelineRef.value?.updateAudioClipDuration?.(clipId, durationSec);
     ports.syncDerivedClipsFromTimeline();
-
-    /** 宿主维护列表时不改内部 state，只拉宽时间轴 */
-    if (props.audioAssets !== undefined || props.sfxAssets !== undefined) return;
 
     const patchList = (list: BgmItem[]): BgmItem[] => list.map((entry) => (entry.url === item.url ? { ...entry, durationSec } : entry));
     state.sfxAssets.value = patchList(state.sfxAssets.value);
@@ -352,14 +383,12 @@ export function useComposeCatalog(
     ports.onAddTextTemplate(item, payload.startTime);
   }
 
-  /** 将音频条目写入时间轴与侧栏列表 */
-  function commitAudioAsset(bgm: BgmItem): void {
+  /** 将音频条目写入时间轴与侧栏列表，并通知宿主 */
+  function commitAudioAsset(bgm: BgmItem, file: File): void {
     const clipId = state.timelineRef.value?.addAudioClip({ ...bgm });
-    if (props.audioAssets !== undefined) {
-      emit("audio-uploaded", bgm);
-    } else {
-      state.audioAssets.value = [...state.audioAssets.value, bgm];
-    }
+    const items = [...state.audioAssets.value, bgm];
+    state.audioAssets.value = items;
+    emit("audio-uploaded", { file, item: bgm, items });
     void probeAndWidenAudioClip(clipId, bgm);
   }
 
@@ -376,7 +405,7 @@ export function useComposeCatalog(
         return;
       }
     }
-    commitAudioAsset(bgm);
+    commitAudioAsset(bgm, payload.file);
   }
 
   /** 切换侧栏视频的喜欢态，并立即写入工程 */
@@ -398,17 +427,16 @@ export function useComposeCatalog(
     ports.persistUploadCatalogNow();
   }
 
-  /** 本地 SVG 进入花字列表：adapter → 本地解析；宿主 props 则 emit */
+  /** 本地 SVG 进入花字列表：写内部目录并 emit */
   async function onFancyUploaded(file: File): Promise<void> {
     if (props.onRequestUploadFancy) return;
     try {
       const uploadFancy = props.uploadAdapter?.uploadFancy;
-      const item = uploadFancy ? await uploadFancy(file) : await createTextTemplateFromFile(file);
-      if (props.textTemplates !== undefined) {
-        emit("text-template-uploaded", item);
-      } else {
-        textTemplateCatalog.value = [...textTemplateCatalog.value, item];
-      }
+      const item: TextTemplateItem = uploadFancy ? await uploadFancy(file) : await createTextTemplateFromFile(file);
+      const items = [...state.textTemplates.value, item];
+      state.textTemplates.value = items;
+      setHostTextTemplates(items);
+      emit("text-template-uploaded", { file, item, items });
       ElMessage.success("已添加到花字列表");
     } catch (error) {
       const message = error instanceof Error ? error.message : "无法读取该花字文件";
@@ -416,7 +444,7 @@ export function useComposeCatalog(
     }
   }
 
-  /** 上传音效弹窗确认；有 adapter.uploadSfx 则先走宿主上传 */
+  /** 上传音效弹窗确认；写内部列表并 emit */
   async function onSfxUploaded(payload: ComposeBgmUploadResult): Promise<void> {
     let bgm = payload.item;
     const uploadSfx = props.uploadAdapter?.uploadSfx;
@@ -429,11 +457,9 @@ export function useComposeCatalog(
         return;
       }
     }
-    if (props.sfxAssets !== undefined) {
-      emit("sfx-uploaded", bgm);
-      return;
-    }
-    state.sfxAssets.value = [...state.sfxAssets.value, bgm];
+    const items = [...state.sfxAssets.value, bgm];
+    state.sfxAssets.value = items;
+    emit("sfx-uploaded", { file: payload.file, item: bgm, items });
   }
 
   function onAddSubtitle(): void {
@@ -453,17 +479,21 @@ export function useComposeCatalog(
     const uploadVideo = props.uploadAdapter?.uploadVideo;
     if (uploadVideo) {
       const files = await pickLocalFiles("video/*", true);
+      let added = 0;
       for (const file of files) {
         try {
           const asset = await uploadVideo(file);
-          emit("video-uploaded", asset);
+          const items = [...state.videoAssets.value, asset];
+          state.videoAssets.value = items;
+          emit("video-uploaded", { file, item: asset, items });
+          added += 1;
         } catch (error) {
           const message = error instanceof Error ? error.message : "视频上传失败";
           ElMessage.warning(message);
         }
       }
-      if (files.length) {
-        ElMessage.success(files.length > 1 ? `已添加 ${files.length} 个视频` : "已添加到视频片段列表");
+      if (added) {
+        ElMessage.success(added > 1 ? `已添加 ${added} 个视频` : "已添加到视频片段列表");
       }
       return;
     }
@@ -499,18 +529,9 @@ export function useComposeCatalog(
   }
 
   watch(
-    () => [props.modelValue.tracks, props.modelValue.composeExtractAudioUrls, props.modelValue.likedMedia] as const,
+    () => [props.modelValue.tracks, props.modelValue.likedMedia] as const,
     () => {
       restoreLikedMediaFromModel();
-      state.syncRegistryFromTracks(props.modelValue.tracks || []);
-    },
-    { deep: true },
-  );
-
-  watch(
-    () => props.textTemplates,
-    (list) => {
-      setHostTextTemplates(list);
     },
     { deep: true },
   );

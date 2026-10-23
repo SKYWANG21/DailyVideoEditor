@@ -108,7 +108,7 @@ export interface VideoFrameTransform {
 
 /** 视频/音频 clip 的 config 业务扩展 */
 export type ComposeMediaClipConfig = DetachAudioConfig & {
-  /** Step3 视频生成任务 ID */
+  /** 视频生成任务 ID（宿主业务） */
   taskId?: string;
   /** 预览美颜。只对视频 clip 有意义 */
   beauty?: BeautyParams;
@@ -340,7 +340,7 @@ export function mapTracksToTextOverlayClips(tracks: ComposeTrack[]): ComposeText
 
 /** 侧栏素材库：某片段下的单个历史生成版本 */
 export interface ComposeSegmentClipAssets {
-  /** 版本唯一 id（Step3 clip id 或 result id 字符串化） */
+  /** 版本唯一 id */
   id: string;
   /** 片段序号（0-based） */
   segmentIndex: number;
@@ -348,7 +348,7 @@ export interface ComposeSegmentClipAssets {
   segmentTitle: string;
   /** 可播放视频 URL */
   url: string;
-  /** Step3 视频生成任务 ID */
+  /** 视频生成任务 ID（宿主业务） */
   taskId?: string;
   /** 展示标签，如「生成 1」 */
   label?: string;
@@ -356,7 +356,7 @@ export interface ComposeSegmentClipAssets {
   status?: string | number;
   /** 缩略图 / 关键帧 */
   poster?: string;
-  /** Step3 当前选中版本 */
+  /** 当前选中版本 */
   isSelected?: boolean;
   /** 素材库 source_video 主键（可选，用于 signed-url） */
   mediaId?: number;
@@ -426,8 +426,8 @@ export interface VideoComposeEditorModel {
    */
   likedMedia?: MediaRef[];
   /**
-   * 本会话/工程内曾生成的 compose_extract 原声 OSS URL；
-   * 离开/保存时与 tracks 对比，删除未引用孤儿文件（删 clip 不立刻删 OSS，便于 undo）。
+   * 兼容旧工程字段（曾登记 compose_extract 原声 URL）。
+   * 本地库不登记、不清理远端抽轨文件，仅透传读写。
    */
   composeExtractAudioUrls?: string[];
   /**
@@ -476,7 +476,7 @@ export function composeMediaLikeKey(media: Pick<MediaRef, "url" | "mediaId">): s
 export interface VideoComposeClipInput {
   /** 片段唯一 id */
   id: string;
-  /** Step3 视频生成任务 ID */
+  /** 视频生成任务 ID（宿主业务） */
   taskId?: string;
   /** 展示标题 */
   title?: string;

@@ -15,9 +15,9 @@ export interface ComposeEditorPorts {
   afterExitCatalogPreview: (action: (exitedPreview: boolean) => void) => void;
   /** 花字落到贴图轨。未指定起点时用播放头，尺寸读预览画面 */
   onAddTextTemplate: (item: TextTemplateItem, startTime?: number) => void;
-  /** 立刻把上传素材库写入 model */
+  /** 立刻把喜欢态等写入 model（侧栏素材列表不进工程 JSON） */
   persistUploadCatalogNow: () => void;
-  /** 立刻持久化轨道，并安排未引用抽轨文件清理 */
+  /** 立刻持久化轨道到 v-model */
   flush: () => void;
   /** 主轨时长就绪后重建 clip，触发时间轴重新抽帧 */
   rebuildMainClipThumbnail: (clipId: string, durationSec: number) => void;

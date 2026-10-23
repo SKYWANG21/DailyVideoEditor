@@ -18,6 +18,8 @@ createApp(App).mount("#app");
 
 `peerDependencies` 只有 `vue`。`pinia`、`element-plus` 随包安装，并在编辑器内部使用：每个时间轴自建一份 Pinia，同页多个编辑器不会抢轨。
 
+换稿请调用组件 ref 上的 `reload(model)`，不要指望改 `v-model` 引用会自动回灌时间轴。
+
 构建：
 
 ```bash
@@ -25,6 +27,18 @@ npm run build
 ```
 
 产物在 `dist/index.js`、`dist/style.css`、`dist/algorithm/`。
+
+## 侧栏素材（不进工程 JSON）
+
+视频 / 音频 / 音效 / 花字列表由 **Editor 内部数组**维护，**不写入** `v-model`（`model` 只有 tracks、likedMedia、scale 等）。
+
+可用 props 作种子；上传成功事件载荷为：
+
+```ts
+{ file: File; item: T; items: T[] }
+```
+
+宿主可把 `items` 回写到自己的状态。纯 `onRequestUpload*` 由宿主自管 UX，不走该 emit。
 
 ## 跨域媒体
 

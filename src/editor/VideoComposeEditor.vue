@@ -189,7 +189,7 @@ import BgmUploadModal from "./modals/BgmUploadModal.vue";
 import SubtitleFontPopover from "./sidebar/SubtitleFontPopover.vue";
 import type { TextTemplateItem } from "./shared/textTemplateCatalog";
 import { useComposeEditorSession } from "./session/useComposeEditorSession";
-import type { ComposeUploadAdapter } from "./session/createComposeEditorState";
+import type { ComposeCatalogUploadPayload, ComposeUploadAdapter } from "./session/createComposeEditorState";
 import { installComposeElementPlus } from "./installComposeElementPlus";
 import { COMPOSE_ALGORITHM_BASE } from "./composeRuntime";
 import { COMPOSE_MEDIA_RESOLVER, createComposeMediaResolver } from "@/service/resolveComposeMediaUrl";
@@ -201,13 +201,13 @@ const props = withDefaults(
     modelValue: VideoComposeEditorModel;
     /** 只读模式 */
     readonly?: boolean;
-    /** 侧栏视频素材（上传与生成由宿主统一维护） */
+    /** 侧栏视频种子；同步进内部列表，不进 v-model */
     videoAssets?: ComposeSegmentClipAssets[];
-    /** 侧栏音频库 */
+    /** 侧栏音频种子 */
     audioAssets?: BgmItem[];
-    /** 侧栏音效库 */
+    /** 侧栏音效种子 */
     sfxAssets?: BgmItem[];
-    /** 侧栏花字模板 */
+    /** 侧栏花字种子 */
     textTemplates?: TextTemplateItem[];
     /** 可选上传适配器（无 onRequestUpload* 时由 Editor 选文件并调用） */
     uploadAdapter?: ComposeUploadAdapter;
@@ -250,10 +250,10 @@ const emit = defineEmits<{
   "update:modelValue": [value: VideoComposeEditorModel];
   ready: [];
   "remove-catalog-clip": [variant: ComposeSegmentClipAssets];
-  "video-uploaded": [item: ComposeSegmentClipAssets];
-  "audio-uploaded": [item: BgmItem];
-  "sfx-uploaded": [item: BgmItem];
-  "text-template-uploaded": [item: TextTemplateItem];
+  "video-uploaded": [payload: ComposeCatalogUploadPayload<ComposeSegmentClipAssets>];
+  "audio-uploaded": [payload: ComposeCatalogUploadPayload<BgmItem>];
+  "sfx-uploaded": [payload: ComposeCatalogUploadPayload<BgmItem>];
+  "text-template-uploaded": [payload: ComposeCatalogUploadPayload<TextTemplateItem>];
 }>();
 
 /** 分类操作插槽名。外壳没传时不转发，面板保留默认上传按钮 */

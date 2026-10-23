@@ -27,6 +27,7 @@
 import { ref } from "vue";
 import { ElMessage } from "element-plus";
 import { VideoComposeEditor } from "@/editor";
+import type { ComposeCatalogUploadPayload } from "@/editor/session/createComposeEditorState";
 import VideoClipUploadModal, { type UploadedComposeClip } from "@/editor/modals/VideoClipUploadModal.vue";
 import type { TextTemplateItem } from "@/editor/shared/textTemplateCatalog";
 import {
@@ -42,7 +43,7 @@ import {
   type VideoComposeEditorModel,
 } from "@/types/videoCompose";
 
-/** 工程状态：轨道在 model.tracks */
+/** 工程状态：轨道在 model.tracks；侧栏素材不进 model */
 const model = ref<VideoComposeEditorModel>(
   createDefaultVideoComposeEditorModel({
     bizType: "source_video",
@@ -52,7 +53,7 @@ const model = ref<VideoComposeEditorModel>(
 
 const mockOn = isVideoComposeMockEnabled();
 
-/** 侧栏四类素材：统一经 Editor props 注入（mock 开时预填） */
+/** 侧栏四类素材种子（上传后 Editor 内部维护；emit 带回全量时可回写） */
 const videoAssets = ref<ComposeSegmentClipAssets[]>(mockOn ? buildMockVideoAssets() : []);
 const audioAssets = ref<BgmItem[]>([]);
 const sfxAssets = ref<BgmItem[]>(mockOn ? buildMockSfxAssets() : []);
@@ -60,7 +61,7 @@ const textTemplates = ref<TextTemplateItem[]>(mockOn ? buildMockTextTemplates() 
 
 const uploadClipOpen = ref(false);
 
-/** 内置上传弹窗结果写入 videoAssets */
+/** 内置上传弹窗结果写入 videoAssets 种子 */
 function onVideoUploaded(clips: UploadedComposeClip[]): void {
   if (!clips.length) return;
   for (const clip of clips) {
@@ -77,29 +78,29 @@ function onVideoUploaded(clips: UploadedComposeClip[]): void {
   ElMessage.success(clips.length > 1 ? `已添加 ${clips.length} 个视频到片段列表` : "已添加到视频片段列表");
 }
 
-/** 侧栏移除：宿主改列表 */
+/** 侧栏移除：宿主同步种子 */
 function onRemoveVideoAsset(variant: ComposeSegmentClipAssets): void {
   videoAssets.value = videoAssets.value.filter((item) => item.id !== variant.id);
 }
 
-/** uploadAdapter 上传视频成功（demo 当前用 onRequestUploadClip；此事件供 adapter 路径） */
-function onVideoAssetUploaded(item: ComposeSegmentClipAssets): void {
-  videoAssets.value = [...videoAssets.value, item];
+/** adapter 上传视频：用 Editor 返回的全量列表对齐种子 */
+function onVideoAssetUploaded(payload: ComposeCatalogUploadPayload<ComposeSegmentClipAssets>): void {
+  videoAssets.value = [...payload.items];
 }
 
-/** 编辑器内置上传音频 → 写入 audioAssets */
-function onAudioUploaded(item: BgmItem): void {
-  audioAssets.value = [...audioAssets.value, item];
+/** 编辑器内置上传音频 */
+function onAudioUploaded(payload: ComposeCatalogUploadPayload<BgmItem>): void {
+  audioAssets.value = [...payload.items];
 }
 
-/** 编辑器内置上传音效 → 写入 sfxAssets */
-function onSfxUploaded(item: BgmItem): void {
-  sfxAssets.value = [...sfxAssets.value, item];
+/** 编辑器内置上传音效 */
+function onSfxUploaded(payload: ComposeCatalogUploadPayload<BgmItem>): void {
+  sfxAssets.value = [...payload.items];
 }
 
-/** 编辑器内置上传花字 → 写入 textTemplates */
-function onTextTemplateUploaded(item: TextTemplateItem): void {
-  textTemplates.value = [...textTemplates.value, item];
+/** 编辑器内置上传花字 */
+function onTextTemplateUploaded(payload: ComposeCatalogUploadPayload<TextTemplateItem>): void {
+  textTemplates.value = [...payload.items];
 }
 
 /**
