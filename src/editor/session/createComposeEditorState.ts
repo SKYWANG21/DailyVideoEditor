@@ -32,7 +32,6 @@ import type VideoComposeSidebar from "../sidebar/VideoComposeSidebar.vue";
 import type VideoComposeTimeline from "../timeline/VideoComposeTimeline.vue";
 import type { SelectedTextClipProps, ComposeInspectorKind } from "../sidebar/VideoComposeSidebar.vue";
 import { findTextTemplateById, isCssHexColor, type TextTemplateItem } from "../shared/textTemplateCatalog";
-import { buildMockSfxAssets, isVideoComposeMockEnabled } from "../shared/videoComposeMockClips";
 import { gainToDb } from "../shared/volumeDb";
 import { findClipById, findSelectedIdOfType, firstClipOfType, getLinkedOriginalAudioIdForVideo, tracksStructureSig } from "./trackLookup";
 
@@ -42,10 +41,7 @@ export interface ComposeEditorProps {
   modelValue: VideoComposeEditorModel;
   /** 只读模式 */
   readonly?: boolean;
-  /**
-   * 侧栏视频素材（上传与生成由宿主拼成一份）。
-   * 传入后编辑器不再用内部列表 / uploadedClipCatalog 驱动侧栏。
-   */
+  /** 侧栏视频素材（上传与生成由宿主统一维护；缺省空列表） */
   videoAssets?: ComposeSegmentClipAssets[];
   /** 侧栏音频库；传入则覆盖会话内列表 */
   audioAssets?: BgmItem[];
@@ -69,6 +65,12 @@ export interface ComposeEditorEmit {
   (event: "ready"): void;
   /** 侧栏移除视频素材（宿主维护 videoAssets 时据此改列表） */
   (event: "remove-catalog-clip", variant: ComposeSegmentClipAssets): void;
+  /** 内置上传音频完成；宿主维护 audioAssets 时追加 */
+  (event: "audio-uploaded", item: BgmItem): void;
+  /** 内置上传音效完成；宿主维护 sfxAssets 时追加 */
+  (event: "sfx-uploaded", item: BgmItem): void;
+  /** 内置上传花字完成；宿主维护 textTemplates 时追加 */
+  (event: "text-template-uploaded", item: TextTemplateItem): void;
 }
 
 /** 预览和时间轴对钟用的可变标志。必须留在同一次会话里，不能做成模块级变量 */
@@ -129,7 +131,6 @@ export interface ComposeEditorState {
   videoPlaybackRate: Ref<number>;
   /** 当前音频 clip 变速倍率 */
   audioPlaybackRate: Ref<number>;
-  uploadedCatalogVariants: Ref<ComposeSegmentClipAssets[]>;
   /** 已喜欢的视频媒体，随工程保存 */
   likedMedia: Ref<MediaRef[]>;
   /** 侧栏素材库当前预览中的历史版本 */
@@ -137,7 +138,6 @@ export interface ComposeEditorState {
   previewClipDuration: Ref<number>;
   uploadAudioModalOpen: Ref<boolean>;
   uploadSfxModalOpen: Ref<boolean>;
-  uploadClipModalOpen: Ref<boolean>;
   composeExtractAudioUrls: Ref<string[]>;
   registerComposeExtractAudioUrl: (url: string | undefined | null) => void;
   syncRegistryFromTracks: (tracks: ComposeTrack[]) => void;
@@ -294,7 +294,7 @@ export function createComposeEditorState(props: ComposeEditorProps): ComposeEdit
     tracks,
     lastPersistedStructureSig: tracksStructureSig(tracks.value),
     audioAssets: ref<BgmItem[]>([]),
-    sfxAssets: ref<BgmItem[]>(isVideoComposeMockEnabled() ? buildMockSfxAssets() : []),
+    sfxAssets: ref<BgmItem[]>([]),
     subtitleAssets: ref<ComposeSubtitleAsset[]>([]),
     selectedClipIds,
     inspectorKind: ref<ComposeInspectorKind | null>(null),
@@ -304,13 +304,11 @@ export function createComposeEditorState(props: ComposeEditorProps): ComposeEdit
     bgmVolume: ref<number | null>(gainToDb(0.5)),
     videoPlaybackRate: ref(1),
     audioPlaybackRate: ref(1),
-    uploadedCatalogVariants: ref<ComposeSegmentClipAssets[]>([]),
     likedMedia: ref<MediaRef[]>([]),
     previewCatalogVariant: ref<ComposeSegmentClipAssets | null>(null),
     previewClipDuration: ref(0),
     uploadAudioModalOpen: ref(false),
     uploadSfxModalOpen: ref(false),
-    uploadClipModalOpen: ref(false),
     composeExtractAudioUrls: ref<string[]>([]),
     registerComposeExtractAudioUrl: () => undefined,
     syncRegistryFromTracks: () => undefined,

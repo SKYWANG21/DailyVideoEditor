@@ -421,11 +421,6 @@ export interface VideoComposeEditorModel {
   /** 多轨列表 */
   tracks: ComposeTrack[];
   /**
-   * 本地 demo 用的侧栏视频列表快照。
-   * 宿主应经 props.videoAssets 统一维护视频素材，不必依赖本字段。
-   */
-  uploadedClipCatalog?: ComposeSegmentClipAssets[];
-  /**
    * 侧栏视频的喜欢态。按 url 或 mediaId 匹配，随工程保存。
    * 只保留已喜欢的媒体引用。
    */

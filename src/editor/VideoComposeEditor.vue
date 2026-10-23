@@ -164,8 +164,6 @@
       @uploaded="onSfxUploaded"
     />
 
-    <VideoClipUploadModal v-if="!readonly" v-model:open="uploadClipModalOpen" @uploaded="onClipUploaded" />
-
     <SubtitleFontPopover
       v-model:font-popover-open="fontPopoverOpen"
       :font-family-dropdown-style="fontFamilyDropdownStyle"
@@ -187,7 +185,6 @@ import VideoComposePlayer from "./player/VideoComposePlayer.vue";
 import VideoComposeSidebar from "./sidebar/VideoComposeSidebar.vue";
 import VideoComposeTimeline from "./timeline/VideoComposeTimeline.vue";
 import BgmUploadModal from "./modals/BgmUploadModal.vue";
-import VideoClipUploadModal from "./modals/VideoClipUploadModal.vue";
 import SubtitleFontPopover from "./sidebar/SubtitleFontPopover.vue";
 import type { TextTemplateItem } from "./shared/textTemplateCatalog";
 import { useComposeEditorSession } from "./session/useComposeEditorSession";
@@ -225,6 +222,9 @@ const emit = defineEmits<{
   "update:modelValue": [value: VideoComposeEditorModel];
   ready: [];
   "remove-catalog-clip": [variant: ComposeSegmentClipAssets];
+  "audio-uploaded": [item: BgmItem];
+  "sfx-uploaded": [item: BgmItem];
+  "text-template-uploaded": [item: TextTemplateItem];
 }>();
 
 /** 分类操作插槽名。外壳没传时不转发，面板保留默认上传按钮 */
@@ -269,7 +269,6 @@ const {
   previewCatalogVariant,
   uploadAudioModalOpen,
   uploadSfxModalOpen,
-  uploadClipModalOpen,
   visiblePreviewSubtitles,
   adjustPreviewSubtitles,
   onPreviewTogglePlayback,
@@ -330,7 +329,6 @@ const {
   onSfxUploaded,
   onFancyUploaded,
   onToggleCatalogLike,
-  onClipUploaded,
   onAddSubtitle,
   onUploadClipClick,
   onUploadAudioClick,

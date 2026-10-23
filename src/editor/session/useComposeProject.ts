@@ -72,10 +72,6 @@ export function useComposeProject(
       bizType: props.modelValue.bizType,
       bizId: props.modelValue.bizId,
       tracks: JSON.parse(JSON.stringify(exported)),
-      /** 宿主接管 videoAssets 时不覆盖其旧字段；本地 demo 写唯一内部列表 */
-      uploadedClipCatalog: props.videoAssets
-        ? props.modelValue.uploadedClipCatalog
-        : JSON.parse(JSON.stringify(state.uploadedCatalogVariants.value)),
       likedMedia: JSON.parse(JSON.stringify(state.likedMedia.value)),
       composeExtractAudioUrls: [...state.composeExtractAudioUrls.value],
       scale: normalizeComposeTimelineScale(state.timelineRef.value?.getScale?.() ?? props.modelValue.scale),
@@ -106,10 +102,6 @@ export function useComposeProject(
       .map((item) => ({ ...item, liked: true as const }));
     state.composeExtractAudioUrls.value = [...(model.composeExtractAudioUrls || [])];
 
-    if (!props.videoAssets) {
-      state.uploadedCatalogVariants.value = JSON.parse(JSON.stringify(model.uploadedClipCatalog || []));
-    }
-
     state.timelineRef.value?.importTracks(tracks);
     state.syncRegistryFromTracks(tracks);
     ports.syncDerivedClipsFromTimeline();
@@ -130,7 +122,7 @@ export function useComposeProject(
     }, DURATION_PROBE_RETRY_MS);
   }
 
-  /** 立即将上传 catalog 写入 model（不依赖 tracks 防抖） */
+  /** 立即写入 model（喜欢态等，不依赖 tracks 防抖） */
   function persistUploadCatalogNow(): void {
     if (persistTimer) {
       clearTimeout(persistTimer);

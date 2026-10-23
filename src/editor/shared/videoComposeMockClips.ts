@@ -1,4 +1,5 @@
-import type { BgmItem, VideoClipItem } from "@/types/videoCompose";
+import type { BgmItem, ComposeSegmentClipAssets, VideoClipItem } from "@/types/videoCompose";
+import { createTextTemplateItem, type TextTemplateItem } from "./textTemplateCatalog";
 import coolRaw from "@/assets/svg/TextTemplate/cool.svg?raw";
 import hiRaw from "@/assets/svg/TextTemplate/hi.svg?raw";
 import likeRaw from "@/assets/svg/TextTemplate/like.svg?raw";
@@ -20,7 +21,7 @@ import yesUrl from "@/assets/svg/TextTemplate/yes.svg";
 
 /**
  * ! MOCK 数据开关 — 调试视频合成 UI 时设为 true；联调/上线前必须改回 false
- * ! true 时忽略 tracks/clips，注入主轨样片、花字模板、音效库
+ * ! true 时：bootstrap 主轨样片；侧栏素材由宿主经 videoAssets/sfxAssets/textTemplates 传入
  */
 export const USE_MOCK_VIDEO_CLIPS = true;
 
@@ -69,7 +70,7 @@ export function isVideoComposeMockEnabled(): boolean {
   return USE_MOCK_VIDEO_CLIPS;
 }
 
-/** ! 调试用 mock 片段列表 */
+/** ! 调试用 mock 主轨片段 */
 export function buildMockVideoClips(): VideoClipItem[] {
   return MOCK_VIDEO_URLS.map((url, i) => ({
     id: `clip-${i + 1}`,
@@ -80,9 +81,25 @@ export function buildMockVideoClips(): VideoClipItem[] {
   }));
 }
 
-/** mock 花字源文件，供 textTemplateCatalog 解析写入缓存 */
+/** mock 侧栏视频（与主轨样片同源，经 props.videoAssets 注入） */
+export function buildMockVideoAssets(): ComposeSegmentClipAssets[] {
+  return MOCK_VIDEO_URLS.map((url, i) => ({
+    id: `mock-video-${i + 1}`,
+    segmentIndex: 0,
+    segmentTitle: "样片",
+    url,
+    label: `片段 ${i + 1}`,
+  }));
+}
+
+/** mock 花字源文件 */
 export function getMockTextTemplateFiles(): MockTextTemplateFile[] {
   return MOCK_TEXT_TEMPLATE_FILES;
+}
+
+/** mock 侧栏花字（经 props.textTemplates 注入） */
+export function buildMockTextTemplates(): TextTemplateItem[] {
+  return MOCK_TEXT_TEMPLATE_FILES.map((file) => createTextTemplateItem(file.id, file.id, file.raw, file.url));
 }
 
 /** mock 音效库。durationSec=0，拖入时间轴时按占位 0.1s 处理 */

@@ -1,7 +1,6 @@
-/** 侧栏文字模板：默认空目录；mock 或上传时写入，不请求素材库 */
+/** 侧栏文字模板：默认空目录；宿主 props / 本地上传写入，不请求素材库 */
 
 import { shallowRef } from "vue";
-import { getMockTextTemplateFiles, isVideoComposeMockEnabled } from "./videoComposeMockClips";
 
 /** 文字模板目录中的一项资源 */
 export interface TextTemplateItem {
@@ -96,8 +95,8 @@ export function loadTextTemplateSvg(sourceUrl: string): Promise<string> {
   return Promise.resolve(getCachedTextTemplateSvg(sourceUrl));
 }
 
-/** 解析 SVG 并写入原文缓存，供拖入贴图轨后读取 */
-function buildTemplate(id: string, name: string, raw: string, url: string): TextTemplateItem {
+/** 解析 SVG 并写入原文缓存，供拖入贴图轨 / 宿主 mock 组装 */
+export function createTextTemplateItem(id: string, name: string, raw: string, url: string): TextTemplateItem {
   const defaults = parseFirstTextDefaults(raw);
   const viewBox = parseViewBoxSize(raw);
   svgRawCache.set(url, raw);
@@ -116,8 +115,8 @@ function buildTemplate(id: string, name: string, raw: string, url: string): Text
   };
 }
 
-/** 把本地 SVG 追加进当前会话的花字列表。刷新页面后消失 */
-export async function appendUploadedTextTemplate(file: File): Promise<TextTemplateItem> {
+/** 从本地 SVG 构建花字项（不写入会话目录，供宿主 props 维护） */
+export async function createTextTemplateFromFile(file: File): Promise<TextTemplateItem> {
   const fileName = file.name.trim();
   const isSvg = file.type === "image/svg+xml" || fileName.toLowerCase().endsWith(".svg");
   if (!isSvg) {
@@ -130,16 +129,18 @@ export async function appendUploadedTextTemplate(file: File): Promise<TextTempla
   const baseName = fileName.replace(/\.svg$/i, "").trim() || "花字";
   const id = `upload-fancy-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
   const url = URL.createObjectURL(new Blob([raw], { type: "image/svg+xml" }));
-  const item = buildTemplate(id, baseName, raw, url);
+  return createTextTemplateItem(id, baseName, raw, url);
+}
+
+/** 把本地 SVG 追加进当前会话的花字列表。刷新页面后消失 */
+export async function appendUploadedTextTemplate(file: File): Promise<TextTemplateItem> {
+  const item = await createTextTemplateFromFile(file);
   textTemplateCatalog.value = [...textTemplateCatalog.value, item];
   return item;
 }
 
-/** 返回文字模板；mock 开且目录为空时注入调试花字 */
+/** 返回当前会话花字目录（不再自动灌 mock；mock 由宿主经 props.textTemplates 传入） */
 export async function loadTextTemplateCatalog(): Promise<TextTemplateItem[]> {
-  if (isVideoComposeMockEnabled() && textTemplateCatalog.value.length === 0) {
-    textTemplateCatalog.value = getMockTextTemplateFiles().map((file) => buildTemplate(file.id, file.id, file.raw, file.url));
-  }
   return textTemplateCatalog.value;
 }
 
