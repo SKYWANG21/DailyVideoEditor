@@ -18,11 +18,22 @@ interface PreviewWorkerScope {
 
 const scope = self as unknown as PreviewWorkerScope;
 
-/** 人脸模型。由页面 public 目录提供 */
-const FACE_MODEL_URL = new URL("/algorithm/face_landmarker.task", scope.location.origin).href;
+/** 人脸模型。默认同源 /algorithm，可由主线程 algorithmBaseUrl 覆盖 */
+let faceModelUrl = new URL("/algorithm/face_landmarker.task", scope.location.origin).href;
 
 /** MediaPipe SIMD wasm 目录 */
-const FACE_WASM_URL = new URL("/algorithm/mediapipe/", scope.location.origin).href;
+let faceWasmUrl = new URL("/algorithm/mediapipe/", scope.location.origin).href;
+let algorithmBaseApplied = false;
+
+/** 只采用第一帧带来的模型根路径 */
+function applyAlgorithmBase(base: string | undefined): void {
+  if (!base || algorithmBaseApplied) return;
+  const normalized = base.endsWith("/") ? base : `${base}/`;
+  const root = new URL(normalized, scope.location.origin);
+  faceModelUrl = new URL("face_landmarker.task", root).href;
+  faceWasmUrl = new URL("mediapipe/", root).href;
+  algorithmBaseApplied = true;
+}
 
 const decodeSession = new DecodeSession();
 const facePass = new FacePass();
@@ -43,7 +54,7 @@ function postError(requestId: number, error: unknown): void {
 function ensureFace(): Promise<void> {
   if (faceFailed) return Promise.reject(new Error("人脸检测不可用"));
   if (!faceInit) {
-    faceInit = facePass.init(FACE_WASM_URL, FACE_MODEL_URL).catch((error: unknown) => {
+    faceInit = facePass.init(faceWasmUrl, faceModelUrl).catch((error: unknown) => {
       faceFailed = true;
       faceInit = null;
       throw error;
@@ -54,6 +65,7 @@ function ensureFace(): Promise<void> {
 
 /** 解一帧、按需检测，再把 RGBA 和关键点转交主线程 */
 async function runRender(request: Extract<BeautyWorkerRequest, { type: "render" }>): Promise<void> {
+  applyAlgorithmBase(request.algorithmBaseUrl);
   const frame = await decodeSession.tick(request.clipId, request.url, request.sourceTimeUs);
   if (latestRender && latestRender.requestId > request.requestId) {
     frame?.close();
@@ -131,6 +143,7 @@ scope.onmessage = (event: MessageEvent<BeautyWorkerRequest>) => {
     return;
   }
   if (message.type === "prefetch") {
+    applyAlgorithmBase(message.algorithmBaseUrl);
     decodeSession.prefetch(message.clipId, message.url);
     return;
   }

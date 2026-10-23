@@ -1,4 +1,4 @@
-import { defineStore } from "pinia";
+import { defineStore, getActivePinia } from "pinia";
 import { ref, computed } from "vue";
 import type { Clip, Track, TrackType } from "../types";
 import { useTracksStore } from "./tracks";
@@ -33,9 +33,11 @@ export interface EdgeScrollConfig {
 }
 
 export const useDragStore = defineStore("drag", () => {
-  const tracksStore = useTracksStore();
-  const scaleStore = useScaleStore();
-  const historyStore = useHistoryStore();
+  const pinia = getActivePinia();
+  if (!pinia) throw new Error("drag store 需要 Pinia 实例");
+  const tracksStore = useTracksStore(pinia);
+  const scaleStore = useScaleStore(pinia);
+  const historyStore = useHistoryStore(pinia);
 
   // 基础拖拽状态
   const isDragging = ref(false);

@@ -5,18 +5,30 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vue-tsc --noEmit && vite build",
+    "build": "vue-tsc --noEmit && vite build --mode lib",
+    "build:demo": "vue-tsc --noEmit && vite build",
     "typecheck": "vue-tsc --noEmit"
+  },
+  "files": ["dist", "README.md"],
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./dist/index.js"
+    },
+    "./style.css": "./dist/style.css"
+  },
+  "peerDependencies": {
+    "vue": "^3.5.0"
   },
   "dependencies": {
     "@lucide/vue": "^1.58.0",
     "@mediapipe/tasks-vision": "1.1.1",
     "@webav/av-cliper": "^1.2.8",
     "element-plus": "^2.14.7",
-    "pinia": "^2.3.1",
-    "vue": "^3.5.44"
+    "pinia": "^2.3.1"
   },
   "devDependencies": {
+    "vue": "^3.5.44",
     "@tailwindcss/vite": "^4.3.3",
     "@vitejs/plugin-vue": "^5.2.4",
     "sass-embedded": "^1.105.2",

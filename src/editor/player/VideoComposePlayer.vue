@@ -22,6 +22,7 @@
             ref="videoARef"
             preload="auto"
             playsinline
+            crossorigin="anonymous"
             class="pointer-events-none absolute inset-0 h-full w-full"
             :class="[directVideoLayerClass(0), catalogPreviewActive ? 'object-contain' : 'object-cover']"
             @loadedmetadata="onDirectVideoMetadata"
@@ -30,6 +31,7 @@
             ref="videoBRef"
             preload="auto"
             playsinline
+            crossorigin="anonymous"
             class="pointer-events-none absolute inset-0 h-full w-full"
             :class="[directVideoLayerClass(1), catalogPreviewActive ? 'object-contain' : 'object-cover']"
             @loadedmetadata="onDirectVideoMetadata"

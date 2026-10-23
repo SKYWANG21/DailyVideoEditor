@@ -1,8 +1,11 @@
-import { defineStore } from 'pinia'
+import { defineStore, getActivePinia } from 'pinia'
 import { ref, computed } from 'vue'
 import { useTracksStore } from './tracks'
 
 export const usePlaybackStore = defineStore('playback', () => {
+  const pinia = getActivePinia()
+  if (!pinia) throw new Error('playback store 需要 Pinia 实例')
+
   // 状态
   const isPlaying = ref(false)
   const currentTime = ref(0) // 当前播放时间（秒）
@@ -15,7 +18,7 @@ export const usePlaybackStore = defineStore('playback', () => {
 
   // 实际使用的时长：优先使用轨道总时长，其次使用手动设置的时长
   const effectiveDuration = computed(() => {
-    const tracksStore = useTracksStore()
+    const tracksStore = useTracksStore(pinia)
     const tracksDuration = tracksStore.totalDuration
     // 使用轨道时长和手动设置时长中的较大值
     return Math.max(tracksDuration, duration.value)

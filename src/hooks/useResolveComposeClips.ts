@@ -1,4 +1,11 @@
 import type { VideoClipItem } from "@/types/videoCompose";
+import { applyMediaCrossOrigin, type ResolveMediaUrl } from "@/service/resolveComposeMediaUrl";
+
+/** 时长探测可选的跨域解析 */
+export interface ComposeProbeOptions {
+  /** 把业务 URL 换成可读取的地址 */
+  resolve?: ResolveMediaUrl;
+}
 
 /** 占位时长（秒）：addClipToMain 在 metadata 未就绪时使用 */
 export const COMPOSE_CLIP_PLACEHOLDER_DURATION_SEC = 0.1;
@@ -17,6 +24,12 @@ export function isComposeClipDurationProbeable(durationSec?: number): boolean {
   return (durationSec ?? 0) <= COMPOSE_CLIP_PLACEHOLDER_DURATION_SEC;
 }
 
+/** 探测前把业务地址换成可读取的地址 */
+async function resolveProbeSrc(url: string, options?: ComposeProbeOptions): Promise<string> {
+  if (!options?.resolve) return url;
+  return options.resolve(url);
+}
+
 /** 读取 video.duration；Infinity / NaN / ≤0 视为未就绪 */
 function readFiniteDuration(el: HTMLVideoElement): number {
   const duration = el.duration;
@@ -29,7 +42,7 @@ function readFiniteDuration(el: HTMLVideoElement): number {
  * @param url 视频地址
  * @returns 时长；失败或超时仍无有效值时返回 0
  */
-export function probeVideoDuration(url: string): Promise<number> {
+export function probeVideoDuration(url: string, options?: ComposeProbeOptions): Promise<number> {
   return new Promise((resolve) => {
     if (!url?.trim()) {
       resolve(0);
@@ -72,7 +85,13 @@ export function probeVideoDuration(url: string): Promise<number> {
       }
     };
     probe.onerror = () => finish(0);
-    probe.src = url;
+    void resolveProbeSrc(url, options)
+      .then((src) => {
+        if (settled) return;
+        applyMediaCrossOrigin(probe, src);
+        probe.src = src;
+      })
+      .catch(() => finish(0));
   });
 }
 
@@ -81,7 +100,7 @@ export function probeVideoDuration(url: string): Promise<number> {
  * @param url 音频地址
  * @returns 时长；失败或超时仍无有效值时返回 0
  */
-export function probeAudioDuration(url: string): Promise<number> {
+export function probeAudioDuration(url: string, options?: ComposeProbeOptions): Promise<number> {
   return new Promise((resolve) => {
     if (!url?.trim()) {
       resolve(0);
@@ -109,7 +128,13 @@ export function probeAudioDuration(url: string): Promise<number> {
       finish(Number.isFinite(duration) && duration > 0 ? duration : 0);
     };
     probe.onerror = () => finish(0);
-    probe.src = url;
+    void resolveProbeSrc(url, options)
+      .then((src) => {
+        if (settled) return;
+        applyMediaCrossOrigin(probe, src);
+        probe.src = src;
+      })
+      .catch(() => finish(0));
   });
 }
 
@@ -119,7 +144,12 @@ export function probeAudioDuration(url: string): Promise<number> {
  * @param onAllDone 全部结束（成功、失败或超时）后回调
  * @param onClipReady 单条探测到有效时长时回调，便于立刻 rebuild
  */
-export function probeClipDurations(clips: VideoClipItem[], onAllDone?: () => void, onClipReady?: (clip: VideoClipItem) => void): void {
+export function probeClipDurations(
+  clips: VideoClipItem[],
+  onAllDone?: () => void,
+  onClipReady?: (clip: VideoClipItem) => void,
+  options?: ComposeProbeOptions,
+): void {
   const indices: number[] = [];
   clips.forEach((clip, i) => {
     if (!isComposeClipDurationProbeable(clip.durationSec) || !clip.url) return;
@@ -147,7 +177,7 @@ export function probeClipDurations(clips: VideoClipItem[], onAllDone?: () => voi
   /** 启动一条探测；完成后腾出槽位再取下一条 */
   const startOne = (i: number) => {
     inflight += 1;
-    void probeVideoDuration(clips[i].url).then((duration) => {
+    void probeVideoDuration(clips[i].url, options).then((duration) => {
       if (duration > 0) {
         clips[i].durationSec = duration;
       }
@@ -179,7 +209,11 @@ function delayMs(ms: number): Promise<void> {
  * @param clips 待探测列表（就地写入 durationSec）
  * @param onClipReady 单条探测到有效时长时回调
  */
-export async function probeClipDurationsWithRetry(clips: VideoClipItem[], onClipReady?: (clip: VideoClipItem) => void): Promise<void> {
+export async function probeClipDurationsWithRetry(
+  clips: VideoClipItem[],
+  onClipReady?: (clip: VideoClipItem) => void,
+  options?: ComposeProbeOptions,
+): Promise<void> {
   for (let round = 0; round < DURATION_PROBE_ROUNDS; round += 1) {
     const pending = clips.filter((clip) => isComposeClipDurationProbeable(clip.durationSec) && Boolean(clip.url));
     if (!pending.length) return;
@@ -187,7 +221,7 @@ export async function probeClipDurationsWithRetry(clips: VideoClipItem[], onClip
       await delayMs(DURATION_PROBE_RETRY_GAP_MS * round);
     }
     await new Promise<void>((resolve) => {
-      probeClipDurations(pending, resolve, onClipReady);
+      probeClipDurations(pending, resolve, onClipReady, options);
     });
   }
 }

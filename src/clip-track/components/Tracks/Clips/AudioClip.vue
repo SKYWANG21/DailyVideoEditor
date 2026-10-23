@@ -17,9 +17,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, onUnmounted, nextTick } from 'vue'
+import { ref, computed, inject, onMounted, watch, onUnmounted, nextTick } from 'vue'
 import { useScaleStore } from '../../../stores/scale'
+import { useClipTrackPinia } from '../../../stores/clipTrackPinia'
 import { extractAudioWaveform, extractVideoAudioWaveform } from '../../../utils/mediaProcessor'
+import { COMPOSE_MEDIA_RESOLVER } from '../../../../service/resolveComposeMediaUrl'
 import type { MediaClip } from '../../../types'
 
 // Props
@@ -30,7 +32,8 @@ interface Props {
 const props = defineProps<Props>()
 
 // Stores
-const scaleStore = useScaleStore()
+const scaleStore = useScaleStore(useClipTrackPinia())
+const mediaResolver = inject(COMPOSE_MEDIA_RESOLVER, null)
 
 // Refs
 const clipRef = ref<HTMLElement>()
@@ -207,9 +210,10 @@ async function loadWaveform() {
     // 根据文件类型选择提取方法
     // 使用更多采样点（500）以获取完整精细的波形数据
     const isVideo = sourceUrl.match(/\.(mp4|webm|mov|avi)$/i)
+    const resolve = mediaResolver ? (url: string) => mediaResolver.resolve(url) : undefined
     const result = isVideo
-      ? await extractVideoAudioWaveform(sourceUrl, { samples: 500 })
-      : await extractAudioWaveform(sourceUrl, { samples: 500 })
+      ? await extractVideoAudioWaveform(sourceUrl, { samples: 500, resolve })
+      : await extractAudioWaveform(sourceUrl, { samples: 500, resolve })
 
     loadedWaveformData.value = result.waveformData
   } catch (error) {

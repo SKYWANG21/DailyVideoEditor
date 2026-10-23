@@ -1,9 +1,10 @@
 
 import { useTracksStore } from '../stores/tracks'
 import type { Clip } from '../types'
+import { useClipTrackPinia } from '../stores/clipTrackPinia'
 
 export function useSelection() {
-  const tracksStore = useTracksStore()
+  const tracksStore = useTracksStore(useClipTrackPinia())
 
   // 处理 Clip 点击（支持多选）
   function handleClipClick(clip: Clip, event: MouseEvent) {

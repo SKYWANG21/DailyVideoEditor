@@ -21,6 +21,8 @@ export interface BeautyRenderRequest {
   sourceTimeUs: number;
   /** 瘦脸或大眼大于 0 时才做人脸检测 */
   detectFace: boolean;
+  /** 美颜模型根路径，以 / 结尾。Worker 用它拼 wasm 与 task */
+  algorithmBaseUrl?: string;
 }
 
 /** 预载下一段，避免切段时重新解封装 */
@@ -30,6 +32,8 @@ export interface BeautyPrefetchRequest {
   clipId: string;
   /** 视频地址 */
   url: string;
+  /** 与 render 相同，保证预载前模型根路径已写入 */
+  algorithmBaseUrl?: string;
 }
 
 /** 页面卸载时释放解码器 */

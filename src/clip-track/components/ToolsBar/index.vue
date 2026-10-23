@@ -118,6 +118,7 @@ import { usePlaybackStore } from '../../stores/playback'
 import { useScaleStore } from '../../stores/scale'
 import { useHistoryStore } from '../../stores/history'
 import { useTracksStore } from '../../stores/tracks'
+import { useClipTrackPinia } from '../../stores/clipTrackPinia'
 import type { OperationButton, ScaleConfigButton, LocaleConfig, OperationButtonConfig, ScaleConfigButtonConfig, CustomButton } from '../../types'
 import SnapIcon from './icons/SnapIcon.vue'
 
@@ -148,10 +149,11 @@ const emit = defineEmits<{
 }>()
 
 // Stores
-const playbackStore = usePlaybackStore()
-const scaleStore = useScaleStore()
-const historyStore = useHistoryStore()
-const tracksStore = useTracksStore()
+const pinia = useClipTrackPinia()
+const playbackStore = usePlaybackStore(pinia)
+const scaleStore = useScaleStore(pinia)
+const historyStore = useHistoryStore(pinia)
+const tracksStore = useTracksStore(pinia)
 
 // Inject config
 const config = inject<any>('config', {})

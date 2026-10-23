@@ -62,6 +62,16 @@ export interface ComposeEditorProps {
   onRequestUploadSfx?: () => void;
   /** 点击「上传花字」；传入则不再走内置选文件 */
   onRequestUploadFancy?: () => void;
+  /**
+   * 把跨域媒体地址解析成可 fetch / 可画进 canvas 的地址。
+   * 未传时，编辑器会自行 CORS fetch 并转成 blob；失败时提示改用同源代理。
+   */
+  resolveMediaUrl?: (url: string) => Promise<string>;
+  /**
+   * 美颜模型根路径，需能访问 face_landmarker.task 与 mediapipe/。
+   * 默认 /algorithm/。
+   */
+  algorithmBaseUrl?: string;
 }
 
 /**

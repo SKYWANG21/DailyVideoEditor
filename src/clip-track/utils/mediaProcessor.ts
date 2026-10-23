@@ -3,6 +3,17 @@
  * 使用 @webav/av-cliper 提取视频缩略图和音频波形数据
  */
 import { MP4Clip, AudioClip } from '@webav/av-cliper';
+import type { ResolveMediaUrl } from '../../service/resolveComposeMediaUrl';
+
+/** 先按会话解析跨域地址，再 fetch 媒体字节 */
+async function fetchMediaBody(url: string, resolve?: ResolveMediaUrl): Promise<ReadableStream<Uint8Array>> {
+  const target = resolve ? await resolve(url) : url;
+  const response = await fetch(target);
+  if (!response.ok || !response.body) {
+    throw new Error(`Failed to fetch media: ${response.statusText}`);
+  }
+  return response.body;
+}
 
 // 缓存已处理的媒体数据
 const thumbnailCache = new Map<string, string[]>();
@@ -36,9 +47,11 @@ export async function extractVideoThumbnails(
   options: {
     count?: number; // 提取的缩略图数量
     width?: number; // 缩略图宽度
+    /** 跨域地址先解析成可 fetch 的 URL */
+    resolve?: ResolveMediaUrl;
   } = {}
 ): Promise<ThumbnailResult> {
-  const { count = 10, width = 120 } = options;
+  const { count = 10, width = 120, resolve } = options;
 
   // 检查缓存
   const cacheKey = `${videoUrl}_${count}_${width}`;
@@ -50,14 +63,10 @@ export async function extractVideoThumbnails(
   }
 
   try {
-    // 获取视频数据
-    const response = await fetch(videoUrl);
-    if (!response.ok || !response.body) {
-      throw new Error(`Failed to fetch video: ${response.statusText}`);
-    }
+    const body = await fetchMediaBody(videoUrl, resolve);
 
     // 创建 MP4Clip 实例
-    const clip = new MP4Clip(response.body);
+    const clip = new MP4Clip(body);
     await clip.ready;
 
     // 获取视频时长（微秒转秒）
@@ -106,9 +115,11 @@ export async function extractAudioWaveform(
   audioUrl: string,
   options: {
     samples?: number; // 采样点数量
+    /** 跨域地址先解析成可 fetch 的 URL */
+    resolve?: ResolveMediaUrl;
   } = {}
 ): Promise<WaveformResult> {
-  const { samples = 100 } = options;
+  const { samples = 100, resolve } = options;
 
   // 检查缓存
   const cacheKey = `${audioUrl}_${samples}`;
@@ -120,14 +131,10 @@ export async function extractAudioWaveform(
   }
 
   try {
-    // 获取音频数据
-    const response = await fetch(audioUrl);
-    if (!response.ok || !response.body) {
-      throw new Error(`Failed to fetch audio: ${response.statusText}`);
-    }
+    const body = await fetchMediaBody(audioUrl, resolve);
 
     // 创建 AudioClip 实例
-    const clip = new AudioClip(response.body);
+    const clip = new AudioClip(body);
     await clip.ready;
 
     // 获取音频时长
@@ -163,9 +170,11 @@ export async function extractVideoAudioWaveform(
   videoUrl: string,
   options: {
     samples?: number;
+    /** 跨域地址先解析成可 fetch 的 URL */
+    resolve?: ResolveMediaUrl;
   } = {}
 ): Promise<WaveformResult> {
-  const { samples = 100 } = options;
+  const { samples = 100, resolve } = options;
 
   const cacheKey = `video_audio_${videoUrl}_${samples}`;
   if (waveformCache.has(cacheKey)) {
@@ -176,13 +185,10 @@ export async function extractVideoAudioWaveform(
   }
 
   try {
-    const response = await fetch(videoUrl);
-    if (!response.ok || !response.body) {
-      throw new Error(`Failed to fetch video: ${response.statusText}`);
-    }
+    const body = await fetchMediaBody(videoUrl, resolve);
 
     // 使用 MP4Clip 来获取视频中的音频
-    const clip = new MP4Clip(response.body);
+    const clip = new MP4Clip(body);
     await clip.ready;
 
     const duration = clip.meta.duration / 1e6;
@@ -283,7 +289,8 @@ function processWaveformData(
  */
 export async function getMediaDuration(
   url: string,
-  type: 'video' | 'audio'
+  type: 'video' | 'audio',
+  resolve?: ResolveMediaUrl,
 ): Promise<number> {
   // 检查缓存
   if (durationCache.has(url)) {
@@ -291,20 +298,17 @@ export async function getMediaDuration(
   }
 
   try {
-    const response = await fetch(url);
-    if (!response.ok || !response.body) {
-      throw new Error(`Failed to fetch media: ${response.statusText}`);
-    }
+    const body = await fetchMediaBody(url, resolve);
 
     if (type === 'video') {
-      const clip = new MP4Clip(response.body);
+      const clip = new MP4Clip(body);
       await clip.ready;
       const duration = clip.meta.duration / 1e6;
       clip.destroy();
       durationCache.set(url, duration);
       return duration;
     } else {
-      const clip = new AudioClip(response.body);
+      const clip = new AudioClip(body);
       await clip.ready;
       const duration = clip.meta.duration / 1e6;
       clip.destroy();

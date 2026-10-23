@@ -1,8 +1,10 @@
 import { ref, onMounted, onUnmounted, type Ref } from 'vue'
+import type { Pinia } from 'pinia'
 import { useTracksStore } from '../stores/tracks'
 import { usePlaybackStore } from '../stores/playback'
 import { useHistoryStore } from '../stores/history'
 import { useScaleStore } from '../stores/scale'
+import { useClipTrackPinia } from '../stores/clipTrackPinia'
 import { isMac } from '../utils/helpers'
 
 interface KeyboardCallbacks {
@@ -17,13 +19,16 @@ interface KeyboardCallbacks {
 interface UseKeyboardOptions {
   containerRef?: Ref<HTMLElement | undefined>
   callbacks?: KeyboardCallbacks
+  /** 根组件创建 Pinia 后传入。子组件可省略，改为 inject */
+  pinia?: Pinia
 }
 
 export function useKeyboard(options: UseKeyboardOptions = {}) {
-  const tracksStore = useTracksStore()
-  const playbackStore = usePlaybackStore()
-  const historyStore = useHistoryStore()
-  const scaleStore = useScaleStore()
+  const pinia = options.pinia ?? useClipTrackPinia()
+  const tracksStore = useTracksStore(pinia)
+  const playbackStore = usePlaybackStore(pinia)
+  const historyStore = useHistoryStore(pinia)
+  const scaleStore = useScaleStore(pinia)
   const callbacks = options.callbacks || {}
 
   // 追踪组件是否处于激活状态（鼠标在组件内或组件有焦点）

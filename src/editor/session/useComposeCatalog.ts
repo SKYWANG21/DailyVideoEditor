@@ -31,6 +31,9 @@ import type {
   ComposeEditorState,
 } from "./createComposeEditorState";
 import type { ComposeEditorPorts } from "./ports";
+import { useComposeMediaResolver } from "../composeRuntime";
+import { applyMediaCrossOrigin } from "@/service/resolveComposeMediaUrl";
+import type { ComposeProbeOptions } from "@/hooks/useResolveComposeClips";
 
 /** 浏览器选文件（供 uploadAdapter 路径使用） */
 function pickLocalFiles(accept: string, multiple: boolean): Promise<File[]> {
@@ -53,6 +56,9 @@ export function useComposeCatalog(
   ports: ComposeEditorPorts,
   emit: ComposeEditorEmit,
 ) {
+  const mediaResolver = useComposeMediaResolver();
+  const probeOptions: ComposeProbeOptions = { resolve: (url) => mediaResolver.resolve(url) };
+
   /** 从工程恢复已喜欢的视频媒体。键没变时不替换数组，避免轨道保存把爱心刷掉 */
   function restoreLikedMediaFromModel(): void {
     const next = (props.modelValue.likedMedia ?? [])
@@ -133,7 +139,10 @@ export function useComposeCatalog(
     if (!url) return;
     const video = document.createElement("video");
     video.preload = "metadata";
-    video.src = url;
+    void mediaResolver.resolve(url).then((src) => {
+      applyMediaCrossOrigin(video, src);
+      video.src = src;
+    }).catch(() => undefined);
     video.onloadedmetadata = () => {
       if (Number.isFinite(video.duration) && video.duration > 0) {
         state.previewClipDuration.value = video.duration;
@@ -215,7 +224,7 @@ export function useComposeCatalog(
       return;
     }
 
-    const durationSec = await probeVideoDuration(playUrl);
+    const durationSec = await probeVideoDuration(playUrl, probeOptions);
     /** 每次上轴独立 id，避免删除后复用 variant.id 导致缩略图缓存不刷新 */
     const clipId = `${variant.id}-tl-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
     const clipItem = {
@@ -243,11 +252,15 @@ export function useComposeCatalog(
     if (durationSec <= COMPOSE_CLIP_PLACEHOLDER_DURATION_SEC) {
       const target = state.derivedMainClips.value.find((clip) => clip.id === clipId);
       if (target) {
-        await probeClipDurationsWithRetry([target], (clip) => {
-          const probed = clip.durationSec ?? 0;
-          if (probed <= COMPOSE_CLIP_PLACEHOLDER_DURATION_SEC) return;
-          refreshClipThumbnails(probed);
-        });
+        await probeClipDurationsWithRetry(
+          [target],
+          (clip) => {
+            const probed = clip.durationSec ?? 0;
+            if (probed <= COMPOSE_CLIP_PLACEHOLDER_DURATION_SEC) return;
+            refreshClipThumbnails(probed);
+          },
+          probeOptions,
+        );
       }
     } else {
       await nextTick();
@@ -296,7 +309,7 @@ export function useComposeCatalog(
     if (!clipId || !item.url?.trim()) return;
     if (!isComposeClipDurationProbeable(item.durationSec)) return;
 
-    const durationSec = await probeAudioDuration(item.url);
+    const durationSec = await probeAudioDuration(item.url, probeOptions);
     if (durationSec <= COMPOSE_CLIP_PLACEHOLDER_DURATION_SEC) return;
 
     state.timelineRef.value?.updateAudioClipDuration?.(clipId, durationSec);

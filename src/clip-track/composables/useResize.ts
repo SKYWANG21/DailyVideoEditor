@@ -2,6 +2,7 @@ import { ref } from 'vue';
 import { useTracksStore } from '../stores/tracks';
 import { useScaleStore } from '../stores/scale';
 import { useHistoryStore } from '../stores/history';
+import { useClipTrackPinia } from '../stores/clipTrackPinia';
 import { normalizeTime } from '../utils/helpers';
 import type { Clip, MediaClip, TransitionClip } from '../types';
 
@@ -15,9 +16,10 @@ interface LinkedElement {
 }
 
 export function useResize() {
-  const tracksStore = useTracksStore();
-  const scaleStore = useScaleStore();
-  const historyStore = useHistoryStore();
+  const pinia = useClipTrackPinia();
+  const tracksStore = useTracksStore(pinia);
+  const scaleStore = useScaleStore(pinia);
+  const historyStore = useHistoryStore(pinia);
 
   const isResizing = ref(false);
   const resizingClip = ref<Clip | null>(null);

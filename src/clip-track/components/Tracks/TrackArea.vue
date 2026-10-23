@@ -45,6 +45,7 @@ import { ref, computed, watch } from "vue";
 import { useScaleStore } from "../../stores/scale";
 import { useTracksStore } from "../../stores/tracks";
 import { useDragStore } from "../../stores/drag";
+import { useClipTrackPinia } from "../../stores/clipTrackPinia";
 import { useResize } from "../../composables/useResize";
 import { normalizeTime, timelineContentWidth, timelineSpanSeconds } from "../../utils/helpers";
 import ClipItem from "./ClipItem.vue";
@@ -73,12 +74,13 @@ const emit = defineEmits<{
 }>();
 
 // Stores
-const scaleStore = useScaleStore();
-const tracksStore = useTracksStore();
-const dragStore = useDragStore();
+const pinia = useClipTrackPinia();
+const scaleStore = useScaleStore(pinia);
+const tracksStore = useTracksStore(pinia);
+const dragStore = useDragStore(pinia);
 
 import { usePlaybackStore } from "../../stores/playback";
-const playbackStore = usePlaybackStore();
+const playbackStore = usePlaybackStore(pinia);
 
 // Composables
 const { startResize } = useResize();

@@ -30,9 +30,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted, watch, onUnmounted } from 'vue'
+import { computed, inject, ref, onMounted, watch, onUnmounted } from 'vue'
 import { useScaleStore } from '../../../stores/scale'
+import { useClipTrackPinia } from '../../../stores/clipTrackPinia'
 import { extractVideoThumbnails } from '../../../utils/mediaProcessor'
+import { COMPOSE_MEDIA_RESOLVER } from '../../../../service/resolveComposeMediaUrl'
 import type { MediaClip } from '../../../types'
 
 // Props
@@ -43,7 +45,8 @@ interface Props {
 const props = defineProps<Props>()
 
 // Stores
-const scaleStore = useScaleStore()
+const scaleStore = useScaleStore(useClipTrackPinia())
+const mediaResolver = inject(COMPOSE_MEDIA_RESOLVER, null)
 
 // Refs
 const thumbnailsRef = ref<HTMLElement>()
@@ -163,7 +166,8 @@ async function loadThumbnails() {
   try {
     const result = await extractVideoThumbnails(sourceUrl, {
       count: 20,
-      width: 120
+      width: 120,
+      resolve: mediaResolver ? (url) => mediaResolver.resolve(url) : undefined,
     })
     loadedThumbnails.value = result.thumbnails
   } catch (error) {

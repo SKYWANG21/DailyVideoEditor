@@ -1,13 +1,16 @@
-import { defineStore } from 'pinia'
+import { defineStore, getActivePinia } from 'pinia'
 import { ref, computed, watch } from 'vue'
+import { clipTrackScopeId } from './clipTrackPinia'
 
-// localStorage key
-const STORAGE_KEY = 'video-track-scale-settings'
+/** 每个时间轴实例一份缩放偏好，避免同页多个编辑器互相覆盖 */
+function storageKeyForActivePinia(): string {
+  return `video-track-scale-${clipTrackScopeId(getActivePinia())}`
+}
 
 // 从 localStorage 读取保存的设置
-function loadSettings() {
+function loadSettings(storageKey: string) {
   try {
-    const saved = localStorage.getItem(STORAGE_KEY)
+    const saved = localStorage.getItem(storageKey)
     if (saved) {
       return JSON.parse(saved)
     }
@@ -18,17 +21,18 @@ function loadSettings() {
 }
 
 // 保存设置到 localStorage
-function saveSettings(settings: { scale: number; snapEnabled: boolean }) {
+function saveSettings(storageKey: string, settings: { scale: number; snapEnabled: boolean }) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(settings))
+    localStorage.setItem(storageKey, JSON.stringify(settings))
   } catch (e) {
     console.warn('Failed to save scale settings to localStorage:', e)
   }
 }
 
 export const useScaleStore = defineStore('scale', () => {
+  const storageKey = storageKeyForActivePinia()
   // 加载保存的设置
-  const savedSettings = loadSettings()
+  const savedSettings = loadSettings(storageKey)
 
   // 状态
   const scale = ref(savedSettings?.scale ?? 1) // 当前缩放比例
@@ -40,7 +44,7 @@ export const useScaleStore = defineStore('scale', () => {
 
   // 监听变化并保存到 localStorage
   watch([scale, snapEnabled], ([newScale, newSnapEnabled]) => {
-    saveSettings({ scale: newScale, snapEnabled: newSnapEnabled })
+    saveSettings(storageKey, { scale: newScale, snapEnabled: newSnapEnabled })
   }, { immediate: false })
 
   // 计算属性：实际每秒像素数
@@ -158,7 +162,7 @@ export const useScaleStore = defineStore('scale', () => {
     snapEnabled.value = true
     // 清除 localStorage 中的设置
     try {
-      localStorage.removeItem(STORAGE_KEY)
+      localStorage.removeItem(storageKey)
     } catch (e) {
       console.warn('Failed to remove scale settings from localStorage:', e)
     }

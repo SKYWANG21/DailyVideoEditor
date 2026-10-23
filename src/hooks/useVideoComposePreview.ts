@@ -2,6 +2,8 @@ import { ref, computed, watch, onUnmounted, type Ref, type ComputedRef } from "v
 import type { VideoClipItem, ComposeConfig, PreviewAudioClip } from "@/types/videoCompose";
 import { findPreviewVideoAtTime } from "@/types/videoCompose";
 import { createPreviewAudioMixer, type PreviewAudioMixerSyncState } from "@/hooks/previewAudioMixer";
+import { assignResolvedMediaSrc, mediaElementUsesUrl } from "@/service/resolveComposeMediaUrl";
+import { useComposeMediaResolver } from "@/editor/composeRuntime";
 import { applyPreviewGain, primePreviewAudioContext } from "@/hooks/previewMediaGain";
 import { clampGain } from "@/editor/volumeDb";
 import { previewSourceTimeUs, previewTimelineSec } from "@/hooks/previewSourceTime";
@@ -72,7 +74,8 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
   const { videoA, videoB, bgmEl, clips, previewMuted } = options;
   const composeConfig = options.config;
   const audioClips = options.audioClips;
-  const audioMixer = createPreviewAudioMixer();
+  const mediaResolver = useComposeMediaResolver();
+  const audioMixer = createPreviewAudioMixer(mediaResolver);
 
   const isPlaying = ref(false);
   /** 作废进行中的异步 play()，避免暂停后旧 play 又把视频拉起 */
@@ -484,16 +487,14 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
   }
 
   function urlMatches(v: HTMLMediaElement, url: string): boolean {
-    return mediaUrlMatches(v, url);
+    if (mediaUrlMatches(v, url)) return true;
+    const peeked = mediaResolver.peek(url);
+    return peeked ? mediaElementUsesUrl(v, peeked) : false;
   }
 
-  /** 设置 video 源；跨域 OSS 需 anonymous 以便 canvas 预览抽帧 */
-  function applyVideoElementSrc(v: HTMLMediaElement, url: string): boolean {
-    const srcChanged = !urlMatches(v, url);
-    if (srcChanged) {
-      v.src = url;
-    }
-    return srcChanged;
+  /** 设置 video 源。跨域先解析成可 CORS 的地址，并打开 anonymous */
+  async function applyVideoElementSrc(v: HTMLMediaElement, url: string): Promise<boolean> {
+    return assignResolvedMediaSrc(v, url, mediaResolver);
   }
 
   function unbindVideoEvents(): void {
@@ -587,7 +588,7 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
     standbyReadyIdx = -1;
     standby.muted = true;
     try {
-      const srcChanged = applyVideoElementSrc(standby, clip.url);
+      const srcChanged = await applyVideoElementSrc(standby, clip.url);
       if (srcChanged || standby.readyState < HTMLMediaElement.HAVE_METADATA) {
         await waitForMetadata(standby);
       }
@@ -666,7 +667,7 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
     bindVideoEvents(v);
     suppressMediaEvents = true;
     try {
-      const srcChanged = applyVideoElementSrc(v, clip.url);
+      const srcChanged = await applyVideoElementSrc(v, clip.url);
       if (srcChanged || v.readyState < HTMLMediaElement.HAVE_METADATA) {
         await waitForMetadata(v);
       }

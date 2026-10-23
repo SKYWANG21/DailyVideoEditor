@@ -133,6 +133,7 @@ import { usePlaybackStore } from "../stores/playback";
 import { useHistoryStore } from "../stores/history";
 import { useScaleStore } from "../stores/scale";
 import { useDragStore } from "../stores/drag";
+import { CLIP_TRACK_PINIA, createClipTrackPinia, disposeClipTrackPinia } from "../stores/clipTrackPinia";
 import { useKeyboard } from "../composables/useKeyboard";
 import { useAutoScroll } from "../composables/useAutoScroll";
 import ToolsBar from "./ToolsBar/index.vue";
@@ -462,12 +463,14 @@ const emit = defineEmits<{
   "clip:dblclick": [clip: any, time: number];
 }>();
 
-// Stores
-const tracksStore = useTracksStore();
-const playbackStore = usePlaybackStore();
-const historyStore = useHistoryStore();
-const scaleStore = useScaleStore();
-const dragStore = useDragStore();
+/** 每个 VideoTrack 一份 Pinia，同页多个编辑器不抢轨 */
+const pinia = createClipTrackPinia();
+provide(CLIP_TRACK_PINIA, pinia);
+const tracksStore = useTracksStore(pinia);
+const playbackStore = usePlaybackStore(pinia);
+const historyStore = useHistoryStore(pinia);
+const scaleStore = useScaleStore(pinia);
+const dragStore = useDragStore(pinia);
 
 // 监听跨轨拖拽配置变化
 watch(
@@ -525,7 +528,7 @@ const keyboardCallbacks = {
 };
 
 // Composables - 传入容器 ref 使快捷键只在组件内生效
-useKeyboard({ containerRef, callbacks: keyboardCallbacks });
+useKeyboard({ containerRef, callbacks: keyboardCallbacks, pinia });
 
 // 监听拖拽状态，在拖拽结束时触发 clipMove 事件
 let dragStartPositionsCopy = new Map<string, { startTime: number; trackId: string }>();
@@ -567,6 +570,7 @@ const currentTrackControlWidth = ref(props.trackControlWidth);
 useAutoScroll({
   scrollLeft,
   tracksWidth,
+  pinia,
   setScrollLeft: (left) => {
     scrollLeft.value = left;
   },
@@ -655,6 +659,7 @@ onUnmounted(() => {
   viewportResizeObserver?.disconnect();
   viewportResizeObserver = null;
   observedViewportEl = null;
+  disposeClipTrackPinia(pinia);
 });
 
 /** 当前观察的视口节点。轨道出现后从刻度尺切到轨道区 */

@@ -32,6 +32,7 @@ import { computed, ref, inject, watch, useSlots } from 'vue'
 import { useTracksStore } from '../../stores/tracks'
 import { useScaleStore } from '../../stores/scale'
 import { useDragStore } from '../../stores/drag'
+import { useClipTrackPinia } from '../../stores/clipTrackPinia'
 import VideoClip from './Clips/VideoClip.vue'
 import AudioClip from './Clips/AudioClip.vue'
 import SubtitleClip from './Clips/SubtitleClip.vue'
@@ -66,9 +67,10 @@ const emit = defineEmits<{
 }>()
 
 // Stores
-const tracksStore = useTracksStore()
-const scaleStore = useScaleStore()
-const dragStore = useDragStore()
+const pinia = useClipTrackPinia()
+const tracksStore = useTracksStore(pinia)
+const scaleStore = useScaleStore(pinia)
+const dragStore = useDragStore(pinia)
 
 // Inject config
 const config = inject<any>('config', {})

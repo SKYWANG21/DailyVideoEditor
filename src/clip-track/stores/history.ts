@@ -1,9 +1,17 @@
-import { defineStore } from 'pinia'
+import { defineStore, getActivePinia } from 'pinia'
 import { ref, computed } from 'vue'
 import type { HistoryItem } from '../types'
 import { useTracksStore } from './tracks'
 
 export const useHistoryStore = defineStore('history', () => {
+  const pinia = getActivePinia()
+  if (!pinia) throw new Error('history store 需要 Pinia 实例')
+
+  /** 绑定创建本 store 时的 Pinia，避免事后读到别的编辑器 */
+  function boundTracksStore() {
+    return useTracksStore(pinia)
+  }
+
   // 状态
   const historyStack = ref<HistoryItem[]>([])
   const currentIndex = ref(-1)
@@ -15,7 +23,7 @@ export const useHistoryStore = defineStore('history', () => {
 
   // 方法：创建快照
   function createSnapshot(description?: string): HistoryItem {
-    const tracksStore = useTracksStore()
+    const tracksStore = boundTracksStore()
     const snapshot: HistoryItem = {
       id: `${Date.now()}-${Math.random()}`,
       timestamp: Date.now(),
@@ -50,7 +58,7 @@ export const useHistoryStore = defineStore('history', () => {
 
   // 方法：恢复快照
   function restoreSnapshot(snapshot: HistoryItem) {
-    const tracksStore = useTracksStore()
+    const tracksStore = boundTracksStore()
     const data = JSON.parse(snapshot.snapshot)
 
     // 恢复轨道数据

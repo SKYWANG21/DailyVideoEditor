@@ -1,5 +1,6 @@
 import { findPreviewAudiosAtTime, type ComposeConfig, type PreviewAudioClip } from "@/types/videoCompose";
 import { applyPreviewGain } from "@/hooks/previewMediaGain";
+import { applyMediaCrossOrigin, mediaElementUsesUrl, type ComposeMediaResolver } from "@/service/resolveComposeMediaUrl";
 
 /** 暂停/scrub 时强制 seek 的偏差阈值（秒） */
 const AUDIO_SYNC_TOLERANCE_SCRUB = 0.05;
@@ -147,9 +148,38 @@ function createSeekLock(): {
  * 切 clip 前预 seek 下一段，交界先 play 再 pause 旧段。
  * legacy composeConfig.bgm 仍走传入的 bgmEl。
  */
-export function createPreviewAudioMixer(): PreviewAudioMixer {
+export function createPreviewAudioMixer(resolver: ComposeMediaResolver): PreviewAudioMixer {
   const pool = new Map<string, HTMLAudioElement>();
   const seekLock = createSeekLock();
+  const pendingSrc = new WeakMap<HTMLMediaElement, string>();
+
+  /** 当前元素是否已经指向原始地址或解析后的地址 */
+  function audioUrlReady(el: HTMLMediaElement, url: string): boolean {
+    if (mediaUrlMatches(el, url)) return true;
+    const peeked = resolver.peek(url);
+    return peeked ? mediaElementUsesUrl(el, peeked) : false;
+  }
+
+  /** 同步能命中则立刻换 src；跨域则后台解析，避免每帧重复 fetch */
+  function assignAudioSrc(el: HTMLMediaElement, url: string): void {
+    const peeked = resolver.peek(url);
+    if (peeked) {
+      pendingSrc.delete(el);
+      applyMediaCrossOrigin(el, peeked);
+      if (!mediaElementUsesUrl(el, peeked)) el.src = peeked;
+      return;
+    }
+    if (pendingSrc.get(el) === url) return;
+    pendingSrc.set(el, url);
+    void resolver.resolve(url).then((resolved) => {
+      if (pendingSrc.get(el) !== url) return;
+      pendingSrc.delete(el);
+      applyMediaCrossOrigin(el, resolved);
+      if (!mediaElementUsesUrl(el, resolved)) el.src = resolved;
+    }).catch(() => {
+      if (pendingSrc.get(el) === url) pendingSrc.delete(el);
+    });
+  }
 
   function ensureClipAudio(clip: PreviewAudioClip): HTMLAudioElement {
     let el = pool.get(clip.id);
@@ -157,9 +187,9 @@ export function createPreviewAudioMixer(): PreviewAudioMixer {
       el = createPoolAudio();
       pool.set(clip.id, el);
     }
-    if (!mediaUrlMatches(el, clip.url)) {
-      seekLock.unlock(el);
-      el.src = clip.url;
+    if (!audioUrlReady(el, clip.url)) {
+      if (pendingSrc.get(el) !== clip.url) seekLock.unlock(el);
+      assignAudioSrc(el, clip.url);
     }
     return el;
   }
@@ -223,10 +253,9 @@ export function createPreviewAudioMixer(): PreviewAudioMixer {
       unloadAudioEl(a);
       return;
     }
-    if (!mediaUrlMatches(a, composeConfig.bgm.url)) {
-      seekLock.unlock(a);
-      a.crossOrigin = "anonymous";
-      a.src = composeConfig.bgm.url;
+    if (!audioUrlReady(a, composeConfig.bgm.url)) {
+      if (pendingSrc.get(a) !== composeConfig.bgm.url) seekLock.unlock(a);
+      assignAudioSrc(a, composeConfig.bgm.url);
     }
     const target = globalTime - composeConfig.bgmStartTime + composeConfig.bgmSourceStartTime;
     const dur = a.duration || composeConfig.bgm.durationSec || 0;
@@ -282,9 +311,9 @@ export function createPreviewAudioMixer(): PreviewAudioMixer {
     if (!state.audioClips.length) {
       const a = state.bgmEl;
       const url = state.composeConfig.bgm?.url;
-      if (a && url && !mediaUrlMatches(a, url)) {
-        seekLock.unlock(a);
-        a.src = url;
+      if (a && url && !audioUrlReady(a, url)) {
+        if (pendingSrc.get(a) !== url) seekLock.unlock(a);
+        assignAudioSrc(a, url);
       } else if (a && !url) {
         seekLock.unlock(a);
         unloadAudioEl(a);

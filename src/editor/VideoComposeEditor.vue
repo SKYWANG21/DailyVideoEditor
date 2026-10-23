@@ -179,7 +179,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, useSlots } from "vue";
+import { computed, getCurrentInstance, onBeforeUnmount, provide, useSlots } from "vue";
+import { ElMessage } from "element-plus";
 import VideoComposeAssetPanel from "./asset-panel/VideoComposeAssetPanel.vue";
 import VideoComposePlayer from "./player/VideoComposePlayer.vue";
 import VideoComposeSidebar from "./sidebar/VideoComposeSidebar.vue";
@@ -189,6 +190,9 @@ import SubtitleFontPopover from "./sidebar/SubtitleFontPopover.vue";
 import type { TextTemplateItem } from "./shared/textTemplateCatalog";
 import { useComposeEditorSession } from "./session/useComposeEditorSession";
 import type { ComposeUploadAdapter } from "./session/createComposeEditorState";
+import { installComposeElementPlus } from "./installComposeElementPlus";
+import { COMPOSE_ALGORITHM_BASE } from "./composeRuntime";
+import { COMPOSE_MEDIA_RESOLVER, createComposeMediaResolver } from "@/service/resolveComposeMediaUrl";
 import type { BgmItem, ComposeSegmentClipAssets, VideoComposeEditorModel } from "@/types/videoCompose";
 
 const props = withDefaults(
@@ -215,11 +219,32 @@ const props = withDefaults(
     onRequestUploadSfx?: () => void;
     /** 点击「上传花字」 */
     onRequestUploadFancy?: () => void;
+    /** 跨域媒体解析。返回同源代理地址或 blob: */
+    resolveMediaUrl?: (url: string) => Promise<string>;
+    /** 美颜 WASM / 模型根路径，默认 /algorithm/ */
+    algorithmBaseUrl?: string;
   }>(),
   {
     readonly: false,
+    algorithmBaseUrl: "/algorithm/",
   },
 );
+
+const hostApp = getCurrentInstance()?.appContext.app;
+if (hostApp) installComposeElementPlus(hostApp);
+
+/** 本编辑器会话的媒体缓存。卸载时释放默认 fetch 产生的 blob */
+const mediaResolver = createComposeMediaResolver({
+  getResolve: () => props.resolveMediaUrl,
+  onError: (message) => ElMessage.warning(message),
+});
+provide(COMPOSE_MEDIA_RESOLVER, mediaResolver);
+const algorithmBase = computed(() => {
+  const base = props.algorithmBaseUrl?.trim() || "/algorithm/";
+  return base.endsWith("/") ? base : `${base}/`;
+});
+provide(COMPOSE_ALGORITHM_BASE, algorithmBase);
+onBeforeUnmount(() => mediaResolver.revokeAll());
 
 const emit = defineEmits<{
   "update:modelValue": [value: VideoComposeEditorModel];

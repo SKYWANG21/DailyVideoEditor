@@ -8,6 +8,7 @@
 import { computed } from "vue";
 import { useDragStore } from "../../stores/drag";
 import { useScaleStore } from "../../stores/scale";
+import { useClipTrackPinia } from "../../stores/clipTrackPinia";
 import type { Track } from "../../types";
 
 // Props
@@ -17,8 +18,9 @@ interface Props {
 
 const props = defineProps<Props>();
 
-const dragStore = useDragStore();
-const scaleStore = useScaleStore();
+const pinia = useClipTrackPinia();
+const dragStore = useDragStore(pinia);
+const scaleStore = useScaleStore(pinia);
 
 // 计算预览框样式
 const previewStyle = computed(() => {

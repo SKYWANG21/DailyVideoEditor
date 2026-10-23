@@ -60,6 +60,7 @@ import { ref, computed, inject, provide, onMounted, onUnmounted, nextTick, watch
 import { useTracksStore } from "../../stores/tracks";
 import { useHistoryStore } from "../../stores/history";
 import { useDragStore } from "../../stores/drag";
+import { useClipTrackPinia } from "../../stores/clipTrackPinia";
 import TrackControl from "./TrackControl.vue";
 import TrackArea from "./TrackArea.vue";
 import type { Track } from "../../types";
@@ -90,9 +91,10 @@ const emit = defineEmits<{
 }>();
 
 // Stores
-const tracksStore = useTracksStore();
-const historyStore = useHistoryStore();
-const dragStore = useDragStore();
+const pinia = useClipTrackPinia();
+const tracksStore = useTracksStore(pinia);
+const historyStore = useHistoryStore(pinia);
+const dragStore = useDragStore(pinia);
 
 // Inject config from parent
 const config = inject<any>("config", {});

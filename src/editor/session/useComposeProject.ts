@@ -10,6 +10,8 @@ import { buildMockVideoClips, isVideoComposeMockEnabled } from "../shared/videoC
 import type { ComposeEditorEmit, ComposeEditorProps, ComposeEditorState } from "./createComposeEditorState";
 import type { ComposeEditorPorts } from "./ports";
 import { tracksStructureSig } from "./trackLookup";
+import { useComposeMediaResolver } from "../composeRuntime";
+import type { ComposeProbeOptions } from "@/hooks/useResolveComposeClips";
 
 /** 轨道副本、草稿持久化和首次上轴。不把 tracks 回灌进时间轴 */
 export function useComposeProject(
@@ -29,6 +31,9 @@ export function useComposeProject(
   let durationProbeRetryTimer: number | null = null;
   let persistTimer: number | null = null;
   const TRACKS_PERSIST_DEBOUNCE_MS = 400;
+  const mediaResolver = useComposeMediaResolver();
+  /** 时长探测与预览共用同一套跨域解析 */
+  const probeOptions: ComposeProbeOptions = { resolve: (url) => mediaResolver.resolve(url) };
 
   /** 把时间轴总时长同步到预览播放条 */
   function syncPreviewDuration(): void {
@@ -198,10 +203,14 @@ export function useComposeProject(
     );
     if (!targets.length) return;
 
-    await probeClipDurationsWithRetry(targets, (clip) => {
-      rebuildMainClipThumbnail(clip.id, clip.durationSec);
-      ports.syncDerivedClipsFromTimeline();
-    });
+    await probeClipDurationsWithRetry(
+      targets,
+      (clip) => {
+        rebuildMainClipThumbnail(clip.id, clip.durationSec);
+        ports.syncDerivedClipsFromTimeline();
+      },
+      probeOptions,
+    );
   }
 
   /** 等到时间轴挂载清空结束再上轴，避免 reset 抹掉刚写入的主轨 */
@@ -237,7 +246,7 @@ export function useComposeProject(
 
     if (isVideoComposeMockEnabled()) {
       const clips = buildMockVideoClips();
-      await probeClipDurationsWithRetry(clips);
+      await probeClipDurationsWithRetry(clips, undefined, probeOptions);
       state.timelineRef.value?.bootstrapMainFromClips(clips);
     } else if (!didBootstrap) {
       didBootstrap = true;

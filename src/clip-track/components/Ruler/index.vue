@@ -37,6 +37,7 @@ import { usePlaybackStore } from '../../stores/playback'
 import { useScaleStore } from '../../stores/scale'
 import { useTracksStore } from '../../stores/tracks'
 import { useDragStore } from '../../stores/drag'
+import { useClipTrackPinia } from '../../stores/clipTrackPinia'
 import { timelineContentWidth, timelineSpanSeconds } from '../../utils/helpers'
 
 // Props
@@ -59,10 +60,11 @@ const emit = defineEmits<{
 }>()
 
 // Stores
-const playbackStore = usePlaybackStore()
-const scaleStore = useScaleStore()
-const tracksStore = useTracksStore()
-const dragStore = useDragStore()
+const pinia = useClipTrackPinia()
+const playbackStore = usePlaybackStore(pinia)
+const scaleStore = useScaleStore(pinia)
+const tracksStore = useTracksStore(pinia)
+const dragStore = useDragStore(pinia)
 
 // Refs
 const rulerRef = ref<HTMLElement>()

@@ -1,4 +1,5 @@
 import { computed, watch } from "vue";
+import { useComposeMediaResolver } from "../composeRuntime";
 import type { ComposeFrameAspect, ComposeTrack, VideoFrameTransform } from "@/types/videoCompose";
 import type { ComposeEditorProps, ComposeEditorState } from "./createComposeEditorState";
 import { findClipById } from "./trackLookup";
@@ -13,6 +14,7 @@ import {
 
 /** 主视频轨画幅，以及当前片段的画面变换。字幕和贴图不读这里 */
 export function useComposeVideoFrame(props: ComposeEditorProps, state: ComposeEditorState) {
+  const mediaResolver = useComposeMediaResolver();
   const mainTrack = computed(
     () => state.tracks.value.find((track) => track.isMain) ?? state.tracks.value.find((track) => track.type === "video"),
   );
@@ -97,7 +99,7 @@ export function useComposeVideoFrame(props: ComposeEditorProps, state: ComposeEd
     (source) => {
       const seq = ++probeSeq;
       if (!source) return;
-      void probeVideoPixelSize(source).then((size) => {
+      void probeVideoPixelSize(source, (url) => mediaResolver.resolve(url)).then((size) => {
         if (seq !== probeSeq || !size) return;
         writeNativeSize(size.width, size.height);
       });
@@ -113,7 +115,7 @@ export function useComposeVideoFrame(props: ComposeEditorProps, state: ComposeEd
       const source = firstVideoSource(track);
       if (!source) return;
       const seq = ++probeSeq;
-      void probeVideoPixelSize(source).then((size) => {
+      void probeVideoPixelSize(source, (url) => mediaResolver.resolve(url)).then((size) => {
         if (seq !== probeSeq || !size) return;
         writeNativeSize(size.width, size.height);
       });

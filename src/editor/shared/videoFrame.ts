@@ -1,4 +1,5 @@
 import type { CSSProperties } from "vue";
+import { applyMediaCrossOrigin } from "@/service/resolveComposeMediaUrl";
 import type { ComposeFrameAspect, ComposeMediaClipConfig, VideoFrameTransform } from "@/types/videoCompose";
 import { readClipConfig } from "@/types/videoCompose";
 
@@ -185,7 +186,10 @@ export function snapFrameRotate(deg: number): { rotate: number; snapped: boolean
 }
 
 /** 探测视频原始像素。失败返回空，不抛错 */
-export function probeVideoPixelSize(url: string): Promise<{ width: number; height: number } | null> {
+export function probeVideoPixelSize(
+  url: string,
+  resolveMedia?: (url: string) => Promise<string>,
+): Promise<{ width: number; height: number } | null> {
   return new Promise((resolve) => {
     if (!url.trim()) {
       resolve(null);
@@ -205,7 +209,12 @@ export function probeVideoPixelSize(url: string): Promise<{ width: number; heigh
       else finish(null);
     };
     video.onerror = () => finish(null);
-    video.src = url;
+    void (resolveMedia ? resolveMedia(url) : Promise.resolve(url))
+      .then((src) => {
+        applyMediaCrossOrigin(video, src);
+        video.src = src;
+      })
+      .catch(() => finish(null));
   });
 }
 

@@ -1,10 +1,11 @@
-import { onUnmounted, ref, watch, type Ref } from "vue";
+import { computed, inject, onUnmounted, ref, watch, type Ref } from "vue";
 import { acquireGpuPixelPreview, type GpuPixelPreview } from "@/utils/beauty/gpuPixelPreview";
 import type { BeautyParams } from "@/types/composeMedia";
 import { readBeautyParams } from "@/types/composeMedia";
 import { beautyNeedsFace, type BeautyFrameEvent, type BeautyWorkerEvent, type PreviewVideoSize } from "@/types/beautyPreview";
 import type { VideoClipItem } from "@/types/videoCompose";
 import { previewSourceTimeUs } from "@/hooks/previewSourceTime";
+import { COMPOSE_ALGORITHM_BASE, useComposeMediaResolver } from "@/editor/composeRuntime";
 
 interface UseComposePreviewFrameOptions {
   /** GPUPixel 使用的页面 canvas。调用前不要 getContext */
@@ -33,6 +34,8 @@ interface UseComposePreviewFrameOptions {
  */
 export function useComposePreviewFrame(options: UseComposePreviewFrameOptions) {
   const { canvas, clips, currentIdx, sampleTime, renderGeneration, isPlaying, inGap, onFramePresented, onFrameMissed } = options;
+  const mediaResolver = useComposeMediaResolver();
+  const algorithmBase = inject(COMPOSE_ALGORITHM_BASE, computed(() => "/algorithm/"));
   const videoSize = ref<PreviewVideoSize | null>(null);
   const frameReady = ref(false);
   const previewError = ref("");
@@ -176,19 +179,44 @@ export function useComposePreviewFrame(options: UseComposePreviewFrameOptions) {
     const beauty = readBeautyParams(clip.beauty);
     if (!beauty.enabled) return;
     requestId += 1;
-    ensureWorker().postMessage({
-      type: "render",
-      requestId,
-      clipId: clip.id,
-      url: clip.url,
-      sourceTimeUs: previewSourceTimeUs(list, index, sampleTime.value),
-      detectFace: beautyNeedsFace(beauty),
-    });
+    const seq = requestId;
+    const sourceTimeUs = previewSourceTimeUs(list, index, sampleTime.value);
+    const detectFace = beautyNeedsFace(beauty);
+    const clipId = clip.id;
+    const rawUrl = clip.url;
     const next = list[index + 1];
-    if (next?.url && next.id !== prefetchedId) {
+    void (async () => {
+      let url: string;
+      try {
+        url = await mediaResolver.resolve(rawUrl);
+      } catch {
+        return;
+      }
+      if (disposed || seq !== requestId) return;
+      ensureWorker().postMessage({
+        type: "render",
+        requestId: seq,
+        clipId,
+        url,
+        sourceTimeUs,
+        detectFace,
+        algorithmBaseUrl: algorithmBase.value,
+      });
+      if (!next?.url || next.id === prefetchedId) return;
       prefetchedId = next.id;
-      ensureWorker().postMessage({ type: "prefetch", clipId: next.id, url: next.url });
-    }
+      try {
+        const nextUrl = await mediaResolver.resolve(next.url);
+        if (disposed) return;
+        ensureWorker().postMessage({
+          type: "prefetch",
+          clipId: next.id,
+          url: nextUrl,
+          algorithmBaseUrl: algorithmBase.value,
+        });
+      } catch {
+        prefetchedId = "";
+      }
+    })();
   }
 
   watch(
