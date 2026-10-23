@@ -339,7 +339,7 @@ export function mapTracksToTextOverlayClips(tracks: ComposeTrack[]): ComposeText
 }
 
 /** 侧栏素材库：某片段下的单个历史生成版本 */
-export interface ComposeSegmentClipVariant {
+export interface ComposeSegmentClipAssets {
   /** 版本唯一 id（Step3 clip id 或 result id 字符串化） */
   id: string;
   /** 片段序号（0-based） */
@@ -407,7 +407,7 @@ export interface ComposeSegmentClipGroup {
   /** 片段展示标题 */
   segmentTitle: string;
   /** 该片段全部历史版本 */
-  variants: ComposeSegmentClipVariant[];
+  variants: ComposeSegmentClipAssets[];
 }
 
 /** 编辑器聚合状态（v-model / 持久化 / 合成请求真相源） */
@@ -420,8 +420,11 @@ export interface VideoComposeEditorModel {
   bizId: string | number;
   /** 多轨列表 */
   tracks: ComposeTrack[];
-  /** 侧栏「上传片段」素材库（持久化，避免步骤切换丢失） */
-  uploadedClipCatalog?: ComposeSegmentClipVariant[];
+  /**
+   * 本地 demo 用的侧栏视频列表快照。
+   * 宿主应经 props.videoAssets 统一维护视频素材，不必依赖本字段。
+   */
+  uploadedClipCatalog?: ComposeSegmentClipAssets[];
   /**
    * 侧栏视频的喜欢态。按 url 或 mediaId 匹配，随工程保存。
    * 只保留已喜欢的媒体引用。

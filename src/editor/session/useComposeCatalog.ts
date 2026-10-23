@@ -4,15 +4,13 @@ import {
   composeMediaLikeKey,
   type BgmItem,
   type ComposeConfig,
-  type ComposeSegmentClipVariant,
+  type ComposeSegmentClipAssets,
   type ComposeSubtitleAsset,
   type ComposeTextTemplateDrag,
   type MediaRef,
   type VideoClipItem,
 } from "@/types/videoCompose";
 import {
-  COMPOSE_UPLOAD_CATALOG_SEGMENT_INDEX,
-  collectStep3InputClipIds,
   inferUploadedVariantsFromTracks,
   mergeUploadedCatalogVariants,
   resolveCatalogVariantPlayUrl,
@@ -24,20 +22,24 @@ import {
   probeClipDurationsWithRetry,
   probeVideoDuration,
 } from "@/hooks/useResolveComposeClips";
-import { appendUploadedTextTemplate, findTextTemplateById } from "../shared/textTemplateCatalog";
+import { appendUploadedTextTemplate, findTextTemplateById, setHostTextTemplates, textTemplateCatalog } from "../shared/textTemplateCatalog";
 import type { UploadedComposeClip } from "../modals/VideoClipUploadModal.vue";
-import type { ComposeEditorProps, ComposeEditorState } from "./createComposeEditorState";
+import type { ComposeEditorEmit, ComposeEditorProps, ComposeEditorState } from "./createComposeEditorState";
 import type { ComposeEditorPorts } from "./ports";
 
 /** 素材库预览、上传和拖入时间轴。退出预览后的 nextTick 仍由这里发出，播放桥只负责接着播 */
-export function useComposeCatalog(props: ComposeEditorProps, state: ComposeEditorState, ports: ComposeEditorPorts) {
-  const uploadSegmentIndex = COMPOSE_UPLOAD_CATALOG_SEGMENT_INDEX;
-
-  /** 从 model / 主轨恢复侧栏「上传片段」列表 */
-  function restoreUploadedCatalogFromModel(): void {
+export function useComposeCatalog(
+  props: ComposeEditorProps,
+  state: ComposeEditorState,
+  ports: ComposeEditorPorts,
+  emit: ComposeEditorEmit,
+) {
+  /** 宿主未接管时，从 model / 主轨恢复唯一内部视频列表（兼容旧草稿；不再依赖 clips 入参） */
+  function restoreInternalVideoVariantsFromModel(): void {
+    if (props.videoAssets) return;
     state.uploadedCatalogVariants.value = mergeUploadedCatalogVariants(
       props.modelValue.uploadedClipCatalog,
-      inferUploadedVariantsFromTracks(props.modelValue.tracks, collectStep3InputClipIds(props.clips)),
+      inferUploadedVariantsFromTracks(props.modelValue.tracks),
     );
   }
 
@@ -52,14 +54,17 @@ export function useComposeCatalog(props: ComposeEditorProps, state: ComposeEdito
     state.likedMedia.value = next;
   }
 
-  restoreUploadedCatalogFromModel();
+  restoreInternalVideoVariantsFromModel();
   restoreLikedMediaFromModel();
+  setHostTextTemplates(props.textTemplates);
 
-  /** 本地上传在前，历史版本按原分组顺序接在后面，不再按标题分组 */
-  const videoCatalogVariants = computed<ComposeSegmentClipVariant[]>(() => {
-    const generated = (props.segmentCatalog ?? []).flatMap((group) => group.variants);
-    return [...state.uploadedCatalogVariants.value, ...generated];
-  });
+  /** 侧栏视频：宿主 props 优先，否则唯一内部列表 */
+  const videoCatalogVariants = computed<ComposeSegmentClipAssets[]>(() => props.videoAssets ?? state.uploadedCatalogVariants.value);
+
+  /** 侧栏音频 / 音效 / 花字：宿主 props 优先 */
+  const panelAudioAssets = computed(() => props.audioAssets ?? state.audioAssets.value);
+  const panelSfxAssets = computed(() => props.sfxAssets ?? state.sfxAssets.value);
+  const panelTextTemplates = computed(() => props.textTemplates ?? textTemplateCatalog.value);
 
   /** 已喜欢媒体的匹配键，供侧栏卡片点亮爱心 */
   const likedMediaKeys = computed(() => {
@@ -129,8 +134,8 @@ export function useComposeCatalog(props: ComposeEditorProps, state: ComposeEdito
     };
   }
 
-  /** 侧栏单击：主播放器预览历史版本（不改时间轴） */
-  function onCatalogPreview(variant: ComposeSegmentClipVariant): void {
+  /** 侧栏单击：主播放器预览（不改时间轴） */
+  function onCatalogPreview(variant: ComposeSegmentClipAssets): void {
     if (!variant.url?.trim()) {
       ElMessage.warning("该版本暂无可用视频");
       return;
@@ -180,7 +185,7 @@ export function useComposeCatalog(props: ComposeEditorProps, state: ComposeEdito
 
   /** 将素材库版本写入主轨（按钮追加末尾 / 拖拽指定时间） */
   async function addCatalogVariantToTimeline(
-    variant: ComposeSegmentClipVariant,
+    variant: ComposeSegmentClipAssets,
     options?: { startTime?: number; successMessage?: string },
   ): Promise<void> {
     if (props.readonly) return;
@@ -203,8 +208,7 @@ export function useComposeCatalog(props: ComposeEditorProps, state: ComposeEdito
 
     const durationSec = await probeVideoDuration(playUrl);
     /** 每次上轴独立 id，避免删除后复用 variant.id 导致缩略图缓存不刷新 */
-    const catalogClipKey = variant.segmentIndex === uploadSegmentIndex ? variant.id : `hist-${variant.segmentIndex}-${variant.id}`;
-    const clipId = `${catalogClipKey}-tl-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+    const clipId = `${variant.id}-tl-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
     const clipItem = {
       id: clipId,
       title: `${variant.segmentTitle}${variant.label ? ` · ${variant.label}` : ""}`,
@@ -227,7 +231,7 @@ export function useComposeCatalog(props: ComposeEditorProps, state: ComposeEdito
       ports.syncDerivedClipsFromTimeline();
     };
 
-    if (variant.segmentIndex === uploadSegmentIndex && playUrl !== variant.url.trim()) {
+    if (!props.videoAssets && playUrl !== variant.url.trim()) {
       const idx = state.uploadedCatalogVariants.value.findIndex((item) => item.id === variant.id);
       if (idx >= 0) {
         state.uploadedCatalogVariants.value[idx] = { ...state.uploadedCatalogVariants.value[idx], url: playUrl };
@@ -252,10 +256,9 @@ export function useComposeCatalog(props: ComposeEditorProps, state: ComposeEdito
     ElMessage.success(options?.successMessage ?? "已添加到时间轴");
   }
 
-  /** 从上传片段列表移除（已在时间轴则确认后一并移除） */
-  async function onRemoveCatalogVariant(variant: ComposeSegmentClipVariant): Promise<void> {
+  /** 从侧栏视频列表移除（已在时间轴则确认后一并移除） */
+  async function onRemoveCatalogVariant(variant: ComposeSegmentClipAssets): Promise<void> {
     if (props.readonly) return;
-    if (variant.segmentIndex !== uploadSegmentIndex) return;
 
     const url = variant.url?.trim();
     if (url && timelineClipUrls.value.has(url)) {
@@ -276,13 +279,18 @@ export function useComposeCatalog(props: ComposeEditorProps, state: ComposeEdito
       clearCatalogPreview();
     }
 
-    state.uploadedCatalogVariants.value = state.uploadedCatalogVariants.value.filter((item) => item.id !== variant.id);
-    ports.persistUploadCatalogNow();
+    emit("remove-catalog-clip", variant);
+
+    if (!props.videoAssets) {
+      state.uploadedCatalogVariants.value = state.uploadedCatalogVariants.value.filter((item) => item.id !== variant.id);
+      ports.persistUploadCatalogNow();
+    }
+
     ElMessage.success("已从片段列表移除");
   }
 
   /** 拖拽：在松手位置插入主轨 */
-  async function onTimelineDropCatalogClip(payload: { variant: ComposeSegmentClipVariant; startTime: number }): Promise<void> {
+  async function onTimelineDropCatalogClip(payload: { variant: ComposeSegmentClipAssets; startTime: number }): Promise<void> {
     await addCatalogVariantToTimeline(payload.variant, { startTime: payload.startTime });
   }
 
@@ -299,8 +307,10 @@ export function useComposeCatalog(props: ComposeEditorProps, state: ComposeEdito
     state.timelineRef.value?.updateAudioClipDuration?.(clipId, durationSec);
     ports.syncDerivedClipsFromTimeline();
 
-    const patchList = (list: BgmItem[]): BgmItem[] =>
-      list.map((entry) => (entry.url === item.url ? { ...entry, durationSec } : entry));
+    /** 宿主接管列表时不改 props，只拉宽时间轴 */
+    if (props.audioAssets || props.sfxAssets) return;
+
+    const patchList = (list: BgmItem[]): BgmItem[] => list.map((entry) => (entry.url === item.url ? { ...entry, durationSec } : entry));
     state.sfxAssets.value = patchList(state.sfxAssets.value);
     state.audioAssets.value = patchList(state.audioAssets.value);
   }
@@ -337,11 +347,14 @@ export function useComposeCatalog(props: ComposeEditorProps, state: ComposeEdito
   /** 侧栏上传音频 → 音频轨追加 clip；若时长仍占位则异步探测拉宽 */
   function onAudioUploaded(bgm: BgmItem): void {
     const clipId = state.timelineRef.value?.addAudioClip({ ...bgm });
+    if (!props.audioAssets) {
+      state.audioAssets.value = [...state.audioAssets.value, bgm];
+    }
     void probeAndWidenAudioClip(clipId, bgm);
   }
 
   /** 切换侧栏视频的喜欢态，并立即写入工程 */
-  function onToggleCatalogLike(variant: ComposeSegmentClipVariant): void {
+  function onToggleCatalogLike(variant: ComposeSegmentClipAssets): void {
     if (props.readonly) return;
     const key = composeMediaLikeKey(variant);
     if (!key) return;
@@ -359,8 +372,9 @@ export function useComposeCatalog(props: ComposeEditorProps, state: ComposeEdito
     ports.persistUploadCatalogNow();
   }
 
-  /** 本地 SVG 进入花字列表，留在当前会话 */
+  /** 本地 SVG 进入花字列表，留在当前会话（仅未接管花字时） */
   async function onFancyUploaded(file: File): Promise<void> {
+    if (props.onRequestUploadFancy) return;
     try {
       await appendUploadedTextTemplate(file);
       ElMessage.success("已添加到花字列表");
@@ -372,16 +386,19 @@ export function useComposeCatalog(props: ComposeEditorProps, state: ComposeEdito
 
   /** 上传音效进入侧栏列表，不直接上轴 */
   function onSfxUploaded(bgm: BgmItem): void {
+    if (props.sfxAssets) return;
     state.sfxAssets.value = [...state.sfxAssets.value, bgm];
   }
 
+  /** 内置弹窗上传视频 → 写入唯一内部列表（宿主接管时不会走到） */
   function onClipUploaded(clips: UploadedComposeClip[]): void {
+    if (props.videoAssets || props.onRequestUploadClip) return;
     if (!clips.length) return;
     for (const clip of clips) {
       if (!clip.url?.trim()) continue;
       state.uploadedCatalogVariants.value.push({
         id: `upload-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        segmentIndex: uploadSegmentIndex,
+        segmentIndex: 0,
         segmentTitle: "上传片段",
         url: clip.url.trim(),
         label: clip.name?.trim() || "上传片段",
@@ -396,6 +413,44 @@ export function useComposeCatalog(props: ComposeEditorProps, state: ComposeEdito
     state.timelineRef.value?.addSubtitleClip({ text: "新建字幕", durationSec: 2 });
   }
 
+  /** 点击上传视频：宿主回调优先 */
+  function onUploadClipClick(): void {
+    if (props.readonly) return;
+    if (props.onRequestUploadClip) {
+      props.onRequestUploadClip();
+      return;
+    }
+    state.uploadClipModalOpen.value = true;
+  }
+
+  /** 点击上传音频 */
+  function onUploadAudioClick(): void {
+    if (props.readonly) return;
+    if (props.onRequestUploadAudio) {
+      props.onRequestUploadAudio();
+      return;
+    }
+    state.uploadAudioModalOpen.value = true;
+  }
+
+  /** 点击上传音效 */
+  function onUploadSfxClick(): void {
+    if (props.readonly) return;
+    if (props.onRequestUploadSfx) {
+      props.onRequestUploadSfx();
+      return;
+    }
+    state.uploadSfxModalOpen.value = true;
+  }
+
+  /** 点击上传花字：宿主回调优先，否则由外壳选文件 */
+  function onUploadFancyClick(): void {
+    if (props.readonly) return;
+    if (props.onRequestUploadFancy) {
+      props.onRequestUploadFancy();
+    }
+  }
+
   watch(
     () =>
       [
@@ -405,9 +460,17 @@ export function useComposeCatalog(props: ComposeEditorProps, state: ComposeEdito
         props.modelValue.likedMedia,
       ] as const,
     () => {
-      restoreUploadedCatalogFromModel();
+      restoreInternalVideoVariantsFromModel();
       restoreLikedMediaFromModel();
       state.syncRegistryFromTracks(props.modelValue.tracks || []);
+    },
+    { deep: true },
+  );
+
+  watch(
+    () => props.textTemplates,
+    (list) => {
+      setHostTextTemplates(list);
     },
     { deep: true },
   );
@@ -416,6 +479,9 @@ export function useComposeCatalog(props: ComposeEditorProps, state: ComposeEdito
 
   return {
     videoCatalogVariants,
+    panelAudioAssets,
+    panelSfxAssets,
+    panelTextTemplates,
     likedMediaKeys,
     onToggleCatalogLike,
     onFancyUploaded,
@@ -435,5 +501,9 @@ export function useComposeCatalog(props: ComposeEditorProps, state: ComposeEdito
     onAudioUploaded,
     onClipUploaded,
     onAddSubtitle,
+    onUploadClipClick,
+    onUploadAudioClick,
+    onUploadSfxClick,
+    onUploadFancyClick,
   };
 }

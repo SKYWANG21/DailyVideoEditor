@@ -4,7 +4,7 @@ import type {
   BeautyParams,
   BgmItem,
   ComposeConfig,
-  ComposeSegmentClipVariant,
+  ComposeSegmentClipAssets,
   ComposeSubtitleAsset,
   ComposeSubtitleClip,
   ComposeTextOverlayClip,
@@ -13,9 +13,7 @@ import type {
   SubtitleItem,
   SubtitleStyleConfig,
   VideoClipItem,
-  VideoComposeClipInput,
   VideoComposeEditorModel,
-  ComposeSegmentClipGroup,
   MediaRef,
 } from "@/types/videoCompose";
 import {
@@ -33,27 +31,44 @@ import type VideoComposePlayer from "../player/VideoComposePlayer.vue";
 import type VideoComposeSidebar from "../sidebar/VideoComposeSidebar.vue";
 import type VideoComposeTimeline from "../timeline/VideoComposeTimeline.vue";
 import type { SelectedTextClipProps, ComposeInspectorKind } from "../sidebar/VideoComposeSidebar.vue";
-import { findTextTemplateById, isCssHexColor } from "../shared/textTemplateCatalog";
+import { findTextTemplateById, isCssHexColor, type TextTemplateItem } from "../shared/textTemplateCatalog";
 import { buildMockSfxAssets, isVideoComposeMockEnabled } from "../shared/videoComposeMockClips";
 import { gainToDb } from "../shared/volumeDb";
 import { findClipById, findSelectedIdOfType, firstClipOfType, getLinkedOriginalAudioIdForVideo, tracksStructureSig } from "./trackLookup";
 
 /** 编辑器入参。可选字段由 withDefaults 在运行时补齐 */
 export interface ComposeEditorProps {
-  /** 视频片段入参 */
-  clips: VideoComposeClipInput[];
-  /** 编辑器聚合状态 */
+  /** 编辑器聚合状态（轨道真相源：modelValue.tracks） */
   modelValue: VideoComposeEditorModel;
   /** 只读模式 */
   readonly?: boolean;
-  /** 各片段历史版本素材库 */
-  segmentCatalog?: ComposeSegmentClipGroup[];
+  /**
+   * 侧栏视频素材（上传与生成由宿主拼成一份）。
+   * 传入后编辑器不再用内部列表 / uploadedClipCatalog 驱动侧栏。
+   */
+  videoAssets?: ComposeSegmentClipAssets[];
+  /** 侧栏音频库；传入则覆盖会话内列表 */
+  audioAssets?: BgmItem[];
+  /** 侧栏音效库；传入则覆盖会话内列表 */
+  sfxAssets?: BgmItem[];
+  /** 侧栏花字模板；传入则覆盖会话目录 */
+  textTemplates?: TextTemplateItem[];
+  /** 点击「上传视频」；传入则不再打开内置上传弹窗 */
+  onRequestUploadClip?: () => void;
+  /** 点击「上传音频」；传入则不再打开内置上传弹窗 */
+  onRequestUploadAudio?: () => void;
+  /** 点击「上传音效」；传入则不再打开内置上传弹窗 */
+  onRequestUploadSfx?: () => void;
+  /** 点击「上传花字」；传入则不再走内置选文件 */
+  onRequestUploadFancy?: () => void;
 }
 
 /** 外壳向外抛出的事件 */
 export interface ComposeEditorEmit {
   (event: "update:modelValue", value: VideoComposeEditorModel): void;
   (event: "ready"): void;
+  /** 侧栏移除视频素材（宿主维护 videoAssets 时据此改列表） */
+  (event: "remove-catalog-clip", variant: ComposeSegmentClipAssets): void;
 }
 
 /** 预览和时间轴对钟用的可变标志。必须留在同一次会话里，不能做成模块级变量 */
@@ -114,11 +129,11 @@ export interface ComposeEditorState {
   videoPlaybackRate: Ref<number>;
   /** 当前音频 clip 变速倍率 */
   audioPlaybackRate: Ref<number>;
-  uploadedCatalogVariants: Ref<ComposeSegmentClipVariant[]>;
+  uploadedCatalogVariants: Ref<ComposeSegmentClipAssets[]>;
   /** 已喜欢的视频媒体，随工程保存 */
   likedMedia: Ref<MediaRef[]>;
   /** 侧栏素材库当前预览中的历史版本 */
-  previewCatalogVariant: Ref<ComposeSegmentClipVariant | null>;
+  previewCatalogVariant: Ref<ComposeSegmentClipAssets | null>;
   previewClipDuration: Ref<number>;
   uploadAudioModalOpen: Ref<boolean>;
   uploadSfxModalOpen: Ref<boolean>;
@@ -289,9 +304,9 @@ export function createComposeEditorState(props: ComposeEditorProps): ComposeEdit
     bgmVolume: ref<number | null>(gainToDb(0.5)),
     videoPlaybackRate: ref(1),
     audioPlaybackRate: ref(1),
-    uploadedCatalogVariants: ref<ComposeSegmentClipVariant[]>([]),
+    uploadedCatalogVariants: ref<ComposeSegmentClipAssets[]>([]),
     likedMedia: ref<MediaRef[]>([]),
-    previewCatalogVariant: ref<ComposeSegmentClipVariant | null>(null),
+    previewCatalogVariant: ref<ComposeSegmentClipAssets | null>(null),
     previewClipDuration: ref(0),
     uploadAudioModalOpen: ref(false),
     uploadSfxModalOpen: ref(false),

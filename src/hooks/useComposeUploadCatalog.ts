@@ -1,6 +1,6 @@
-import type { ComposeSegmentClipVariant, ComposeTrack, VideoComposeClipInput } from "@/types/videoCompose";
+import type { ComposeSegmentClipAssets, ComposeTrack } from "@/types/videoCompose";
 
-/** 侧栏「上传片段」分组序号（与 Step3 片段区分） */
+/** 侧栏视频分组序号占位（历史字段，卡片不再按此区分可否删除） */
 export const COMPOSE_UPLOAD_CATALOG_SEGMENT_INDEX = -1;
 
 /** 从主轨 clip 名称解析展示标签（「上传片段 · xxx」→ xxx） */
@@ -14,25 +14,21 @@ function parseUploadClipLabel(name?: string): string {
 }
 
 /**
- * 从已持久化主轨推断上传片段（兼容旧数据无 uploadedClipCatalog 字段）。
- * 排除 Step3 入参 id 与侧栏历史版本 id（hist- 前缀）。
+ * 从已持久化主轨推断侧栏视频条目（兼容旧数据无 uploadedClipCatalog 字段）。
+ * 排除 hist- 前缀 id（旧历史版本上轴标记）。
  */
-export function inferUploadedVariantsFromTracks(
-  tracks: ComposeTrack[] | undefined,
-  step3InputIds: Iterable<string>,
-): ComposeSegmentClipVariant[] {
-  const inputIdSet = new Set(step3InputIds);
+export function inferUploadedVariantsFromTracks(tracks: ComposeTrack[] | undefined): ComposeSegmentClipAssets[] {
   const main =
     tracks?.find((t) => t.isMain && t.clips.some((c) => c.type === "video")) ||
     tracks?.find((t) => t.type === "video" && t.clips.some((c) => c.type === "video"));
   if (!main) return [];
 
-  const variants: ComposeSegmentClipVariant[] = [];
+  const variants: ComposeSegmentClipAssets[] = [];
   for (const clip of main.clips) {
     if (clip.type !== "video") continue;
     const sourceUrl = clip.sourceUrl?.trim();
     if (!sourceUrl) continue;
-    if (inputIdSet.has(clip.id) || clip.id.startsWith("hist-")) continue;
+    if (clip.id.startsWith("hist-")) continue;
 
     variants.push({
       id: clip.id,
@@ -46,8 +42,8 @@ export function inferUploadedVariantsFromTracks(
 }
 
 /** 合并多来源上传 catalog，按 URL 去重（保留先出现的条目） */
-export function mergeUploadedCatalogVariants(...sources: Array<ComposeSegmentClipVariant[] | undefined>): ComposeSegmentClipVariant[] {
-  const byUrl = new Map<string, ComposeSegmentClipVariant>();
+export function mergeUploadedCatalogVariants(...sources: Array<ComposeSegmentClipAssets[] | undefined>): ComposeSegmentClipAssets[] {
+  const byUrl = new Map<string, ComposeSegmentClipAssets>();
   for (const list of sources) {
     for (const variant of list || []) {
       const url = variant.url?.trim();
@@ -59,11 +55,6 @@ export function mergeUploadedCatalogVariants(...sources: Array<ComposeSegmentCli
 }
 
 /** 本地素材直接使用已有地址 */
-export async function resolveCatalogVariantPlayUrl(variant: ComposeSegmentClipVariant): Promise<string> {
+export async function resolveCatalogVariantPlayUrl(variant: ComposeSegmentClipAssets): Promise<string> {
   return variant.url?.trim() || "";
-}
-
-/** Step3 入参 clip id 集合 */
-export function collectStep3InputClipIds(inputs: VideoComposeClipInput[]): Set<string> {
-  return new Set(inputs.map((c) => c.id));
 }

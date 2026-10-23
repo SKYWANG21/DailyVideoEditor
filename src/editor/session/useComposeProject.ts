@@ -72,11 +72,62 @@ export function useComposeProject(
       bizType: props.modelValue.bizType,
       bizId: props.modelValue.bizId,
       tracks: JSON.parse(JSON.stringify(exported)),
-      uploadedClipCatalog: JSON.parse(JSON.stringify(state.uploadedCatalogVariants.value)),
+      /** 宿主接管 videoAssets 时不覆盖其旧字段；本地 demo 写唯一内部列表 */
+      uploadedClipCatalog: props.videoAssets
+        ? props.modelValue.uploadedClipCatalog
+        : JSON.parse(JSON.stringify(state.uploadedCatalogVariants.value)),
       likedMedia: JSON.parse(JSON.stringify(state.likedMedia.value)),
       composeExtractAudioUrls: [...state.composeExtractAudioUrls.value],
       scale: normalizeComposeTimelineScale(state.timelineRef.value?.getScale?.() ?? props.modelValue.scale),
     };
+  }
+
+  /**
+   * 用指定工程整页重置时间轴与会话态。侧栏视频/音频/音效/花字以宿主 props 为准，不从 model 回灌。
+   */
+  async function reload(model: VideoComposeEditorModel): Promise<void> {
+    state.playerRef.value?.pause();
+    if (persistTimer) {
+      clearTimeout(persistTimer);
+      persistTimer = null;
+    }
+    clearDurationProbeRetry();
+    durationProbeSeq += 1;
+
+    emit("update:modelValue", JSON.parse(JSON.stringify(model)));
+    await nextTick();
+    await waitForTimeline();
+
+    const tracks = model.tracks?.length ? JSON.parse(JSON.stringify(model.tracks)) : [];
+    state.tracks.value = tracks;
+    state.lastPersistedStructureSig = tracksStructureSig(tracks);
+    state.likedMedia.value = (model.likedMedia ?? [])
+      .filter((item) => item.liked !== false)
+      .map((item) => ({ ...item, liked: true as const }));
+    state.composeExtractAudioUrls.value = [...(model.composeExtractAudioUrls || [])];
+
+    if (!props.videoAssets) {
+      state.uploadedCatalogVariants.value = JSON.parse(JSON.stringify(model.uploadedClipCatalog || []));
+    }
+
+    state.timelineRef.value?.importTracks(tracks);
+    state.syncRegistryFromTracks(tracks);
+    ports.syncDerivedClipsFromTimeline();
+    ports.syncSidebarFromTracks();
+    syncPreviewDuration();
+    lastMainLayoutSig = mainVideoLayoutSig(state.derivedMainClips.value);
+    didBootstrap = true;
+    emit("ready");
+
+    const seq = durationProbeSeq;
+    await applyProbedMainClipDurations();
+    if (seq !== durationProbeSeq) return;
+    if (!mainClipsStillProbeable()) return;
+    durationProbeRetryTimer = window.setTimeout(() => {
+      durationProbeRetryTimer = null;
+      if (seq !== durationProbeSeq) return;
+      void applyProbedMainClipDurations();
+    }, DURATION_PROBE_RETRY_MS);
   }
 
   /** 立即将上传 catalog 写入 model（不依赖 tracks 防抖） */
@@ -258,5 +309,6 @@ export function useComposeProject(
     onTimelineScaleUpdate,
     validate,
     flush,
+    reload,
   };
 }

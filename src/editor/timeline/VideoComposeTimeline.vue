@@ -144,7 +144,7 @@ import type {
   VideoClipItem,
   BgmItem,
   SubtitleStyleConfig,
-  ComposeSegmentClipVariant,
+  ComposeSegmentClipAssets,
   ComposeMediaClipConfig,
   ComposeSubtitleAsset,
   ComposeTextTemplateDrag,
@@ -248,7 +248,7 @@ const emit = defineEmits<{
   /** 时间线全局倍速变更 */
   "playback-ratechange": [rate: number];
   /** 侧栏素材库版本拖入主轨 */
-  "drop-catalog-clip": [payload: { variant: ComposeSegmentClipVariant; startTime: number }];
+  "drop-catalog-clip": [payload: { variant: ComposeSegmentClipAssets; startTime: number }];
   /** 音频或音效拖入音频轨 */
   "drop-audio-asset": [payload: { item: BgmItem; startTime: number }];
   /** 字幕素材拖入字幕轨 */
@@ -411,9 +411,11 @@ let themeObserver: MutationObserver | null = null;
 const hScrollbarControlWidthPx = ref(TIMELINE_TRACK_CONTROL_WIDTH);
 
 /** 根节点 CSS 变量，缩放条左缘与轨道头对齐 */
-const hScrollbarAlignStyle = computed((): Record<string, string> => ({
-  "--timeline-track-control-width": `${hScrollbarControlWidthPx.value}px`,
-}));
+const hScrollbarAlignStyle = computed(
+  (): Record<string, string> => ({
+    "--timeline-track-control-width": `${hScrollbarControlWidthPx.value}px`,
+  }),
+);
 
 /** 控制栏单元格尺寸变化时更新假横向条左缘 */
 let hScrollbarAlignResizeObserver: ResizeObserver | null = null;
@@ -1577,7 +1579,7 @@ function onCatalogDrop(event: DragEvent): void {
   event.stopPropagation();
   const startTime = resolveDropTimeSec(event);
   try {
-    const variant = readCatalogDrag<ComposeSegmentClipVariant>(event, COMPOSE_SEGMENT_CLIP_DRAG_MIME);
+    const variant = readCatalogDrag<ComposeSegmentClipAssets>(event, COMPOSE_SEGMENT_CLIP_DRAG_MIME);
     if (variant) {
       emit("drop-catalog-clip", { variant, startTime });
       return;

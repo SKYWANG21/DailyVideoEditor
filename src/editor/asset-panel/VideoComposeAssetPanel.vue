@@ -90,7 +90,7 @@
         <template v-else-if="catId === 'fancy'">
           <div class="grid gap-2" :style="cardGridStyle">
             <slot name="fancy-actions">
-              <button v-if="!readonly" type="button" :class="addCardClass" @click="fancyFileRef?.click()">
+              <button v-if="!readonly" type="button" :class="addCardClass" @click="onFancyUploadClick">
                 <UploadCloud :size="24" />
                 上传花字
               </button>
@@ -132,7 +132,7 @@ import {
   COMPOSE_AUDIO_ASSET_DRAG_MIME,
   COMPOSE_SUBTITLE_ASSET_DRAG_MIME,
   type BgmItem,
-  type ComposeSegmentClipVariant,
+  type ComposeSegmentClipAssets,
   type ComposeSubtitleAsset,
 } from "@/types/videoCompose";
 import VideoComposeAssetCard from "./VideoComposeAssetCard.vue";
@@ -158,8 +158,8 @@ const CARD_SIZE_PX = 72;
 const NARROW_PANE_PX = 132;
 
 const props = defineProps<{
-  /** 扁平视频素材。本地上传在前，历史版本按原顺序接在后面 */
-  videoVariants?: ComposeSegmentClipVariant[];
+  /** 扁平视频素材 */
+  videoVariants?: ComposeSegmentClipAssets[];
   /** 已喜欢媒体的匹配键 */
   likedMediaKeys?: Set<string>;
   /** 已在时间轴上的视频地址 */
@@ -178,17 +178,23 @@ const props = defineProps<{
   subtitleAssets?: ComposeSubtitleAsset[];
   /** 花字模板 */
   textTemplates?: TextTemplateItem[];
+  /**
+   * 为 true 时「上传花字」只向外抛点击事件，不打开内置选文件。
+   * 宿主经 onRequestUploadFancy 接管时由外壳传入。
+   */
+  externalFancyUpload?: boolean;
 }>();
 
 const emit = defineEmits<{
   "upload-clip": [];
   "open-upload-bgm": [];
   "upload-sfx": [];
-  "upload-fancy": [file: File];
+  /** 内置选文件完成；externalFancyUpload 时改为空参点击 */
+  "upload-fancy": [file?: File];
   "add-subtitle": [];
-  "preview-clip": [variant: ComposeSegmentClipVariant];
-  "remove-catalog-clip": [variant: ComposeSegmentClipVariant];
-  "toggle-like": [variant: ComposeSegmentClipVariant];
+  "preview-clip": [variant: ComposeSegmentClipAssets];
+  "remove-catalog-clip": [variant: ComposeSegmentClipAssets];
+  "toggle-like": [variant: ComposeSegmentClipAssets];
 }>();
 
 const videoVariants = computed(() => props.videoVariants ?? []);
@@ -214,8 +220,17 @@ function onSubtitleDragStart(event: DragEvent, item: ComposeSubtitleAsset): void
   writeAssetDrag(event, COMPOSE_SUBTITLE_ASSET_DRAG_MIME, item);
 }
 
-/** 花字 SVG 选择框。默认上传按钮点它，外壳换掉插槽后不再使用 */
+/** 花字 SVG 选择框。宿主接管上传时不使用 */
 const fancyFileRef = ref<HTMLInputElement | null>(null);
+
+/** 点击上传花字：外置回调只抛事件，否则打开本地选文件 */
+function onFancyUploadClick(): void {
+  if (props.externalFancyUpload) {
+    emit("upload-fancy");
+    return;
+  }
+  fancyFileRef.value?.click();
+}
 
 /** 选中本地 SVG 后交给外壳登记到花字列表 */
 function onFancyFileChange(event: Event): void {

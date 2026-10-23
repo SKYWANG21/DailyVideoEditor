@@ -1,4 +1,4 @@
-import { defineExpose, nextTick, onBeforeUnmount, onMounted } from "vue";
+import { defineExpose, onBeforeUnmount, onMounted } from "vue";
 import { useComposeExtractAudioCleanup } from "@/hooks/useComposeExtractAudioCleanup";
 import { loadTextTemplateCatalog } from "../shared/textTemplateCatalog";
 import type { ComposeEditorEmit, ComposeEditorProps } from "./createComposeEditorState";
@@ -29,16 +29,13 @@ export function useComposeEditorSession(props: ComposeEditorProps, emit: Compose
   const layout = useComposeShellLayout(props);
   const playback = useComposePlaybackBridge(state, ports);
   const inspector = useComposeInspector(props, state, ports);
-  const catalog = useComposeCatalog(props, state, ports);
+  const catalog = useComposeCatalog(props, state, ports, emit);
   const project = useComposeProject(props, state, ports, emit);
   const videoFrame = useComposeVideoFrame(props, state);
 
   onMounted(() => {
     void loadTextTemplateCatalog();
     layout.mountLayout();
-    nextTick(() => {
-      console.log("props.modelValue", props.modelValue);
-    });
   });
 
   onBeforeUnmount(() => {
@@ -49,14 +46,14 @@ export function useComposeEditorSession(props: ComposeEditorProps, emit: Compose
   defineExpose({
     validate: project.validate,
     flush: project.flush,
+    reload: project.reload,
     getResolvedClips: () => state.timelineRef.value?.getMainVideoClips?.() || state.derivedMainClips.value,
     validateBeforeCompose: project.validate,
     syncBeforeCompose: project.flush,
     getComposeClips: () => state.timelineRef.value?.getMainVideoClips?.() || state.derivedMainClips.value,
-    /** 打开上传视频片段弹窗（供顶栏按钮调用） */
+    /** 打开上传视频：有宿主回调则调回调，否则开内置弹窗 */
     openUploadClipModal: () => {
-      if (props.readonly) return;
-      state.uploadClipModalOpen.value = true;
+      catalog.onUploadClipClick();
     },
   });
 

@@ -78,12 +78,11 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { Film, Heart, X } from "@lucide/vue";
-import { COMPOSE_UPLOAD_CATALOG_SEGMENT_INDEX } from "@/hooks/useComposeUploadCatalog";
-import { COMPOSE_SEGMENT_CLIP_DRAG_MIME, composeMediaLikeKey, type ComposeSegmentClipVariant } from "@/types/videoCompose";
+import { COMPOSE_SEGMENT_CLIP_DRAG_MIME, composeMediaLikeKey, type ComposeSegmentClipAssets } from "@/types/videoCompose";
 
 const props = defineProps<{
-  /** 扁平视频素材，本地上传与历史版本同一套卡片 */
-  variants: ComposeSegmentClipVariant[];
+  /** 扁平视频素材（上传与生成统一卡片） */
+  variants: ComposeSegmentClipAssets[];
   /** 已喜欢媒体的匹配键 */
   likedKeys?: Set<string>;
   /** 已在时间轴上的视频 URL 集合 */
@@ -95,11 +94,11 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  preview: [variant: ComposeSegmentClipVariant];
-  /** 从侧栏素材列表移除（不删后端 Step3 / 素材库数据） */
-  remove: [variant: ComposeSegmentClipVariant];
+  preview: [variant: ComposeSegmentClipAssets];
+  /** 从侧栏素材列表移除 */
+  remove: [variant: ComposeSegmentClipAssets];
   /** 切换喜欢 */
-  "toggle-like": [variant: ComposeSegmentClipVariant];
+  "toggle-like": [variant: ComposeSegmentClipAssets];
 }>();
 
 /** 当前正在拖拽的版本 id（用于样式与抑制误触预览） */
@@ -107,42 +106,42 @@ const draggingVariantId = ref<string | null>(null);
 /** 本次 pointer 序列是否已发起拖拽，避免 drag 后触发 click 预览 */
 let suppressNextClick = false;
 
-/** 是否允许从侧栏列表移除（仅上传片段） */
-function isRemovable(variant: ComposeSegmentClipVariant): boolean {
-  return variant.segmentIndex === COMPOSE_UPLOAD_CATALOG_SEGMENT_INDEX;
+/** 非只读时均可从侧栏移除（由宿主或内部列表统一处理） */
+function isRemovable(_variant: ComposeSegmentClipAssets): boolean {
+  return !props.readonly;
 }
 
 /** 该版本是否已标记喜欢 */
-function isLiked(variant: ComposeSegmentClipVariant): boolean {
+function isLiked(variant: ComposeSegmentClipAssets): boolean {
   const key = composeMediaLikeKey(variant);
   return Boolean(key && props.likedKeys?.has(key));
 }
 
 /** 只读时只展示已喜欢；可编辑时始终留出可点的爱心 */
-function showLikeButton(variant: ComposeSegmentClipVariant): boolean {
+function showLikeButton(variant: ComposeSegmentClipAssets): boolean {
   return !props.readonly || isLiked(variant);
 }
 
 /** 悬浮且可删除时，爱心让到删除按钮左侧 */
-function likeButtonClass(variant: ComposeSegmentClipVariant): string[] {
+function likeButtonClass(variant: ComposeSegmentClipAssets): string[] {
   const shift = !props.readonly && isRemovable(variant) ? "right-1.5 group-hover:right-[30px]" : "right-1.5";
   if (isLiked(variant)) return [shift, "opacity-100"];
   return [shift, "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100"];
 }
 
 /** 爱心提示 */
-function likeTitle(variant: ComposeSegmentClipVariant): string {
+function likeTitle(variant: ComposeSegmentClipAssets): string {
   if (props.readonly) return "已喜欢";
   return isLiked(variant) ? "取消喜欢" : "喜欢";
 }
 
 /** 是否允许拖入时间轴 */
-function canDrag(variant: ComposeSegmentClipVariant): boolean {
+function canDrag(variant: ComposeSegmentClipAssets): boolean {
   return !props.readonly && Boolean(variant.url?.trim()) && !isOnTimeline(variant);
 }
 
 /** 卡片单击：拖拽结束后不触发预览 */
-function onCardClick(variant: ComposeSegmentClipVariant): void {
+function onCardClick(variant: ComposeSegmentClipAssets): void {
   if (suppressNextClick) {
     suppressNextClick = false;
     return;
@@ -151,13 +150,13 @@ function onCardClick(variant: ComposeSegmentClipVariant): void {
 }
 
 /** 喜欢不进入预览，也不开始拖拽 */
-function onToggleLike(variant: ComposeSegmentClipVariant): void {
+function onToggleLike(variant: ComposeSegmentClipAssets): void {
   if (props.readonly) return;
   emit("toggle-like", variant);
 }
 
 /** 开始拖拽：写入素材库版本 payload */
-function onVariantDragStart(event: DragEvent, variant: ComposeSegmentClipVariant): void {
+function onVariantDragStart(event: DragEvent, variant: ComposeSegmentClipAssets): void {
   if (!canDrag(variant) || !event.dataTransfer) return;
   suppressNextClick = true;
   draggingVariantId.value = variant.id;
@@ -171,7 +170,7 @@ function onVariantDragEnd(): void {
 }
 
 /** 判断该版本是否已在时间轴（按 URL 去重） */
-function isOnTimeline(variant: ComposeSegmentClipVariant): boolean {
+function isOnTimeline(variant: ComposeSegmentClipAssets): boolean {
   if (!variant.url?.trim() || !props.timelineClipUrls?.size) return false;
   return props.timelineClipUrls.has(variant.url.trim());
 }

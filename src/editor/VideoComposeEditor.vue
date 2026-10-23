@@ -11,14 +11,15 @@
           :preview-clip-id="previewCatalogVariant?.id"
           :readonly="readonly"
           :audio-clip-count="audioClipCount"
-          :audio-assets="audioAssets"
-          :sfx-assets="sfxAssets"
+          :audio-assets="panelAudioAssets"
+          :sfx-assets="panelSfxAssets"
           :subtitle-assets="subtitleAssets"
-          :text-templates="textTemplateCatalog"
-          @open-upload-bgm="uploadAudioModalOpen = true"
-          @upload-clip="uploadClipModalOpen = true"
-          @upload-sfx="uploadSfxModalOpen = true"
-          @upload-fancy="onFancyUploaded"
+          :text-templates="panelTextTemplates"
+          :external-fancy-upload="Boolean(props.onRequestUploadFancy)"
+          @open-upload-bgm="onUploadAudioClick"
+          @upload-clip="onUploadClipClick"
+          @upload-sfx="onUploadSfxClick"
+          @upload-fancy="onPanelUploadFancy"
           @add-subtitle="onAddSubtitle"
           @preview-clip="onCatalogPreview"
           @remove-catalog-clip="onRemoveCatalogVariant"
@@ -188,30 +189,42 @@ import VideoComposeTimeline from "./timeline/VideoComposeTimeline.vue";
 import BgmUploadModal from "./modals/BgmUploadModal.vue";
 import VideoClipUploadModal from "./modals/VideoClipUploadModal.vue";
 import SubtitleFontPopover from "./sidebar/SubtitleFontPopover.vue";
-import { textTemplateCatalog } from "./shared/textTemplateCatalog";
+import type { TextTemplateItem } from "./shared/textTemplateCatalog";
 import { useComposeEditorSession } from "./session/useComposeEditorSession";
-import type { ComposeSegmentClipGroup, VideoComposeClipInput, VideoComposeEditorModel } from "@/types/videoCompose";
+import type { BgmItem, ComposeSegmentClipAssets, VideoComposeEditorModel } from "@/types/videoCompose";
 
 const props = withDefaults(
   defineProps<{
-    /** 视频片段入参 */
-    clips: VideoComposeClipInput[];
-    /** 编辑器聚合状态 */
+    /** 编辑器聚合状态（轨道真相源：modelValue.tracks） */
     modelValue: VideoComposeEditorModel;
     /** 只读模式 */
     readonly?: boolean;
-    /** 各片段历史版本素材库（侧栏展示，不自动上轴） */
-    segmentCatalog?: ComposeSegmentClipGroup[];
+    /** 侧栏视频素材（上传与生成由宿主统一维护） */
+    videoAssets?: ComposeSegmentClipAssets[];
+    /** 侧栏音频库 */
+    audioAssets?: BgmItem[];
+    /** 侧栏音效库 */
+    sfxAssets?: BgmItem[];
+    /** 侧栏花字模板 */
+    textTemplates?: TextTemplateItem[];
+    /** 点击「上传视频」；传入则不再打开内置弹窗 */
+    onRequestUploadClip?: () => void;
+    /** 点击「上传音频」 */
+    onRequestUploadAudio?: () => void;
+    /** 点击「上传音效」 */
+    onRequestUploadSfx?: () => void;
+    /** 点击「上传花字」 */
+    onRequestUploadFancy?: () => void;
   }>(),
   {
     readonly: false,
-    segmentCatalog: () => [],
   },
 );
 
 const emit = defineEmits<{
   "update:modelValue": [value: VideoComposeEditorModel];
   ready: [];
+  "remove-catalog-clip": [variant: ComposeSegmentClipAssets];
 }>();
 
 /** 分类操作插槽名。外壳没传时不转发，面板保留默认上传按钮 */
@@ -236,8 +249,6 @@ const {
   videoReady,
   previewDurationSec,
   tracks,
-  audioAssets,
-  sfxAssets,
   subtitleAssets,
   audioClipCount,
   subtitleStyle,
@@ -299,6 +310,9 @@ const {
   onFontOptionSelect,
   onStyleOptionSelect,
   videoCatalogVariants,
+  panelAudioAssets,
+  panelSfxAssets,
+  panelTextTemplates,
   likedMediaKeys,
   catalogPreviewActive,
   previewOverrideClips,
@@ -318,6 +332,10 @@ const {
   onToggleCatalogLike,
   onClipUploaded,
   onAddSubtitle,
+  onUploadClipClick,
+  onUploadAudioClick,
+  onUploadSfxClick,
+  onUploadFancyClick,
   onTracksUpdate,
   onTimelineScaleUpdate,
   frameAspect,
@@ -333,6 +351,15 @@ const {
   onFrameAspectChange,
   onVideoSourceSize,
 } = useComposeEditorSession(props, emit);
+
+/** 面板花字上传：宿主回调或内置选文件结果 */
+function onPanelUploadFancy(file?: File): void {
+  if (props.onRequestUploadFancy) {
+    onUploadFancyClick();
+    return;
+  }
+  if (file) void onFancyUploaded(file);
+}
 </script>
 
 <style lang="scss">

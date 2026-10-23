@@ -143,10 +143,26 @@ export async function loadTextTemplateCatalog(): Promise<TextTemplateItem[]> {
   return textTemplateCatalog.value;
 }
 
-/** 按 templateId 查找资源 */
+/** 宿主经 props 注入的花字（优先于会话目录） */
+let hostTextTemplates: TextTemplateItem[] = [];
+
+/** 同步宿主花字进查找缓存，供拖入贴图轨 / 预览按 id 解析 */
+export function setHostTextTemplates(items: TextTemplateItem[] | undefined): void {
+  hostTextTemplates = items ?? [];
+  for (const item of hostTextTemplates) {
+    if (!item.raw?.trim()) continue;
+    svgRawCache.set(item.id, item.raw);
+    if (item.url?.trim()) svgRawCache.set(item.url.trim(), item.raw);
+    if (item.sourceUrl?.trim()) svgRawCache.set(item.sourceUrl.trim(), item.raw);
+  }
+}
+
+/** 按 templateId 查找资源（先宿主 props，再会话目录） */
 export function findTextTemplateById(templateId: string): TextTemplateItem | undefined {
   if (!templateId) return undefined;
   const needle = templateId.trim().toLowerCase();
+  const fromHost = hostTextTemplates.find((item) => item.id.toLowerCase() === needle);
+  if (fromHost) return fromHost;
   return textTemplateCatalog.value.find((item) => item.id.toLowerCase() === needle);
 }
 

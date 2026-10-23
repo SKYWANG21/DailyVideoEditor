@@ -5,7 +5,7 @@
       <button type="button" class="h-9 rounded-md bg-primary px-4 text-sm text-primary-foreground" @click="onCompose">合成</button>
     </header>
     <div class="min-h-0 flex-1">
-      <VideoComposeEditor v-model="model" :clips="clips" />
+      <VideoComposeEditor v-model="model" />
     </div>
   </div>
 </template>
@@ -14,12 +14,9 @@
 import { ref } from "vue";
 import { ElMessage } from "element-plus";
 import { VideoComposeEditor } from "@/editor";
-import { createDefaultVideoComposeEditorModel, type VideoComposeClipInput, type VideoComposeEditorModel } from "@/types/videoCompose";
+import { createDefaultVideoComposeEditorModel, type VideoComposeEditorModel } from "@/types/videoCompose";
 
-/** 本地工程没有上游片段，素材从侧栏上传进入内存 */
-const clips = ref<VideoComposeClipInput[]>([]);
-
-/** 编辑器工程状态，只留在当前页面 */
+/** 编辑器工程状态：轨道在 model.tracks，侧栏素材可由 videoAssets 等 props 注入 */
 const model = ref<VideoComposeEditorModel>(
   createDefaultVideoComposeEditorModel({
     bizType: "source_video",
