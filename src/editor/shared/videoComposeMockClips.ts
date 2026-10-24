@@ -23,7 +23,7 @@ import yesUrl from "@/assets/svg/TextTemplate/yes.svg";
  * ! MOCK 数据开关 — 调试视频合成 UI 时设为 true；联调/上线前必须改回 false
  * ! true 时：bootstrap 主轨样片；侧栏素材由宿主经 videoAssets/sfxAssets/textTemplates 传入
  */
-export const USE_MOCK_VIDEO_CLIPS = true;
+export const USE_MOCK_VIDEO_CLIPS = false;
 
 /** 调试样片。同源 mp4，Worker 才能取到像素；远程地址解析失败时预览会一直空。 */
 const MOCK_VIDEO_URLS: string[] = ["/algorithm/test.mp4", "/algorithm/test1.mp4", "/algorithm/test2.mp4"];

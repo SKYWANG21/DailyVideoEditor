@@ -4,6 +4,7 @@ import { fileURLToPath, URL } from "node:url";
 import { defineConfig, type Plugin } from "vite";
 import vue from "@vitejs/plugin-vue";
 import tailwindcss from "@tailwindcss/vite";
+import dts from "vite-plugin-dts";
 
 const rootDir = fileURLToPath(new URL(".", import.meta.url));
 
@@ -39,7 +40,23 @@ function emitStyleCss(): Plugin {
 export default defineConfig(({ mode }) => {
   const lib = mode === "lib";
   return {
-    plugins: [vue(), tailwindcss(), ...(lib ? [emitStyleCss(), copyAlgorithmAssets()] : [])],
+    plugins: [
+      vue(),
+      tailwindcss(),
+      ...(lib
+        ? [
+            emitStyleCss(),
+            copyAlgorithmAssets(),
+            dts({
+              tsconfigPath: "./tsconfig.json",
+              // 关闭合并：Windows 上 rollupTypes 清理 dist 时 lstat 会 EPERM。入口声明仍是 dist/index.d.ts
+              rollupTypes: false,
+              insertTypesEntry: false,
+              exclude: ["node_modules/**", "src/App.vue", "src/main.ts"],
+            }),
+          ]
+        : []),
+    ],
     resolve: {
       alias: {
         "@": fileURLToPath(new URL("./src", import.meta.url)),

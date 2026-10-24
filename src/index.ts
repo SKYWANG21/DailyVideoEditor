@@ -1,12 +1,29 @@
 import "./style";
 
-export { VideoComposeEditor } from "./editor";
+export { VideoComposeEditor, createDefaultVideoComposeEditorModel } from "./editor";
+
 export type {
-  ComposeUploadAdapter,
+  BgmItem,
   ComposeBgmUploadResult,
   ComposeCatalogUploadPayload,
-} from "./editor/session/createComposeEditorState";
-export type { ComposeExportPayload } from "./types/videoCompose";
+  ComposeClip,
+  ComposeEditorProps,
+  ComposeExportPayload,
+  ComposeSegmentClipAssets,
+  ComposeTrack,
+  ComposeUploadAdapter,
+  MediaBizType,
+  MediaClip,
+  MediaRef,
+  SubtitleClip,
+  TextClip,
+  TextTemplateItem,
+  TrackType,
+  VideoClipItem,
+  VideoComposeEditorExpose,
+  VideoComposeEditorModel,
+} from "./editor";
+
 export {
   createComposeMediaResolver,
   isPassthroughMediaUrl,

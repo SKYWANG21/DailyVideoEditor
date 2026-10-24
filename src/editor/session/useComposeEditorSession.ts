@@ -9,6 +9,7 @@ import { useComposePlaybackBridge } from "./useComposePlaybackBridge";
 import { useComposeProject } from "./useComposeProject";
 import { useComposeShellLayout } from "./useComposeShellLayout";
 import { useComposeVideoFrame } from "./useComposeVideoFrame";
+import type { VideoComposeEditorExpose } from "./videoComposeEditorExpose";
 
 /**
  * 视频剪辑会话。
@@ -38,17 +39,18 @@ export function useComposeEditorSession(props: ComposeEditorProps, emit: Compose
     ports.flush();
   });
 
-  defineExpose({
+  /** 宿主 ref 方法，签名与 VideoComposeEditorExpose 一致 */
+  const exposed: VideoComposeEditorExpose = {
     validate: project.validate,
     flush: project.flush,
     reload: project.reload,
     exportComposePayload: project.exportComposePayload,
     getMainVideoClips: () => state.timelineRef.value?.getMainVideoClips?.() || state.derivedMainClips.value,
-    /** 触发上传视频：onRequestUploadClip → uploadAdapter → 提示 */
     requestUploadClip: () => {
       catalog.onUploadClipClick();
     },
-  });
+  };
+  defineExpose(exposed);
 
   return {
     shellRef: layout.shellRef,

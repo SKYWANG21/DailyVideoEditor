@@ -40,7 +40,7 @@
       </template>
 
       <!-- 透传自定义按钮插槽 -->
-      <template v-for="(_, name) in $slots" #[name]="slotProps">
+      <template v-for="name in forwardedToolSlotNames" :key="name" #[name]="slotProps">
         <slot :name="name" v-bind="slotProps" />
       </template>
     </ToolsBar>
@@ -104,7 +104,7 @@
         </template>
 
         <!-- 透传其他插槽 -->
-        <template v-for="(_, name) in $slots" #[name]="slotProps">
+        <template v-for="name in tracksPassthroughSlotNames" :key="name" #[name]="slotProps">
           <slot :name="name" v-bind="slotProps" />
         </template>
       </Tracks>
@@ -127,7 +127,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, provide, computed, watch, nextTick } from "vue";
+import { ref, onMounted, onUnmounted, provide, computed, watch, nextTick, useSlots, type Slots } from "vue";
 import { useTracksStore } from "../stores/tracks";
 import { usePlaybackStore } from "../stores/playback";
 import { useHistoryStore } from "../stores/history";
@@ -313,8 +313,8 @@ function mergeClipConfigs(userConfigs?: ClipTypeConfig): ClipTypeConfig {
   return merged;
 }
 
-// Props
-interface Props {
+/** 时间轴组件入参 */
+export interface Props {
   operationButtons?: OperationButton[];
   scaleConfigButtons?: ScaleConfigButton[];
   trackTypes?: TrackTypeConfig;
@@ -378,6 +378,34 @@ const props = withDefaults(defineProps<Props>(), {
   locale: "zh-CN",
   // 主题默认值
   theme: undefined,
+});
+
+/** 自定义按钮在工具栏上的插槽名 */
+function customToolSlotName(prefix: "custom-operation" | "custom-scale-config", button: OperationButton | ScaleConfigButton): string | null {
+  if (typeof button === "object" && "type" in button && button.type === "custom" && button.key) {
+    return `${prefix}-${button.key}`;
+  }
+  return null;
+}
+
+/** 组件插槽。类型写死，避免和模板动态插槽互相推断 */
+const componentSlots: Slots = useSlots();
+
+/** 原样传给轨道区的插槽名 */
+const tracksPassthroughSlotNames = computed((): string[] => Object.keys(componentSlots));
+
+/** 透传到工具栏的自定义按钮插槽。不遍历 $slots，避免声明生成时插槽名被推断成 any */
+const forwardedToolSlotNames = computed((): string[] => {
+  const names: string[] = [];
+  for (const button of props.operationButtons ?? []) {
+    const name = customToolSlotName("custom-operation", button);
+    if (name) names.push(name);
+  }
+  for (const button of props.scaleConfigButtons ?? []) {
+    const name = customToolSlotName("custom-scale-config", button);
+    if (name) names.push(name);
+  }
+  return names;
 });
 
 // 计算合并后的国际化配置

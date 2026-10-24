@@ -1,7 +1,7 @@
 {
-  "name": "video-clips",
-  "private": true,
-  "version": "0.0.1",
+  "name": "daily-video-editor",
+  "private": false,
+  "version": "0.0.2",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,10 +9,14 @@
     "build:demo": "vue-tsc --noEmit && vite build",
     "typecheck": "vue-tsc --noEmit"
   },
-  "files": ["dist", "README.md"],
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "exports": {
     ".": {
-      "types": "./src/index.ts",
+      "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
     "./style.css": "./dist/style.css"
@@ -28,13 +32,14 @@
     "pinia": "^2.3.1"
   },
   "devDependencies": {
-    "vue": "^3.5.44",
     "@tailwindcss/vite": "^4.3.3",
     "@vitejs/plugin-vue": "^5.2.4",
     "sass-embedded": "^1.105.2",
     "tailwindcss": "^4.3.3",
     "typescript": "^5.9.3",
     "vite": "^6.4.4",
+    "vite-plugin-dts": "4.5.4",
+    "vue": "^3.5.44",
     "vue-tsc": "^3.3.13"
   }
 }

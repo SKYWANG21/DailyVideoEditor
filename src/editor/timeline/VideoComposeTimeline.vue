@@ -220,20 +220,20 @@ type TrackWithMute = Track & {
   nativeFrameHeight?: number;
 };
 
-const props = withDefaults(
-  defineProps<{
-    /** 多轨列表（对齐 ComposeTrack） */
-    tracks: ComposeTrack[];
-    /** 只读：隐藏工具栏操作与菜单 */
-    readonly?: boolean;
-    /** 工程持久化的时间轴倍率；缺省 1 */
-    scale?: number;
-  }>(),
-  {
-    readonly: false,
-    scale: 1,
-  },
-);
+/** 时间轴外壳入参。导出后声明文件才能引用，避免生成 d.ts 时 Props 无法命名 */
+export interface VideoComposeTimelineProps {
+  /** 多轨列表（对齐 ComposeTrack） */
+  tracks: ComposeTrack[];
+  /** 只读：隐藏工具栏操作与菜单 */
+  readonly?: boolean;
+  /** 工程持久化的时间轴倍率；缺省 1 */
+  scale?: number;
+}
+
+const props = withDefaults(defineProps<VideoComposeTimelineProps>(), {
+  readonly: false,
+  scale: 1,
+});
 
 const emit = defineEmits<{
   "update:tracks": [value: ComposeTrack[]];

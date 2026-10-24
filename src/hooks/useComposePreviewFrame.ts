@@ -6,6 +6,7 @@ import { beautyNeedsFace, type BeautyFrameEvent, type BeautyWorkerEvent, type Pr
 import type { VideoClipItem } from "@/types/videoCompose";
 import { previewSourceTimeUs } from "@/hooks/previewSourceTime";
 import { COMPOSE_ALGORITHM_BASE, useComposeMediaResolver } from "@/editor/composeRuntime";
+import BeautyPreviewWorker from "../workers/beautyPreview.worker.ts?worker&inline";
 
 interface UseComposePreviewFrameOptions {
   /** GPUPixel 使用的页面 canvas。调用前不要 getContext */
@@ -54,10 +55,10 @@ export function useComposePreviewFrame(options: UseComposePreviewFrameOptions) {
   let latestFrame: BeautyFrameEvent | null = null;
   let prefetchedId = "";
 
-  /** 懒创建 Worker。页面卸载时在 onUnmounted 里关掉 */
+  /** 懒创建预览线程。Worker 在构建时内联，页面卸载时关掉 */
   function ensureWorker(): Worker {
     if (worker) return worker;
-    const next = new Worker(new URL("../workers/beautyPreview.worker.ts", import.meta.url), { type: "module" });
+    const next = new BeautyPreviewWorker();
     next.onmessage = (event: MessageEvent<BeautyWorkerEvent>) => {
       onWorkerEvent(event.data);
     };

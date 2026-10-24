@@ -5,20 +5,64 @@
 ## 接入
 
 ```ts
-import { createApp } from "vue";
-import { VideoComposeEditor } from "video-clips";
+import { createApp, ref } from "vue";
+import {
+  createDefaultVideoComposeEditorModel,
+  VideoComposeEditor,
+  type VideoComposeEditorExpose,
+  type VideoComposeEditorModel,
+} from "video-clips";
 import "video-clips/style.css";
+
+const model = ref<VideoComposeEditorModel>(
+  createDefaultVideoComposeEditorModel({
+    bizType: "source_video",
+    bizId: "local",
+  }),
+);
+const editorRef = ref<VideoComposeEditorExpose | null>(null);
 
 createApp(App).mount("#app");
 ```
 
 ```vue
-<VideoComposeEditor v-model="model" />
+<VideoComposeEditor ref="editorRef" v-model="model" />
 ```
 
 `peerDependencies` 只有 `vue`。`pinia`、`element-plus` 随包安装，并在编辑器内部使用：每个时间轴自建一份 Pinia，同页多个编辑器不会抢轨。
 
-换稿请调用组件 ref 上的 `reload(model)`，不要指望改 `v-model` 引用会自动回灌时间轴。
+换稿必须调用 `editorRef.reload(model)`。只改 `v-model` 引用不会回灌时间轴。
+
+## 组件 Ref（`VideoComposeEditorExpose`）
+
+| 方法 | 说明 |
+| --- | --- |
+| `validate(): string \| null` | 导出前校验。`null` 表示通过，否则为错误文案 |
+| `flush(): void` | 立刻把当前轨道、喜欢态、缩放写入 `update:modelValue` |
+| `reload(model): Promise<void>` | 用指定工程整页重置时间轴。换稿只走这个方法 |
+| `exportComposePayload()` | 先 `flush`，再返回 `{ id, bizType, bizId, tracks }` |
+| `getMainVideoClips()` | 主轨视频片段。优先读时间轴，否则用派生列表 |
+| `requestUploadClip()` | 触发上传视频：有 `onRequestUploadClip` 则交给宿主，否则走内置上传 |
+
+## 公共类型
+
+声明在 `dist/index.d.ts`。包根导出：
+
+- 组件与工厂：`VideoComposeEditor`、`createDefaultVideoComposeEditorModel`
+- 工程：`VideoComposeEditorModel`、`ComposeExportPayload`、`ComposeTrack`、`ComposeClip`、`MediaBizType`、`MediaRef`、`ComposeSegmentClipAssets`
+- 侧栏种子：`BgmItem`、`TextTemplateItem`、`VideoClipItem`
+- 入参与上传：`ComposeEditorProps`、`ComposeUploadAdapter`、`ComposeBgmUploadResult`、`ComposeCatalogUploadPayload`
+- Ref：`VideoComposeEditorExpose`
+- 轨道片段：`MediaClip`、`SubtitleClip`、`TextClip`、`TrackType`
+- 媒体地址：`createComposeMediaResolver`、`isPassthroughMediaUrl`、`mediaCorsMessage`、`ComposeMediaResolver`、`ResolveMediaUrl`
+
+字段含义以声明文件为准。
+
+## 发包
+
+`package.json` 保持 `"private": true`。本包默认不发到公共 npm。
+
+安装方式：monorepo workspace、`file:` 依赖，或私有 registry。类型入口是 `dist/index.d.ts`（`files` 含整个 `dist`）。要公开发到 npm 时，须先去掉 `private`，再按公开发布流程处理，不走上述私有安装约定。
 
 构建：
 
@@ -26,7 +70,29 @@ createApp(App).mount("#app");
 npm run build
 ```
 
-产物在 `dist/index.js`、`dist/style.css`、`dist/algorithm/`。
+库产物：
+
+- `dist/index.js`
+- `dist/index.d.ts`
+- `dist/style.css`
+- `dist/algorithm/`
+
+## 产物部署
+
+宿主必须引入样式，否则编辑器没有皮肤：
+
+```ts
+import "video-clips/style.css";
+```
+
+美颜预览 Worker 在 `npm run build` 时内联进 `dist/index.js`。不要单独部署 worker 文件，也不要再准备 `/assets/beautyPreview.worker-*.js`。
+
+`dist/algorithm/` 仍须挂到宿主静态目录。默认从站点根路径 `/algorithm/` 读取：
+
+- `/algorithm/face_landmarker.task`
+- `/algorithm/mediapipe/`
+
+本地 demo 使用 `public/algorithm/`。库构建只拷贝这两项到 `dist/algorithm/`。挂好后可用 `algorithmBaseUrl` 改根路径（须是目录，并能拼出上述两个相对路径）。
 
 ## 侧栏素材（不进工程 JSON）
 
@@ -70,12 +136,3 @@ async function proxyToBlob(url: string): Promise<string> {
 ```
 
 本仓库不实现代理服务。
-
-## 美颜模型
-
-默认从站点根路径 `/algorithm/` 读取：
-
-- `/algorithm/face_landmarker.task`
-- `/algorithm/mediapipe/`
-
-本地 demo 使用 `public/algorithm/`。库构建会把这两项拷到 `dist/algorithm/`。宿主把它挂到自己的静态目录后，可用 `algorithmBaseUrl` 改根路径（需以目录形式能拼出上述两个相对路径）。

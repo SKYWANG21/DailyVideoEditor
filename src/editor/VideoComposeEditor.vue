@@ -179,7 +179,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, getCurrentInstance, onBeforeUnmount, provide, useSlots } from "vue";
+import { computed, getCurrentInstance, onBeforeUnmount, provide, useSlots, type Slot } from "vue";
 import { ElMessage } from "element-plus";
 import VideoComposeAssetPanel from "./asset-panel/VideoComposeAssetPanel.vue";
 import VideoComposePlayer from "./player/VideoComposePlayer.vue";
@@ -259,10 +259,16 @@ const emit = defineEmits<{
 /** 分类操作插槽名。外壳没传时不转发，面板保留默认上传按钮 */
 const actionSlotNames = ["video-actions", "audio-actions", "subtitle-actions", "fancy-actions", "sfx-actions"] as const;
 
-const editorSlots = useSlots();
+type ActionSlotName = (typeof actionSlotNames)[number];
+
+/**
+ * 外壳传入的分类操作插槽。
+ * 类型写死，避免和模板里的动态插槽互相推断，声明生成时变成 any。
+ */
+const editorSlots: Partial<Record<ActionSlotName, Slot | undefined>> = useSlots();
 
 /** 只转发外壳真正传入的分类操作插槽 */
-const forwardedActionSlots = computed(() => actionSlotNames.filter((name) => editorSlots[name]));
+const forwardedActionSlots = computed((): ActionSlotName[] => actionSlotNames.filter((name) => editorSlots[name]));
 
 const {
   shellRef,

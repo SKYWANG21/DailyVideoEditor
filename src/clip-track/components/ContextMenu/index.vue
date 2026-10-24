@@ -26,8 +26,8 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import type { ContextMenuItem } from '../../types'
 
-// Props
-interface Props {
+/** 右键菜单入参 */
+export interface Props {
   items?: ContextMenuItem[]
 }
 
