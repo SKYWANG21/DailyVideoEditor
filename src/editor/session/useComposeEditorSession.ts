@@ -1,4 +1,4 @@
-import { defineExpose, onBeforeUnmount, onMounted } from "vue";
+import { onBeforeUnmount, onMounted } from "vue";
 import { loadTextTemplateCatalog, setHostTextTemplates } from "../shared/textTemplateCatalog";
 import type { ComposeEditorEmit, ComposeEditorProps } from "./createComposeEditorState";
 import { createComposeEditorState } from "./createComposeEditorState";
@@ -15,6 +15,7 @@ import type { VideoComposeEditorExpose } from "./videoComposeEditorExpose";
  * 视频剪辑会话。
  * 接线顺序固定：播放桥 → 右栏 → 素材库 → 草稿。后注册的 immediate watch 才能用到已经接好的交接函数。
  * 区域组件仍由外壳用 props / 事件连接，不在子组件里注入，避免改掉播放和写回的调用顺序。
+ * 宿主 ref 方法由本函数返回，须在 VideoComposeEditor 的 `<script setup>` 里 `defineExpose`。
  */
 export function useComposeEditorSession(props: ComposeEditorProps, emit: ComposeEditorEmit) {
   const state = createComposeEditorState(props);
@@ -39,7 +40,7 @@ export function useComposeEditorSession(props: ComposeEditorProps, emit: Compose
     ports.flush();
   });
 
-  /** 宿主 ref 方法，签名与 VideoComposeEditorExpose 一致 */
+  /** 宿主 ref 方法，签名与 VideoComposeEditorExpose 一致；由外壳 defineExpose */
   const exposed: VideoComposeEditorExpose = {
     validate: project.validate,
     flush: project.flush,
@@ -50,9 +51,9 @@ export function useComposeEditorSession(props: ComposeEditorProps, emit: Compose
       catalog.onUploadClipClick();
     },
   };
-  defineExpose(exposed);
 
   return {
+    ...exposed,
     shellRef: layout.shellRef,
     shellGridStyle: layout.shellGridStyle,
     topGridStyle: layout.topGridStyle,

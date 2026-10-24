@@ -271,6 +271,12 @@ const editorSlots: Partial<Record<ActionSlotName, Slot | undefined>> = useSlots(
 const forwardedActionSlots = computed((): ActionSlotName[] => actionSlotNames.filter((name) => editorSlots[name]));
 
 const {
+  validate,
+  flush,
+  reload,
+  exportComposePayload,
+  getMainVideoClips,
+  requestUploadClip,
   shellRef,
   shellGridStyle,
   topGridStyle,
@@ -384,6 +390,16 @@ const {
   onFrameAspectChange,
   onVideoSourceSize,
 } = useComposeEditorSession(props, emit);
+
+/** 宿主通过组件 ref 调用的公开方法（须在本 SFC 的 script setup 内 defineExpose） */
+defineExpose({
+  validate,
+  flush,
+  reload,
+  exportComposePayload,
+  getMainVideoClips,
+  requestUploadClip,
+});
 
 /** 面板花字上传：宿主回调或内置选文件结果 */
 function onPanelUploadFancy(file?: File): void {
