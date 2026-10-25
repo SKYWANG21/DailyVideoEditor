@@ -1,13 +1,11 @@
 import { computed, nextTick, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import {
-  composeMediaLikeKey,
   type BgmItem,
   type ComposeConfig,
   type ComposeSegmentClipAssets,
   type ComposeSubtitleAsset,
   type ComposeTextTemplateDrag,
-  type MediaRef,
   type VideoClipItem,
 } from "@/types/videoCompose";
 import { resolveCatalogVariantPlayUrl } from "@/hooks/useComposeUploadCatalog";
@@ -59,18 +57,6 @@ export function useComposeCatalog(
   const mediaResolver = useComposeMediaResolver();
   const probeOptions: ComposeProbeOptions = { resolve: (url) => mediaResolver.resolve(url) };
 
-  /** 从工程恢复已喜欢的视频媒体。键没变时不替换数组，避免轨道保存把爱心刷掉 */
-  function restoreLikedMediaFromModel(): void {
-    const next = (props.modelValue.likedMedia ?? [])
-      .filter((item) => item.liked !== false && composeMediaLikeKey(item))
-      .map((item) => ({ ...item, liked: true }));
-    const prevKeys = state.likedMedia.value.map((item) => composeMediaLikeKey(item)).join("|");
-    const nextKeys = next.map((item) => composeMediaLikeKey(item)).join("|");
-    if (prevKeys === nextKeys) return;
-    state.likedMedia.value = next;
-  }
-
-  restoreLikedMediaFromModel();
   setHostTextTemplates(state.textTemplates.value);
 
   /** 侧栏列表：只读内部数组（props 作种子经 watch 同步） */
@@ -79,7 +65,7 @@ export function useComposeCatalog(
   const panelSfxAssets = computed(() => state.sfxAssets.value);
   const panelTextTemplates = computed(() => state.textTemplates.value);
 
-  /** 宿主种子覆盖内部列表（可重置侧栏） */
+  /** 宿主种子覆盖内部列表（喜欢态由宿主 videoAssets[].liked 驱动） */
   watch(
     () => props.videoAssets,
     (list) => {
@@ -121,16 +107,6 @@ export function useComposeCatalog(
     },
     { deep: true },
   );
-
-  /** 已喜欢媒体的匹配键，供侧栏卡片点亮爱心 */
-  const likedMediaKeys = computed(() => {
-    const keys = new Set<string>();
-    for (const item of state.likedMedia.value) {
-      const key = composeMediaLikeKey(item);
-      if (key) keys.add(key);
-    }
-    return keys;
-  });
 
   /** 是否处于素材库预览（用于静音 BGM 轨） */
   const catalogPreviewActive = computed(() => !!state.previewCatalogVariant.value);
@@ -422,23 +398,16 @@ export function useComposeCatalog(
     commitAudioAsset(bgm, payload.file);
   }
 
-  /** 切换侧栏视频的喜欢态，并立即写入工程 */
+  /** 切换侧栏视频喜欢态；写内部列表并抛给宿主回写 videoAssets */
   function onToggleCatalogLike(variant: ComposeSegmentClipAssets): void {
     if (props.readonly) return;
-    const key = composeMediaLikeKey(variant);
-    if (!key) return;
-    const rest = state.likedMedia.value.filter((item) => composeMediaLikeKey(item) !== key);
-    if (likedMediaKeys.value.has(key)) {
-      state.likedMedia.value = rest;
-    } else {
-      const entry: MediaRef = {
-        url: variant.url?.trim() || undefined,
-        mediaId: variant.mediaId,
-        liked: true,
-      };
-      state.likedMedia.value = [...rest, entry];
-    }
-    ports.persistUploadCatalogNow();
+    let updated: ComposeSegmentClipAssets | null = null;
+    state.videoAssets.value = state.videoAssets.value.map((item) => {
+      if (item.id !== variant.id) return item;
+      updated = { ...item, liked: !item.liked };
+      return updated;
+    });
+    if (updated) emit("toggle-like", updated);
   }
 
   /** 本地 SVG 进入花字列表：写内部目录并 emit */
@@ -542,14 +511,6 @@ export function useComposeCatalog(
     }
   }
 
-  watch(
-    () => [props.modelValue.tracks, props.modelValue.likedMedia] as const,
-    () => {
-      restoreLikedMediaFromModel();
-    },
-    { deep: true },
-  );
-
   ports.afterExitCatalogPreview = afterExitCatalogPreview;
 
   return {
@@ -557,7 +518,6 @@ export function useComposeCatalog(
     panelAudioAssets,
     panelSfxAssets,
     panelTextTemplates,
-    likedMediaKeys,
     onToggleCatalogLike,
     onFancyUploaded,
     onSfxUploaded,

@@ -13,6 +13,7 @@
         :text-templates="textTemplates"
         :on-request-upload-clip="() => (uploadClipOpen = true)"
         @remove-catalog-clip="onRemoveVideoAsset"
+        @toggle-like="onToggleVideoLike"
         @video-uploaded="onVideoAssetUploaded"
         @audio-uploaded="onAudioUploaded"
         @sfx-uploaded="onSfxUploaded"
@@ -81,6 +82,11 @@ function onVideoUploaded(clips: UploadedComposeClip[]): void {
 /** 侧栏移除：宿主同步种子 */
 function onRemoveVideoAsset(variant: ComposeSegmentClipAssets): void {
   videoAssets.value = videoAssets.value.filter((item) => item.id !== variant.id);
+}
+
+/** 侧栏切换喜欢：宿主回写 videoAssets[].liked */
+function onToggleVideoLike(variant: ComposeSegmentClipAssets): void {
+  videoAssets.value = videoAssets.value.map((item) => (item.id === variant.id ? variant : item));
 }
 
 /** adapter 上传视频：用 Editor 返回的全量列表对齐种子 */

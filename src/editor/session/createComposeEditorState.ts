@@ -14,7 +14,6 @@ import type {
   SubtitleStyleConfig,
   VideoClipItem,
   VideoComposeEditorModel,
-  MediaRef,
 } from "@/types/videoCompose";
 import {
   countAudioClips,
@@ -114,6 +113,8 @@ export interface ComposeEditorEmit {
   (event: "ready"): void;
   /** 侧栏移除视频素材（内部列表已删；宿主可同步自己的种子） */
   (event: "remove-catalog-clip", variant: ComposeSegmentClipAssets): void;
+  /** 侧栏切换喜欢；抛出切换后的项，宿主应回写 videoAssets */
+  (event: "toggle-like", variant: ComposeSegmentClipAssets): void;
   /** 内置选文件 / adapter 上传视频完成 */
   (event: "video-uploaded", payload: ComposeCatalogUploadPayload<ComposeSegmentClipAssets>): void;
   /** 内置或 adapter 上传音频完成 */
@@ -188,8 +189,6 @@ export interface ComposeEditorState {
   videoPlaybackRate: Ref<number>;
   /** 当前音频 clip 变速倍率 */
   audioPlaybackRate: Ref<number>;
-  /** 已喜欢的视频媒体，随工程保存 */
-  likedMedia: Ref<MediaRef[]>;
   /** 侧栏素材库当前预览中的历史版本 */
   previewCatalogVariant: Ref<ComposeSegmentClipAssets | null>;
   previewClipDuration: Ref<number>;
@@ -361,7 +360,6 @@ export function createComposeEditorState(props: ComposeEditorProps): ComposeEdit
     bgmVolume: ref<number | null>(gainToDb(0.5)),
     videoPlaybackRate: ref(1),
     audioPlaybackRate: ref(1),
-    likedMedia: ref<MediaRef[]>([]),
     previewCatalogVariant: ref<ComposeSegmentClipAssets | null>(null),
     previewClipDuration: ref(0),
     uploadAudioModalOpen: ref(false),

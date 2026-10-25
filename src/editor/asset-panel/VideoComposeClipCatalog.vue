@@ -80,13 +80,11 @@
 <script setup lang="ts">
 import { computed, ref, useSlots } from "vue";
 import { Film, Heart, X } from "@lucide/vue";
-import { COMPOSE_SEGMENT_CLIP_DRAG_MIME, composeMediaLikeKey, type ComposeSegmentClipAssets } from "@/types/videoCompose";
+import { COMPOSE_SEGMENT_CLIP_DRAG_MIME, type ComposeSegmentClipAssets } from "@/types/videoCompose";
 
 const props = defineProps<{
   /** 扁平视频素材（上传与生成统一卡片） */
   variants: ComposeSegmentClipAssets[];
-  /** 已喜欢媒体的匹配键 */
-  likedKeys?: Set<string>;
   /** 已在时间轴上的视频 URL 集合 */
   timelineClipUrls?: Set<string>;
   /** 当前主播放器预览中的版本 id */
@@ -117,10 +115,9 @@ function isRemovable(_variant: ComposeSegmentClipAssets): boolean {
   return !props.readonly;
 }
 
-/** 该版本是否已标记喜欢 */
+/** 该版本是否已标记喜欢（读 videoAssets 项上的 liked） */
 function isLiked(variant: ComposeSegmentClipAssets): boolean {
-  const key = composeMediaLikeKey(variant);
-  return Boolean(key && props.likedKeys?.has(key));
+  return variant.liked === true;
 }
 
 /** 只读时只展示已喜欢；可编辑时始终留出可点的爱心 */

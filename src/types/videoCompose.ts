@@ -360,6 +360,8 @@ export interface ComposeSegmentClipAssets {
   isSelected?: boolean;
   /** 素材库 source_video 主键（可选，用于 signed-url） */
   mediaId?: number;
+  /** 是否喜欢；侧栏爱心直接读此字段 */
+  liked?: boolean;
 }
 
 /** 侧栏素材库卡片拖入时间轴时 dataTransfer 的 MIME 类型 */
@@ -431,11 +433,6 @@ export interface VideoComposeEditorModel {
   /** 多轨列表 */
   tracks: ComposeTrack[];
   /**
-   * 侧栏视频的喜欢态。按 url 或 mediaId 匹配，随工程保存。
-   * 只保留已喜欢的媒体引用。
-   */
-  likedMedia?: MediaRef[];
-  /**
    * 兼容旧工程字段（曾登记 compose_extract 原声 URL）。
    * 本地库不登记、不清理远端抽轨文件，仅透传读写。
    */
@@ -469,17 +466,6 @@ export interface MediaRef {
   bizType?: MediaBizType;
   /** 签名字段，默认 videoUrl */
   field?: string;
-  /** 是否喜欢。侧栏视频卡片切换后随工程保存 */
-  liked?: boolean;
-}
-
-/** 喜欢态匹配键。有 mediaId 时按素材库 id，否则按可播放地址 */
-export function composeMediaLikeKey(media: Pick<MediaRef, "url" | "mediaId">): string {
-  if (typeof media.mediaId === "number" && Number.isFinite(media.mediaId)) {
-    return `id:${media.mediaId}`;
-  }
-  const url = media.url?.trim();
-  return url ? `url:${url}` : "";
 }
 
 /** 编辑器视频片段入参 */

@@ -6,7 +6,6 @@
           v-if="!readonly"
           class="h-full min-h-0 w-full min-w-0"
           :video-variants="videoCatalogVariants"
-          :liked-media-keys="likedMediaKeys"
           :timeline-clip-urls="timelineClipUrls"
           :preview-clip-id="previewCatalogVariant?.id"
           :readonly="readonly"
@@ -257,6 +256,8 @@ const emit = defineEmits<{
   "update:modelValue": [value: VideoComposeEditorModel];
   ready: [];
   "remove-catalog-clip": [variant: ComposeSegmentClipAssets];
+  /** 切换喜欢后的项；宿主应回写 videoAssets */
+  "toggle-like": [variant: ComposeSegmentClipAssets];
   "video-uploaded": [payload: ComposeCatalogUploadPayload<ComposeSegmentClipAssets>];
   "audio-uploaded": [payload: ComposeCatalogUploadPayload<BgmItem>];
   "sfx-uploaded": [payload: ComposeCatalogUploadPayload<BgmItem>];
@@ -360,7 +361,6 @@ const {
   panelAudioAssets,
   panelSfxAssets,
   panelTextTemplates,
-  likedMediaKeys,
   catalogPreviewActive,
   previewOverrideClips,
   previewCatalogLabel,

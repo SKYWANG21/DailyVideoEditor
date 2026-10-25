@@ -25,7 +25,6 @@
         <template v-if="catId === 'video'">
           <VideoComposeClipCatalog
             :variants="videoVariants"
-            :liked-keys="likedMediaKeys"
             :timeline-clip-urls="timelineClipUrls"
             :preview-clip-id="previewClipId"
             :readonly="readonly"
@@ -155,8 +154,6 @@ const NARROW_PANE_PX = 132;
 const props = defineProps<{
   /** 扁平视频素材 */
   videoVariants?: ComposeSegmentClipAssets[];
-  /** 已喜欢媒体的匹配键 */
-  likedMediaKeys?: Set<string>;
   /** 已在时间轴上的视频地址 */
   timelineClipUrls?: Set<string>;
   /** 正在预览的版本 id */
