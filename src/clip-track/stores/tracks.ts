@@ -1,12 +1,14 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { Track, Clip, ClipType, TrackType, MediaClip, TransitionClip } from '../types'
+import type { Track, Clip, ClipType, TrackType, MediaClip, TransitionClip, TrackTypeConfig } from '../types'
 import { normalizeTime } from '../utils/helpers'
 
 export const useTracksStore = defineStore('tracks', () => {
   // 状态
   const tracks = ref<Track[]>([])
   const selectedClipIds = ref<Set<string>>(new Set())
+  /** 各轨道类型数量上限（来自 props.trackTypes） */
+  const trackTypes = ref<TrackTypeConfig>({})
 
   // 剪贴板状态
   const clipboard = ref<{
@@ -119,13 +121,39 @@ export const useTracksStore = defineStore('tracks', () => {
     tracks.value = normalizeTracks(tracksData)
   }
 
-  // 方法：添加轨道
-  function addTrack(track: Track) {
+  /**
+   * 同步轨道类型上限配置
+   * @param config - trackTypes 配置；未出现的类型视为不限制
+   */
+  function setTrackTypes(config: TrackTypeConfig | undefined) {
+    trackTypes.value = config ? { ...config } : {}
+  }
+
+  /**
+   * 当前类型是否还能再建轨（无 max 配置则不限制）
+   * @param type - 轨道类型
+   */
+  function canAddTrack(type: TrackType): boolean {
+    const limit = trackTypes.value[type]?.max
+    if (limit === undefined) return true
+    return getTrackCountByType(type) < limit
+  }
+
+  /**
+   * 添加轨道；达类型上限时拒绝并返回 false
+   * @param track - 待添加轨道
+   * @returns 是否添加成功
+   */
+  function addTrack(track: Track): boolean {
+    if (!canAddTrack(track.type)) {
+      return false
+    }
     // 处理轨道中的媒体 clips，自动根据 playbackRate 修正 endTime
     if (track.clips && track.clips.length > 0) {
       track.clips = track.clips.map(normalizeClipDuration)
     }
     tracks.value.push(track)
+    return true
   }
 
   // 方法：删除轨道
@@ -146,6 +174,8 @@ export const useTracksStore = defineStore('tracks', () => {
 
   // 方法：在指定轨道上方添加轨道
   function addTrackAbove(trackId: string, type: TrackType): Track | null {
+    if (!canAddTrack(type)) return null
+
     const index = tracks.value.findIndex(t => t.id === trackId)
     if (index === -1) return null
 
@@ -172,6 +202,8 @@ export const useTracksStore = defineStore('tracks', () => {
 
   // 方法：在指定轨道下方添加轨道
   function addTrackBelow(trackId: string, type: TrackType): Track | null {
+    if (!canAddTrack(type)) return null
+
     const index = tracks.value.findIndex(t => t.id === trackId)
     if (index === -1) return null
 
@@ -990,6 +1022,7 @@ export const useTracksStore = defineStore('tracks', () => {
     tracks,
     selectedClipIds,
     clipboard,
+    trackTypes,
 
     // 计算属性
     mainTrack,
@@ -998,6 +1031,8 @@ export const useTracksStore = defineStore('tracks', () => {
     selectedClips,
 
     // 方法
+    setTrackTypes,
+    canAddTrack,
     addTrack,
     addTrackAbove,
     addTrackBelow,

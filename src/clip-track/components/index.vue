@@ -348,11 +348,6 @@ export interface Props {
 const props = withDefaults(defineProps<Props>(), {
   operationButtons: () => ["reset", "undo", "redo", "delete"],
   scaleConfigButtons: () => ["snap"],
-  trackTypes: () => ({
-    video: { max: 5 },
-    audio: { max: 3 },
-    subtitle: { max: 2 },
-  }),
   clipConfigs: undefined, // 使用 undefined 让 mergeClipConfigs 处理默认值
   showToolsBar: true,
   showPlayback: true,
@@ -381,7 +376,10 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 /** 自定义按钮在工具栏上的插槽名 */
-function customToolSlotName(prefix: "custom-operation" | "custom-scale-config", button: OperationButton | ScaleConfigButton): string | null {
+function customToolSlotName(
+  prefix: "custom-operation" | "custom-scale-config",
+  button: OperationButton | ScaleConfigButton,
+): string | null {
   if (typeof button === "object" && "type" in button && button.type === "custom" && button.key) {
     return `${prefix}-${button.key}`;
   }
@@ -507,6 +505,15 @@ watch(
     dragStore.setConfig({ enableCrossTrackDrag: newVal });
   },
   { immediate: true },
+);
+
+/** 同步轨道类型数量上限到 tracks store，供建轨闸门使用 */
+watch(
+  () => props.trackTypes,
+  (newVal) => {
+    tracksStore.setTrackTypes(newVal);
+  },
+  { immediate: true, deep: true },
 );
 
 // Refs
@@ -1179,12 +1186,29 @@ function importFromJSON(json: string): boolean {
 
 // ============ 轨道操作 API ============
 
-// 添加轨道
-function addTrack(track: Track) {
-  tracksStore.addTrack(track);
+/**
+ * 当前类型是否还能再建轨（无 max 配置则不限制）
+ * @param type - 轨道类型
+ */
+function canAddTrack(type: Track["type"]): boolean {
+  return tracksStore.canAddTrack(type);
+}
+
+/**
+ * 添加轨道；达类型上限时拒绝，不写历史、不发事件
+ * @param track - 待添加轨道
+ * @returns 是否添加成功
+ */
+function addTrack(track: Track): boolean {
+  if (!tracksStore.canAddTrack(track.type)) {
+    return false;
+  }
+  const ok = tracksStore.addTrack(track);
+  if (!ok) return false;
   historyStore.pushSnapshot("添加轨道");
   emit("track:added", track);
   emit("trackCreate", track.id);
+  return true;
 }
 
 // 删除轨道
@@ -1482,6 +1506,7 @@ defineExpose({
   importFromJSON,
 
   // 轨道操作
+  canAddTrack,
   addTrack,
   removeTrack,
   updateTrack,

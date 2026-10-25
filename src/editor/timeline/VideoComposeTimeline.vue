@@ -13,7 +13,6 @@
       ref="videoTrackRef"
       :operation-buttons="operationButtons"
       :scale-config-buttons="['snap']"
-      :track-types="trackTypes"
       :show-tools-bar="!readonly"
       :show-playback="false"
       :show-scale-control="false"
@@ -307,12 +306,6 @@ const DATA_CHANGED_DEBOUNCE_MS = 50;
 const POINTER_SYNC_DEBOUNCE_MS = 100;
 
 const operationButtons: OperationButton[] = ["undo", "redo", "split", "delete"];
-
-/** 主视频/字幕各一条；音频与贴图允许多轨 */
-const trackTypes = {
-  video: { max: 1 },
-  subtitle: { max: 1 },
-};
 
 /** 片段色靠近设计稿：视频中性、音频成功、字幕警告、贴图蓝 */
 const clipTypeConfigs: ClipTypeConfig = {

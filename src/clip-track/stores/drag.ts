@@ -406,6 +406,37 @@ export const useDragStore = defineStore("drag", () => {
     }
 
     const decision = resolveSeamDrop(currentMouseY.value, clip.type, startTime, endTime);
+    const desiredType = clip.type as TrackType;
+    // 本会建轨但已达类型上限：改落入已有同类型轨，避免缝预览可建、松开被拒
+    if (!decision.intoTrack && !tracksStore.canAddTrack(desiredType)) {
+      const fallbackId = findFallbackSameTypeTrackId(desiredType);
+      if (fallbackId) {
+        currentTargetTrackId.value = fallbackId;
+        previewPosition.value = {
+          trackId: fallbackId,
+          startTime,
+          endTime,
+          needNewTrack: false,
+          insertIndex: -1,
+          visible: true,
+          clipType: clip.type,
+        };
+        return;
+      }
+      // 无可落同类型轨：保持原轨同轨移动
+      const adjusted = calculateSameTrackPosition(dragStartTrackId.value, startTime, duration);
+      currentTargetTrackId.value = dragStartTrackId.value;
+      previewPosition.value = {
+        trackId: dragStartTrackId.value,
+        startTime: adjusted.startTime,
+        endTime: adjusted.endTime,
+        needNewTrack: false,
+        insertIndex: -1,
+        visible: true,
+        clipType: clip.type,
+      };
+      return;
+    }
     currentTargetTrackId.value = decision.intoTrack ? decision.trackId : "";
     previewPosition.value = {
       trackId: decision.trackId,
@@ -424,19 +455,19 @@ export const useDragStore = defineStore("drag", () => {
     const sourceTrackId = dragStartTrackId.value;
     const isCrossTrack = targetTrackId !== sourceTrackId;
     const duration = desiredEndTime - desiredStartTime;
+    const desiredTrackType = clipType as TrackType;
 
     // 默认预览位置
     let previewStartTime = desiredStartTime;
     let previewEndTime = desiredEndTime;
     let needNewTrack = false;
+    let resolvedTrackId = targetTrackId;
 
     if (isCrossTrack) {
       // 跨轨移动逻辑
       if (!targetTrack) {
         needNewTrack = true;
       } else {
-        // 检查轨道类型是否匹配
-        const desiredTrackType = clipType as TrackType;
         const typeMatches = targetTrack.type === desiredTrackType;
 
         if (!typeMatches) {
@@ -452,6 +483,18 @@ export const useDragStore = defineStore("drag", () => {
           }
         }
       }
+
+      // 达类型上限时禁止建轨，回退到已有同类型轨
+      if (needNewTrack && !tracksStore.canAddTrack(desiredTrackType)) {
+        const fallbackId = findFallbackSameTypeTrackId(desiredTrackType) || sourceTrackId;
+        needNewTrack = false;
+        resolvedTrackId = fallbackId;
+        if (fallbackId === sourceTrackId) {
+          const adjusted = calculateSameTrackPosition(sourceTrackId, desiredStartTime, duration);
+          previewStartTime = adjusted.startTime;
+          previewEndTime = adjusted.endTime;
+        }
+      }
     } else {
       // 同轨移动逻辑 - 处理碰撞
       const adjustedPosition = calculateSameTrackPosition(targetTrackId, desiredStartTime, duration);
@@ -461,7 +504,7 @@ export const useDragStore = defineStore("drag", () => {
 
     // 更新预览位置
     previewPosition.value = {
-      trackId: targetTrackId,
+      trackId: resolvedTrackId,
       startTime: previewStartTime,
       endTime: previewEndTime,
       needNewTrack,
@@ -469,6 +512,24 @@ export const useDragStore = defineStore("drag", () => {
       visible: true,
       clipType,
     };
+  }
+
+  /**
+   * 达建轨上限时，选一条可落入的同类型未锁定轨（优先指针下、其次源轨、再次任意）
+   * @param type - 期望轨道类型
+   */
+  function findFallbackSameTypeTrackId(type: TrackType): string {
+    const underPointer = trackIdUnderPointer(currentMouseY.value);
+    const underTrack = underPointer ? tracksStore.tracks.find((t) => t.id === underPointer) : null;
+    if (underTrack && underTrack.type === type && !underTrack.locked) {
+      return underTrack.id;
+    }
+    const source = tracksStore.tracks.find((t) => t.id === dragStartTrackId.value);
+    if (source && source.type === type && !source.locked) {
+      return source.id;
+    }
+    const any = tracksStore.tracks.find((t) => t.type === type && !t.locked);
+    return any?.id || "";
   }
 
   // 计算同轨移动的实际放置位置（处理碰撞）
@@ -684,7 +745,13 @@ export const useDragStore = defineStore("drag", () => {
     let finalTargetTrack: Track | null = null;
 
     if (preview.needNewTrack) {
-      finalTargetTrack = insertTrackAtVisualSeam(desiredTrackType, preview.insertIndex);
+      // 二次闸门：达上限则不建轨，改落入已有同类型轨
+      if (!tracksStore.canAddTrack(desiredTrackType)) {
+        const fallbackId = findFallbackSameTypeTrackId(desiredTrackType);
+        finalTargetTrack = fallbackId ? tracksStore.tracks.find((t) => t.id === fallbackId) || null : null;
+      } else {
+        finalTargetTrack = insertTrackAtVisualSeam(desiredTrackType, preview.insertIndex);
+      }
     } else {
       // 使用目标轨道
       finalTargetTrack = tracksStore.tracks.find((t) => t.id === preview.trackId) || null;
@@ -753,14 +820,18 @@ export const useDragStore = defineStore("drag", () => {
     activeDocument.removeEventListener("mouseup", handleDragEnd);
   }
 
-  /** 在同类型分组的这条缝上新建轨道。order 只在同类型内比较 */
-  function insertTrackAtVisualSeam(type: TrackType, visualIndex: number): Track {
+  /**
+   * 在同类型分组的这条缝上新建轨道。order 只在同类型内比较。
+   * 达类型上限或 addTrack 失败时返回 null。
+   */
+  function insertTrackAtVisualSeam(type: TrackType, visualIndex: number): Track | null {
+    if (!tracksStore.canAddTrack(type)) return null;
+
     const rows = listTrackRows();
     const track = createNewTrack(type);
     const group = rows.map((row, index) => ({ row, index })).filter((item) => item.row.type === type);
     if (!group.length) {
-      tracksStore.addTrack(track);
-      return track;
+      return tracksStore.addTrack(track) ? track : null;
     }
     const below = group.find((item) => item.index >= visualIndex);
     const above = [...group].reverse().find((item) => item.index < visualIndex);
@@ -777,8 +848,7 @@ export const useDragStore = defineStore("drag", () => {
         if (item.type === type && item.order > aboveOrder) item.order += 1;
       });
     }
-    tracksStore.addTrack(track);
-    return track;
+    return tracksStore.addTrack(track) ? track : null;
   }
 
   /** 轨道当前的 order */
