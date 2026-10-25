@@ -1,6 +1,8 @@
 <template>
   <div>
-    <div v-if="items.length" class="grid gap-2" style="grid-template-columns: repeat(auto-fill, 72px)">
+    <div v-if="showGrid" class="grid gap-2" style="grid-template-columns: repeat(auto-fill, 72px)">
+      <!-- 与卡片同网格：上传按钮等前置操作 -->
+      <slot name="leading" />
       <div
         v-for="item in items"
         :key="item.id"
@@ -16,12 +18,12 @@
         </div>
       </div>
     </div>
-    <p v-else class="py-2 text-center text-[12px] text-[var(--compose-fg-3)]">暂无文字模板</p>
+    <p v-if="!items.length" class="py-2 text-center text-[12px] text-[var(--compose-fg-3)]">暂无文字模板</p>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, useSlots } from "vue";
 import { COMPOSE_TEXT_TEMPLATE_DRAG_MIME, type ComposeTextTemplateDrag } from "@/types/videoCompose";
 import type { TextTemplateItem } from "../shared/textTemplateCatalog";
 
@@ -35,8 +37,13 @@ const props = defineProps<{
 /** 正在拖的模板 id */
 const draggingId = ref("");
 
+const slots = useSlots();
+
 /** 列表缺省为空 */
 const items = computed(() => props.items ?? []);
+
+/** 有模板或前置操作时展示网格 */
+const showGrid = computed(() => items.value.length > 0 || Boolean(slots.leading));
 
 /** 未只读才允许拖入贴图轨 */
 const canDrag = computed(() => !props.readonly);

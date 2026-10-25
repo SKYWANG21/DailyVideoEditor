@@ -1,6 +1,8 @@
 <template>
   <div class="flex flex-col gap-4">
-    <div v-if="variants.length" class="grid gap-2" style="grid-template-columns: repeat(auto-fill, 72px)">
+    <div v-if="showGrid" class="grid gap-2" style="grid-template-columns: repeat(auto-fill, 72px)">
+      <!-- 与卡片同网格：上传按钮等前置操作 -->
+      <slot name="leading" />
       <div
         v-for="variant in variants"
         :key="`${variant.segmentIndex}:${variant.id}`"
@@ -71,12 +73,12 @@
         />
       </div>
     </div>
-    <p v-else class="py-2 text-center text-[12px] text-[var(--compose-fg-3)]">暂无视频</p>
+    <p v-if="!variants.length" class="py-2 text-center text-[12px] text-[var(--compose-fg-3)]">暂无视频</p>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref, useSlots } from "vue";
 import { Film, Heart, X } from "@lucide/vue";
 import { COMPOSE_SEGMENT_CLIP_DRAG_MIME, composeMediaLikeKey, type ComposeSegmentClipAssets } from "@/types/videoCompose";
 
@@ -100,6 +102,10 @@ const emit = defineEmits<{
   /** 切换喜欢 */
   "toggle-like": [variant: ComposeSegmentClipAssets];
 }>();
+
+const slots = useSlots();
+/** 有卡片或前置操作（上传按钮）时展示网格 */
+const showGrid = computed(() => props.variants.length > 0 || Boolean(slots.leading));
 
 /** 当前正在拖拽的版本 id（用于样式与抑制误触预览） */
 const draggingVariantId = ref<string | null>(null);

@@ -23,16 +23,7 @@
 
       <div class="compose-scroll min-h-0 flex-1 overflow-y-auto px-3 py-3">
         <template v-if="catId === 'video'">
-          <div class="grid gap-2" :style="cardGridStyle">
-            <slot name="video-actions">
-              <button v-if="!readonly" type="button" :class="addCardClass" @click="emit('upload-clip')">
-                <UploadCloud :size="24" />
-                上传视频
-              </button>
-            </slot>
-          </div>
           <VideoComposeClipCatalog
-            class="mt-3"
             :variants="videoVariants"
             :liked-keys="likedMediaKeys"
             :timeline-clip-urls="timelineClipUrls"
@@ -41,10 +32,20 @@
             @preview="emit('preview-clip', $event)"
             @remove="emit('remove-catalog-clip', $event)"
             @toggle-like="emit('toggle-like', $event)"
-          />
+          >
+            <template #leading>
+              <slot name="video-actions">
+                <button v-if="!readonly" type="button" :class="addCardClass" @click="emit('upload-clip')">
+                  <UploadCloud :size="24" />
+                  上传视频
+                </button>
+              </slot>
+            </template>
+          </VideoComposeClipCatalog>
         </template>
 
         <template v-else-if="catId === 'audio'">
+          <p v-if="audioClipCount > 0" class="mb-3 text-[12px] text-[var(--compose-fg-3)]">已添加 {{ audioClipCount }} 段音频到时间轴</p>
           <div class="grid gap-2" :style="cardGridStyle">
             <slot name="audio-actions">
               <button v-if="!readonly" type="button" :class="addCardClass" @click="emit('open-upload-bgm')">
@@ -52,9 +53,6 @@
                 上传音频
               </button>
             </slot>
-          </div>
-          <p v-if="audioClipCount > 0" class="mt-3 text-[12px] text-[var(--compose-fg-3)]">已添加 {{ audioClipCount }} 段音频到时间轴</p>
-          <div v-if="audioAssets.length" class="mt-3 grid gap-2" :style="cardGridStyle">
             <VideoComposeAssetCard
               v-for="(item, index) in audioAssets"
               :key="`${item.url}-${index}`"
@@ -63,7 +61,7 @@
               @drag-start="onAudioDragStart($event, item)"
             />
           </div>
-          <p v-else class="mt-3 text-center text-[12px] text-[var(--compose-fg-3)]">暂无音频</p>
+          <p v-if="!audioAssets.length" class="mt-3 text-center text-[12px] text-[var(--compose-fg-3)]">暂无音频</p>
         </template>
 
         <template v-else-if="catId === 'subtitle'">
@@ -74,8 +72,6 @@
                 添加字幕
               </button>
             </slot>
-          </div>
-          <div v-if="subtitleAssets.length" class="mt-3 grid gap-2" :style="cardGridStyle">
             <VideoComposeAssetCard
               v-for="item in subtitleAssets"
               :key="item.id"
@@ -84,19 +80,20 @@
               @drag-start="onSubtitleDragStart($event, item)"
             />
           </div>
-          <p v-else class="mt-3 text-center text-[12px] text-[var(--compose-fg-3)]">暂无字幕</p>
+          <p v-if="!subtitleAssets.length" class="mt-3 text-center text-[12px] text-[var(--compose-fg-3)]">暂无字幕</p>
         </template>
 
         <template v-else-if="catId === 'fancy'">
-          <div class="grid gap-2" :style="cardGridStyle">
-            <slot name="fancy-actions">
-              <button v-if="!readonly" type="button" :class="addCardClass" @click="onFancyUploadClick">
-                <UploadCloud :size="24" />
-                上传花字
-              </button>
-            </slot>
-          </div>
-          <VideoComposeTextTemplateCatalog class="mt-3" :items="textTemplates" :readonly="readonly" />
+          <VideoComposeTextTemplateCatalog :items="textTemplates" :readonly="readonly">
+            <template #leading>
+              <slot name="fancy-actions">
+                <button v-if="!readonly" type="button" :class="addCardClass" @click="onFancyUploadClick">
+                  <UploadCloud :size="24" />
+                  上传花字
+                </button>
+              </slot>
+            </template>
+          </VideoComposeTextTemplateCatalog>
         </template>
 
         <template v-else>
@@ -107,8 +104,6 @@
                 上传音效
               </button>
             </slot>
-          </div>
-          <div v-if="sfxAssets.length" class="mt-3 grid gap-2" :style="cardGridStyle">
             <VideoComposeAssetCard
               v-for="(item, index) in sfxAssets"
               :key="`${item.url}-${index}`"
@@ -117,7 +112,7 @@
               @drag-start="onAudioDragStart($event, item)"
             />
           </div>
-          <p v-else class="mt-3 text-center text-[12px] text-[var(--compose-fg-3)]">暂无音效</p>
+          <p v-if="!sfxAssets.length" class="mt-3 text-center text-[12px] text-[var(--compose-fg-3)]">暂无音效</p>
         </template>
       </div>
     </div>
