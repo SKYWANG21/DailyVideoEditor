@@ -24,7 +24,7 @@
             playsinline
             crossorigin="anonymous"
             class="pointer-events-none absolute inset-0 h-full w-full"
-            :class="[directVideoLayerClass(0), catalogPreviewActive ? 'object-contain' : 'object-cover']"
+            :class="[directVideoLayerClass(0), catalogPreviewActive ? 'object-contain' : 'object-fill']"
             @loadedmetadata="onDirectVideoMetadata"
           />
           <video
@@ -33,14 +33,14 @@
             playsinline
             crossorigin="anonymous"
             class="pointer-events-none absolute inset-0 h-full w-full"
-            :class="[directVideoLayerClass(1), catalogPreviewActive ? 'object-contain' : 'object-cover']"
+            :class="[directVideoLayerClass(1), catalogPreviewActive ? 'object-contain' : 'object-fill']"
             @loadedmetadata="onDirectVideoMetadata"
           />
           <canvas
             :id="GPU_PIXEL_CANVAS_ID"
             ref="previewCanvasRef"
             class="pointer-events-none absolute inset-0 h-full w-full"
-            :class="[showPreviewFrame ? 'opacity-100' : 'opacity-0', catalogPreviewActive ? 'object-contain' : 'object-cover']"
+            :class="[showPreviewFrame ? 'opacity-100' : 'opacity-0', catalogPreviewActive ? 'object-contain' : 'object-fill']"
           />
         </div>
 

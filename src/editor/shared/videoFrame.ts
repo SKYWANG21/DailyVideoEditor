@@ -264,7 +264,7 @@ function snapAxis(
   return { value: best, guide };
 }
 
-/** 四角等比缩放，四边改宽或高。拉边时活动边贴齐画布边 */
+/** 四角等比缩放，四边改宽或高。活动边/角靠近画布边时吸附 */
 function resizeFrame(
   base: VideoFrameTransform,
   dx: number,
@@ -331,7 +331,10 @@ function growEdge(half: number, localDelta: number, sign: number): { size: numbe
   return { size, shift: (sign * (size - 2 * half)) / 2 };
 }
 
-/** 活动边靠近画布边时贴齐，并保持对边不动 */
+/**
+ * 活动边靠近画布边时贴齐。
+ * 四边改 w/h 且对边不动；四角改 scale 且对顶角不动。
+ */
 function snapResizedEdge(
   frame: VideoFrameTransform,
   sign: [number, number],
@@ -339,7 +342,7 @@ function snapResizedEdge(
   canvasH: number,
 ): { frame: VideoFrameTransform; guides: FrameSnapGuide[] } {
   const [sx, sy] = sign;
-  if (sx && sy) return { frame, guides: [] };
+  if (sx && sy) return snapResizedCorner(frame, sign, canvasW, canvasH);
   const { w, h } = frameDisplaySize(frame);
   const guides: FrameSnapGuide[] = [];
   let next = frame;
@@ -360,6 +363,82 @@ function snapResizedEdge(
     }
   }
   return { frame: next, guides };
+}
+
+/**
+ * 四角等比缩放吸附：活动边贴画布边，对顶角不动。
+ * 水平/垂直各最多一个候选，取距离更近的一条（避免两套 scale 冲突）。
+ */
+function snapResizedCorner(
+  frame: VideoFrameTransform,
+  sign: [number, number],
+  canvasW: number,
+  canvasH: number,
+): { frame: VideoFrameTransform; guides: FrameSnapGuide[] } {
+  const [sx, sy] = sign;
+  const { w: dw, h: dh } = frameDisplaySize(frame);
+  if (dw <= 0 || dh <= 0 || frame.w <= 0 || frame.h <= 0) return { frame, guides: [] };
+
+  const left = canvasW / 2 + frame.x - dw / 2;
+  const right = left + dw;
+  const top = canvasH / 2 + frame.y - dh / 2;
+  const bottom = top + dh;
+  /** 拖左边则右边固定；拖上边则下边固定 */
+  const fixedX = sx < 0 ? right : left;
+  const fixedY = sy < 0 ? bottom : top;
+
+  type CornerSnapCand = { dist: number; scale: number; guide: FrameSnapGuide };
+  const cands: CornerSnapCand[] = [];
+
+  if (sx < 0) {
+    const dist = Math.abs(left);
+    if (dist <= FRAME_SNAP_PX) {
+      const nextDw = Math.max(16, fixedX);
+      const scale = Math.round(clampNum((nextDw / frame.w) * 100, 1, 1000) * 10) / 10;
+      cands.push({ dist, scale, guide: "left" });
+    }
+  } else if (sx > 0) {
+    const dist = Math.abs(right - canvasW);
+    if (dist <= FRAME_SNAP_PX) {
+      const nextDw = Math.max(16, canvasW - fixedX);
+      const scale = Math.round(clampNum((nextDw / frame.w) * 100, 1, 1000) * 10) / 10;
+      cands.push({ dist, scale, guide: "right" });
+    }
+  }
+
+  if (sy < 0) {
+    const dist = Math.abs(top);
+    if (dist <= FRAME_SNAP_PX) {
+      const nextDh = Math.max(16, fixedY);
+      const scale = Math.round(clampNum((nextDh / frame.h) * 100, 1, 1000) * 10) / 10;
+      cands.push({ dist, scale, guide: "top" });
+    }
+  } else if (sy > 0) {
+    const dist = Math.abs(bottom - canvasH);
+    if (dist <= FRAME_SNAP_PX) {
+      const nextDh = Math.max(16, canvasH - fixedY);
+      const scale = Math.round(clampNum((nextDh / frame.h) * 100, 1, 1000) * 10) / 10;
+      cands.push({ dist, scale, guide: "bottom" });
+    }
+  }
+
+  if (!cands.length) return { frame, guides: [] };
+  cands.sort((a, b) => a.dist - b.dist);
+  const best = cands[0];
+  const nextDw = (frame.w * best.scale) / 100;
+  const nextDh = (frame.h * best.scale) / 100;
+  const nextLeft = sx < 0 ? fixedX - nextDw : fixedX;
+  const nextTop = sy < 0 ? fixedY - nextDh : fixedY;
+
+  return {
+    frame: {
+      ...frame,
+      scale: best.scale,
+      x: Math.round(nextLeft + nextDw / 2 - canvasW / 2),
+      y: Math.round(nextTop + nextDh / 2 - canvasH / 2),
+    },
+    guides: [best.guide],
+  };
 }
 
 function snapOneEdge(
