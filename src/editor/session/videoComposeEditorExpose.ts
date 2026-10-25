@@ -1,4 +1,4 @@
-import type { ComposeExportPayload, VideoClipItem, VideoComposeEditorModel } from "@/types/videoCompose";
+import type { ComposeClip, ComposeExportPayload, VideoClipItem, VideoComposeEditorModel } from "@/types/videoCompose";
 
 /**
  * `VideoComposeEditor` 通过组件 ref 暴露的方法。
@@ -17,4 +17,10 @@ export interface VideoComposeEditorExpose {
   getMainVideoClips: () => VideoClipItem[];
   /** 触发上传视频：`onRequestUploadClip`，否则走内置上传 */
   requestUploadClip: () => void;
+  /**
+   * 右栏 inspector 当前类型对应的那条选中 clip；无选中或无 inspector 时为 null
+   */
+  getEditingClip: () => ComposeClip | null;
+  /** 当前时间轴多选解析后的 clip 列表 */
+  getSelectedClips: () => ComposeClip[];
 }

@@ -19,6 +19,7 @@ export type {
   TextClip,
   TextTemplateItem,
   TrackType,
+  TrackTypeConfig,
   VideoClipItem,
   VideoComposeEditorExpose,
   VideoComposeEditorModel,

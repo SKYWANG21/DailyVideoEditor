@@ -1,8 +1,9 @@
 import { computed, reactive, ref, type ComputedRef, type Ref } from "vue";
-import type { MediaClip, TextClip } from "@/clip-track";
+import type { MediaClip, TextClip, TrackTypeConfig } from "@/clip-track";
 import type {
   BeautyParams,
   BgmItem,
+  ComposeClip,
   ComposeConfig,
   ComposeSegmentClipAssets,
   ComposeSubtitleAsset,
@@ -73,6 +74,11 @@ export interface ComposeEditorProps {
    * 默认 /algorithm/。
    */
   algorithmBaseUrl?: string;
+  /**
+   * 各轨道类型数量上限；未传则使用 clip-track 组件默认。
+   * 某类型未出现在配置中视为不限制。
+   */
+  trackTypes?: TrackTypeConfig;
 }
 
 /**
@@ -123,6 +129,8 @@ export interface ComposeEditorEmit {
   (event: "sfx-uploaded", payload: ComposeCatalogUploadPayload<BgmItem>): void;
   /** 内置或 adapter 上传花字完成 */
   (event: "text-template-uploaded", payload: ComposeCatalogUploadPayload<TextTemplateItem>): void;
+  /** 时间轴选中变化；载荷为解析后的 clip 列表 */
+  (event: "selection-changed", clips: ComposeClip[]): void;
 }
 
 /** 预览和时间轴对钟用的可变标志。必须留在同一次会话里，不能做成模块级变量 */

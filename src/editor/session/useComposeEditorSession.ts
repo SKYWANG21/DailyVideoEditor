@@ -1,8 +1,10 @@
 import { onBeforeUnmount, onMounted } from "vue";
+import type { ComposeClip } from "@/types/videoCompose";
 import { loadTextTemplateCatalog, setHostTextTemplates } from "../shared/textTemplateCatalog";
 import type { ComposeEditorEmit, ComposeEditorProps } from "./createComposeEditorState";
 import { createComposeEditorState } from "./createComposeEditorState";
 import { createComposeEditorPorts } from "./ports";
+import { findClipById } from "./trackLookup";
 import { useComposeCatalog } from "./useComposeCatalog";
 import { useComposeInspector } from "./useComposeInspector";
 import { useComposePlaybackBridge } from "./useComposePlaybackBridge";
@@ -40,6 +42,44 @@ export function useComposeEditorSession(props: ComposeEditorProps, emit: Compose
     ports.flush();
   });
 
+  /**
+   * 当前多选解析为 ComposeClip 列表
+   */
+  function getSelectedClips(): ComposeClip[] {
+    const clips: ComposeClip[] = [];
+    for (const id of state.selectedClipIds.value) {
+      const clip = findClipById(state.tracks.value, id);
+      if (clip) clips.push(clip);
+    }
+    return clips;
+  }
+
+  /**
+   * 右栏 inspector 当前类型对应的选中 clip
+   */
+  function getEditingClip(): ComposeClip | null {
+    const kind = state.inspectorKind.value;
+    if (!kind) return null;
+    const id =
+      kind === "video"
+        ? state.activeVideoId.value
+        : kind === "audio"
+          ? state.activeAudioId.value
+          : kind === "subtitle"
+            ? state.activeSubtitleId.value
+            : state.activeTextClipId.value;
+    return findClipById(state.tracks.value, id) ?? null;
+  }
+
+  /**
+   * 时间轴选中变化：先更新会话态，再向宿主抛出 clip 列表
+   * @param ids - 选中 clip id 列表
+   */
+  function onSelectionChanged(ids: string[]): void {
+    inspector.onSelectionChanged(ids);
+    emit("selection-changed", getSelectedClips());
+  }
+
   /** 宿主 ref 方法，签名与 VideoComposeEditorExpose 一致；由外壳 defineExpose */
   const exposed: VideoComposeEditorExpose = {
     validate: project.validate,
@@ -50,6 +90,8 @@ export function useComposeEditorSession(props: ComposeEditorProps, emit: Compose
     requestUploadClip: () => {
       catalog.onUploadClipClick();
     },
+    getEditingClip,
+    getSelectedClips,
   };
 
   return {
@@ -95,6 +137,7 @@ export function useComposeEditorSession(props: ComposeEditorProps, emit: Compose
     adjustPreviewSubtitles: state.adjustPreviewSubtitles,
     ...playback,
     ...inspector,
+    onSelectionChanged,
     ...catalog,
     onTracksUpdate: project.onTracksUpdate,
     onTimelineScaleUpdate: project.onTimelineScaleUpdate,

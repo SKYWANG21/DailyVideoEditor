@@ -25,4 +25,4 @@ export type {
 
 export type { VideoComposeEditorExpose } from "./session/videoComposeEditorExpose";
 
-export type { MediaClip, SubtitleClip, TextClip, TrackType } from "@/clip-track";
+export type { MediaClip, SubtitleClip, TextClip, TrackType, TrackTypeConfig } from "@/clip-track";

@@ -119,7 +119,11 @@
           @apply-global="onApplyGlobal"
           @update:frame-aspect="onFrameAspectChange"
           @update:video-frame="onInspectorFrameChange"
-        />
+        >
+          <template v-for="name in forwardedSidebarSlots" :key="name" #[name]>
+            <slot :name="name" />
+          </template>
+        </VideoComposeSidebar>
       </div>
 
       <div
@@ -136,6 +140,7 @@
         :tracks="tracks"
         :readonly="readonly"
         :scale="modelValue.scale"
+        :track-types="trackTypes"
         @update:tracks="onTracksUpdate"
         @update:scale="onTimelineScaleUpdate"
         @selection-changed="onSelectionChanged"
@@ -192,8 +197,10 @@ import type { ComposeCatalogUploadPayload, ComposeUploadAdapter } from "./sessio
 import { installComposeElementPlus } from "./installComposeElementPlus";
 import { COMPOSE_ALGORITHM_BASE } from "./composeRuntime";
 import { COMPOSE_MEDIA_RESOLVER, createComposeMediaResolver } from "@/service/resolveComposeMediaUrl";
+import type { TrackTypeConfig } from "@/clip-track";
 import type {
   BgmItem,
+  ComposeClip,
   ComposeSegmentClipAssets,
   ComposeSubtitleAsset,
   VideoComposeEditorModel,
@@ -229,6 +236,11 @@ const props = withDefaults(
     resolveMediaUrl?: (url: string) => Promise<string>;
     /** 美颜 WASM / 模型根路径，默认 /algorithm/ */
     algorithmBaseUrl?: string;
+    /**
+     * 各轨道类型数量上限；未传则使用 clip-track 组件默认。
+     * 某类型未出现在配置中视为不限制。
+     */
+    trackTypes?: TrackTypeConfig;
   }>(),
   {
     readonly: false,
@@ -262,21 +274,30 @@ const emit = defineEmits<{
   "audio-uploaded": [payload: ComposeCatalogUploadPayload<BgmItem>];
   "sfx-uploaded": [payload: ComposeCatalogUploadPayload<BgmItem>];
   "text-template-uploaded": [payload: ComposeCatalogUploadPayload<TextTemplateItem>];
+  /** 时间轴选中变化；载荷为解析后的 clip 列表 */
+  "selection-changed": [clips: ComposeClip[]];
 }>();
 
 /** 分类操作插槽名。外壳没传时不转发，面板保留默认上传按钮 */
 const actionSlotNames = ["video-actions", "audio-actions", "subtitle-actions", "fancy-actions", "sfx-actions"] as const;
 
+/** 侧栏「应用到全局」前的插槽，供宿主插入自定义控件 */
+const sidebarSlotNames = ["before-apply-video", "before-apply-audio", "before-apply-subtitle", "before-apply-text"] as const;
+
 type ActionSlotName = (typeof actionSlotNames)[number];
+type SidebarSlotName = (typeof sidebarSlotNames)[number];
 
 /**
- * 外壳传入的分类操作插槽。
+ * 外壳传入的插槽。
  * 类型写死，避免和模板里的动态插槽互相推断，声明生成时变成 any。
  */
-const editorSlots: Partial<Record<ActionSlotName, Slot | undefined>> = useSlots();
+const editorSlots = useSlots() as Partial<Record<ActionSlotName | SidebarSlotName, Slot | undefined>>;
 
 /** 只转发外壳真正传入的分类操作插槽 */
 const forwardedActionSlots = computed((): ActionSlotName[] => actionSlotNames.filter((name) => editorSlots[name]));
+
+/** 只转发外壳真正传入的侧栏插槽 */
+const forwardedSidebarSlots = computed((): SidebarSlotName[] => sidebarSlotNames.filter((name) => editorSlots[name]));
 
 const {
   validate,
@@ -285,6 +306,8 @@ const {
   exportComposePayload,
   getMainVideoClips,
   requestUploadClip,
+  getEditingClip,
+  getSelectedClips,
   shellRef,
   shellGridStyle,
   topGridStyle,
@@ -406,6 +429,8 @@ defineExpose({
   exportComposePayload,
   getMainVideoClips,
   requestUploadClip,
+  getEditingClip,
+  getSelectedClips,
 });
 
 /** 面板花字上传：宿主回调或内置选文件结果 */

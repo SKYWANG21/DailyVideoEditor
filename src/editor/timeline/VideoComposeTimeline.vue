@@ -24,6 +24,7 @@
       :locale="locales['zh-CN']"
       :theme="clipTrackTheme"
       :clip-configs="clipTypeConfigs"
+      :track-types="trackTypes"
       :track-context-menu="trackContextMenuConfig"
       :clip-context-menu="clipContextMenuConfig"
       @data:changed="scheduleDataChanged"
@@ -166,7 +167,7 @@ import {
 } from "@/types/videoCompose";
 import { normalizeFrameAspect } from "../shared/videoFrame";
 import { clampPlaybackRate } from "../shared/playbackRate";
-import type { MediaClip, SubtitleClip, TextClip, Clip, ClipTypeConfig } from "@/clip-track";
+import type { MediaClip, SubtitleClip, TextClip, Clip, ClipTypeConfig, TrackTypeConfig } from "@/clip-track";
 
 /** 可批量改属性的 clip 类型 */
 export type PatchableClipType = "video" | "audio" | "subtitle" | "text";
@@ -227,6 +228,11 @@ export interface VideoComposeTimelineProps {
   readonly?: boolean;
   /** 工程持久化的时间轴倍率；缺省 1 */
   scale?: number;
+  /**
+   * 各轨道类型数量上限；未传则使用 clip-track 组件默认。
+   * 某类型未出现在配置中视为不限制。
+   */
+  trackTypes?: TrackTypeConfig;
 }
 
 const props = withDefaults(defineProps<VideoComposeTimelineProps>(), {

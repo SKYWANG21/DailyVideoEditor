@@ -23,6 +23,7 @@ export type { Track, TrackType } from "./types/track";
 export type {
   OperationButton,
   ClipTypeConfig,
+  TrackTypeConfig,
   TrackContextMenuConfig,
   ClipContextMenuConfig,
   ThemeConfig,
