@@ -1,4 +1,4 @@
-# video-clips
+# daily-video-clips
 
 视频合成编辑器。打包后宿主只需 Vue，不必再装 Pinia、全局 Element Plus 或 Tailwind。
 
