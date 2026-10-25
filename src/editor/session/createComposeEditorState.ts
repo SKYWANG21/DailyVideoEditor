@@ -47,6 +47,8 @@ export interface ComposeEditorProps {
   audioAssets?: BgmItem[];
   /** 侧栏音效种子；传入后同步进内部列表 */
   sfxAssets?: BgmItem[];
+  /** 侧栏字幕种子；传入后同步进内部列表（不进 v-model） */
+  subtitleAssets?: ComposeSubtitleAsset[];
   /** 侧栏花字种子；传入后同步进内部列表 */
   textTemplates?: TextTemplateItem[];
   /**
@@ -350,7 +352,7 @@ export function createComposeEditorState(props: ComposeEditorProps): ComposeEdit
     audioAssets: ref<BgmItem[]>([...(props.audioAssets ?? [])]),
     sfxAssets: ref<BgmItem[]>([...(props.sfxAssets ?? [])]),
     textTemplates: ref<TextTemplateItem[]>([...(props.textTemplates ?? [])]),
-    subtitleAssets: ref<ComposeSubtitleAsset[]>([]),
+    subtitleAssets: ref<ComposeSubtitleAsset[]>([...(props.subtitleAssets ?? [])]),
     selectedClipIds,
     inspectorKind: ref<ComposeInspectorKind | null>(null),
     subtitleStyle,

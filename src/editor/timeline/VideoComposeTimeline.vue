@@ -1685,18 +1685,36 @@ function resolveSubtitleInsertRange(
   return { start, duration: preferred };
 }
 
+/** 插入字幕 clip 的可选文案、时间与样式（样式缺省走 normalizeSubtitleClipStyle） */
+type AddSubtitleClipOptions = {
+  text?: string;
+  startTime?: number;
+  durationSec?: number;
+  fontFamily?: string;
+  fontSize?: number;
+  color?: string;
+  bold?: boolean;
+  italic?: boolean;
+};
+
 /**
  * 在字幕轨 playhead（或指定时间）插入字幕 clip。
  * 游标落在已有字幕上时插到该 clip 之后，且不与同轨其他字幕重叠。
  */
-function addSubtitleClip(options?: { text?: string; startTime?: number; durationSec?: number }): string {
+function addSubtitleClip(options?: AddSubtitleClipOptions): string {
   const api = videoTrackRef.value!;
   const trackId = ensureSubtitleTrack();
   const track = api.getTracks().find((t) => t.id === trackId);
   const cursor = options?.startTime ?? api.getCurrentTime?.() ?? 0;
   const { start, duration } = resolveSubtitleInsertRange(track?.clips || [], cursor, options?.durationSec ?? 2);
   const clipId = `sub-${generateId()}`;
-  const style = normalizeSubtitleClipStyle({});
+  const style = normalizeSubtitleClipStyle({
+    fontFamily: options?.fontFamily,
+    fontSize: options?.fontSize,
+    color: options?.color,
+    bold: options?.bold,
+    italic: options?.italic,
+  });
   suppressEmit = true;
   api.addClip(trackId, {
     id: clipId,

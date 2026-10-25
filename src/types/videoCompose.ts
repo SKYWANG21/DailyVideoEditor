@@ -374,7 +374,7 @@ export const COMPOSE_SUBTITLE_ASSET_DRAG_MIME = "application/x-compose-subtitle-
 /** 花字卡片拖入时间轴 */
 export const COMPOSE_TEXT_TEMPLATE_DRAG_MIME = "application/x-compose-text-template+json";
 
-/** 字幕素材。拖入后按文案和时长插入字幕轨 */
+/** 字幕素材。拖入后按文案、时长与可选样式插入字幕轨 */
 export interface ComposeSubtitleAsset {
   /** 素材 id */
   id: string;
@@ -382,6 +382,16 @@ export interface ComposeSubtitleAsset {
   text: string;
   /** 期望时长（秒） */
   durationSec: number;
+  /** ASS 字体名；缺省用默认字幕样式 */
+  fontFamily?: string;
+  /** 字号（视频原生像素）；0 / 缺省表示待预览换算 */
+  fontSize?: number;
+  /** 字体颜色 #RRGGBB */
+  color?: string;
+  /** 是否加粗 */
+  bold?: boolean;
+  /** 是否斜体 */
+  italic?: boolean;
 }
 
 /** 花字拖放载荷。只带入轨需要的字段，不含 SVG 原文 */

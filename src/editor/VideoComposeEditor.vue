@@ -193,7 +193,12 @@ import type { ComposeCatalogUploadPayload, ComposeUploadAdapter } from "./sessio
 import { installComposeElementPlus } from "./installComposeElementPlus";
 import { COMPOSE_ALGORITHM_BASE } from "./composeRuntime";
 import { COMPOSE_MEDIA_RESOLVER, createComposeMediaResolver } from "@/service/resolveComposeMediaUrl";
-import type { BgmItem, ComposeSegmentClipAssets, VideoComposeEditorModel } from "@/types/videoCompose";
+import type {
+  BgmItem,
+  ComposeSegmentClipAssets,
+  ComposeSubtitleAsset,
+  VideoComposeEditorModel,
+} from "@/types/videoCompose";
 
 const props = withDefaults(
   defineProps<{
@@ -207,6 +212,8 @@ const props = withDefaults(
     audioAssets?: BgmItem[];
     /** 侧栏音效种子 */
     sfxAssets?: BgmItem[];
+    /** 侧栏字幕种子；同步进内部列表，不进 v-model */
+    subtitleAssets?: ComposeSubtitleAsset[];
     /** 侧栏花字种子 */
     textTemplates?: TextTemplateItem[];
     /** 可选上传适配器（无 onRequestUpload* 时由 Editor 选文件并调用） */

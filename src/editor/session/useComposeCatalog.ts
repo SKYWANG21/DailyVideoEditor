@@ -73,7 +73,7 @@ export function useComposeCatalog(
   restoreLikedMediaFromModel();
   setHostTextTemplates(state.textTemplates.value);
 
-  /** 侧栏四类列表：只读内部数组（props 作种子经 watch 同步） */
+  /** 侧栏列表：只读内部数组（props 作种子经 watch 同步） */
   const videoCatalogVariants = computed(() => state.videoAssets.value);
   const panelAudioAssets = computed(() => state.audioAssets.value);
   const panelSfxAssets = computed(() => state.sfxAssets.value);
@@ -101,6 +101,14 @@ export function useComposeCatalog(
     (list) => {
       if (list === undefined) return;
       state.sfxAssets.value = [...list];
+    },
+    { deep: true },
+  );
+  watch(
+    () => props.subtitleAssets,
+    (list) => {
+      if (list === undefined) return;
+      state.subtitleAssets.value = [...list];
     },
     { deep: true },
   );
@@ -362,13 +370,19 @@ export function useComposeCatalog(
     void probeAndWidenAudioClip(clipId, payload.item);
   }
 
-  /** 字幕素材拖入字幕轨 */
+  /** 字幕素材拖入字幕轨（文案、时长与可选样式一并入轨） */
   function onTimelineDropSubtitleAsset(payload: { item: ComposeSubtitleAsset; startTime: number }): void {
     if (props.readonly) return;
+    const { item } = payload;
     state.timelineRef.value?.addSubtitleClip({
-      text: payload.item.text,
-      durationSec: payload.item.durationSec,
+      text: item.text,
+      durationSec: item.durationSec,
       startTime: payload.startTime,
+      fontFamily: item.fontFamily,
+      fontSize: item.fontSize,
+      color: item.color,
+      bold: item.bold,
+      italic: item.italic,
     });
     ElMessage.success("已添加到时间轴");
   }
