@@ -34,12 +34,12 @@
         >
           已使用
         </span>
-        <span
+        <!-- <span
           v-else-if="variant.isSelected"
           class="absolute top-1.5 left-1.5 z-20 rounded-[4px] bg-black/55 px-1.5 py-0.5 text-[10px] font-medium text-white"
         >
           已选中
-        </span>
+        </span> -->
         <button
           v-if="showLikeButton(variant)"
           type="button"
