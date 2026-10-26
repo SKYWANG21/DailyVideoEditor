@@ -7,10 +7,17 @@
 
       <template v-for="(btn, index) in operationButtons" :key="index">
         <!-- 字符串简写形式 -->
-        <button v-if="typeof btn === 'string'" class="tools-bar__btn"
-          :class="{ 'tools-bar__btn--disabled': isOperationDisabled(btn) }" :disabled="isOperationDisabled(btn)"
-          @click="handleOperation(btn)">
-          <span class="tools-bar__icon">{{ getOperationIcon(btn) }}</span>
+        <button
+          v-if="typeof btn === 'string'"
+          class="tools-bar__btn"
+          :class="{ 'tools-bar__btn--disabled': isOperationDisabled(btn) }"
+          :disabled="isOperationDisabled(btn)"
+          @click="handleOperation(btn)"
+        >
+          <span class="tools-bar__icon">
+            <component :is="getOperationIconComponent(btn)" v-if="getOperationIconComponent(btn)" />
+            <template v-else>{{ getOperationIcon(btn) }}</template>
+          </span>
           <span class="tools-bar__label">{{ getOperationLabel(btn) }}</span>
         </button>
         <!-- 自定义插槽形式 -->
@@ -120,26 +127,28 @@ import { useHistoryStore } from '../../stores/history'
 import { useTracksStore } from '../../stores/tracks'
 import { useClipTrackPinia } from '../../stores/clipTrackPinia'
 import type { OperationButton, ScaleConfigButton, LocaleConfig, OperationButtonConfig, ScaleConfigButtonConfig, CustomButton } from '../../types'
-import SnapIcon from './icons/SnapIcon.vue'
+import SnapIcon from "./icons/SnapIcon.vue";
+import TrimLeftIcon from "./icons/TrimLeftIcon.vue";
+import TrimRightIcon from "./icons/TrimRightIcon.vue";
 
 // Props
 interface Props {
-  operationButtons?: OperationButton[]
-  scaleConfigButtons?: ScaleConfigButton[]
-  locale?: LocaleConfig
+  operationButtons?: OperationButton[];
+  scaleConfigButtons?: ScaleConfigButton[];
+  locale?: LocaleConfig;
   /** 是否显示播放钮、时间和倍速 */
-  showPlayback?: boolean
+  showPlayback?: boolean;
   /** 是否显示缩放加减和倍率滑杆。吸附按钮不受影响 */
-  showScaleControl?: boolean
+  showScaleControl?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  operationButtons: () => ['reset', 'undo', 'redo', 'split', 'delete'],
-  scaleConfigButtons: () => ['snap'],
+  operationButtons: () => ["reset", "undo", "redo", "split", "trimLeft", "trimRight", "delete"],
+  scaleConfigButtons: () => ["snap"],
   locale: () => ({}),
   showPlayback: true,
-  showScaleControl: true
-})
+  showScaleControl: true,
+});
 
 // Emits
 const emit = defineEmits<{
@@ -232,43 +241,68 @@ function handleScaleConfigButtonClick(btn: ScaleConfigButtonConfig) {
   }
 }
 
-// 操作按钮图标
+/** 内置操作用组件图标（向左/向右裁剪对齐设计稿 SVG） */
+function getOperationIconComponent(operation: string): Component | FunctionalComponent | undefined {
+  const icons: Record<string, Component | FunctionalComponent> = {
+    trimLeft: TrimLeftIcon,
+    trimRight: TrimRightIcon,
+  };
+  return icons[operation];
+}
+
+// 操作按钮图标（emoji 回退）
 function getOperationIcon(operation: string): string {
   const icons: Record<string, string> = {
-    reset: '↺',
-    undo: '↶',
-    redo: '↷',
-    split: '✂',
-    delete: '🗑'
-  }
-  return icons[operation] || ''
+    reset: "↺",
+    undo: "↶",
+    redo: "↷",
+    split: "✂",
+    delete: "🗑",
+  };
+  return icons[operation] || "";
 }
 
 // 操作按钮标签
 function getOperationLabel(operation: string): string {
-  const localeLabels = props.locale || {}
+  const localeLabels = props.locale || {};
   const defaultLabels: Record<string, string> = {
-    reset: '重置',
-    undo: '撤销',
-    redo: '重做',
-    split: '分割',
-    delete: '删除'
+    reset: "重置",
+    undo: "撤销",
+    redo: "重做",
+    split: "分割",
+    trimLeft: "向左裁剪",
+    trimRight: "向右裁剪",
+    delete: "删除",
+  };
+  return (localeLabels as Record<string, string>)[operation] || defaultLabels[operation] || operation;
+}
+
+/** 播放头是否落在任一选中 clip 内部（严格开区间，与分割/裁剪一致） */
+function hasCuttableSelection(): boolean {
+  if (tracksStore.selectedClipIds.size === 0) return false;
+  const currentTime = playbackStore.currentTime;
+  for (const clipId of tracksStore.selectedClipIds) {
+    const clip = tracksStore.getClip(clipId);
+    if (clip && currentTime > clip.startTime && currentTime < clip.endTime) {
+      return true;
+    }
   }
-  return (localeLabels as Record<string, string>)[operation] || defaultLabels[operation] || operation
+  return false;
 }
 
 // 判断操作是否禁用
 function isOperationDisabled(operation: string): boolean {
   switch (operation) {
-    case 'undo':
-      return !historyStore.canUndo
-    case 'redo':
-      return !historyStore.canRedo
-    case 'split':
-      // split 禁用条件：没有选中的 clip
-      return tracksStore.selectedClipIds.size === 0
+    case "undo":
+      return !historyStore.canUndo;
+    case "redo":
+      return !historyStore.canRedo;
+    case "split":
+    case "trimLeft":
+    case "trimRight":
+      return !hasCuttableSelection();
     default:
-      return false
+      return false;
   }
 }
 

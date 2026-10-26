@@ -26,7 +26,16 @@ export interface OperationButtonConfig {
 }
 
 // 操作按钮配置 - 支持字符串简写、自定义按钮或完整配置对象
-export type OperationButton = "reset" | "undo" | "redo" | "split" | "delete" | CustomButton | OperationButtonConfig;
+export type OperationButton =
+  | "reset"
+  | "undo"
+  | "redo"
+  | "split"
+  | "trimLeft"
+  | "trimRight"
+  | "delete"
+  | CustomButton
+  | OperationButtonConfig;
 
 // 缩放配置按钮对象配置
 export interface ScaleConfigButtonConfig {
@@ -206,6 +215,9 @@ export interface LocaleConfig {
   reset?: string;
   undo?: string;
   redo?: string;
+  split?: string;
+  trimLeft?: string;
+  trimRight?: string;
   delete?: string;
   play?: string;
   pause?: string;
@@ -255,6 +267,9 @@ export const locales: Record<string, LocaleConfig> = {
     reset: "重置",
     undo: "撤销",
     redo: "重做",
+    split: "剪裁",
+    trimLeft: "向左裁剪",
+    trimRight: "向右裁剪",
     delete: "删除",
     play: "播放",
     pause: "暂停",
@@ -298,6 +313,9 @@ export const locales: Record<string, LocaleConfig> = {
     reset: "Reset",
     undo: "Undo",
     redo: "Redo",
+    split: "Split",
+    trimLeft: "Trim Left",
+    trimRight: "Trim Right",
     delete: "Delete",
     play: "Play",
     pause: "Pause",

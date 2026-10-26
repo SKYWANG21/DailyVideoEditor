@@ -805,6 +805,12 @@ function handleOperation(operation: string) {
     case "split":
       handleSplit();
       break;
+    case "trimLeft":
+      handleTrim("left");
+      break;
+    case "trimRight":
+      handleTrim("right");
+      break;
     case "delete":
       handleDelete();
       break;
@@ -871,6 +877,45 @@ function handleSplit() {
   });
 
   historyStore.pushSnapshot("分割片段");
+}
+
+/**
+ * 向左/向右裁剪：在播放头处分割后移除一侧半段。
+ * - left：去掉播放头左侧（删左段，保留右段）
+ * - right：去掉播放头右侧（删右段，保留左段）
+ */
+function handleTrim(side: "left" | "right") {
+  const selectedClipIds = Array.from(tracksStore.selectedClipIds);
+  if (selectedClipIds.length === 0) return;
+
+  const currentTime = playbackStore.currentTime;
+  let didTrim = false;
+
+  selectedClipIds.forEach((clipId) => {
+    const clip = tracksStore.getClip(clipId);
+    if (!clip) return;
+
+    if (currentTime <= clip.startTime || currentTime >= clip.endTime) {
+      return;
+    }
+
+    const result = tracksStore.splitClip(clipId, currentTime);
+    if (!result) return;
+
+    emit("clipSplit", clipId, result.leftClip, result.rightClip, currentTime);
+
+    const removeId = side === "left" ? result.leftClip.id : result.rightClip.id;
+    const keepId = side === "left" ? result.rightClip.id : result.leftClip.id;
+
+    tracksStore.removeClip(removeId);
+    tracksStore.selectClip(keepId);
+    emit("clipDelete", removeId);
+    didTrim = true;
+  });
+
+  if (didTrim) {
+    historyStore.pushSnapshot(side === "left" ? "向左裁剪" : "向右裁剪");
+  }
 }
 
 // 处理添加转场

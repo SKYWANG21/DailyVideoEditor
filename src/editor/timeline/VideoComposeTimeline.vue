@@ -311,7 +311,7 @@ const DATA_CHANGED_DEBOUNCE_MS = 50;
 /** 裁剪 pointerup 兜底间隔（ms） */
 const POINTER_SYNC_DEBOUNCE_MS = 100;
 
-const operationButtons: OperationButton[] = ["undo", "redo", "split", "delete"];
+const operationButtons: OperationButton[] = ["undo", "redo", "split", "trimLeft", "trimRight", "delete"];
 
 /** 片段色靠近设计稿：视频中性、音频成功、字幕警告、贴图蓝 */
 const clipTypeConfigs: ClipTypeConfig = {
