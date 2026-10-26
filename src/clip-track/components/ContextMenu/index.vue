@@ -1,11 +1,17 @@
 <template>
   <teleport to="body">
     <div v-if="visible" class="context-menu" :style="menuStyle" @contextmenu.prevent>
-      <div v-for="item in menuItems" :key="item.key" class="context-menu__item" :class="{
-        'context-menu__item--disabled': item.disabled,
-        'context-menu__item--divider': item.divider,
-        'context-menu__item--danger': item.danger
-      }" @click="handleItemClick(item)">
+      <div
+        v-for="item in menuItems"
+        :key="item.key"
+        class="context-menu__item"
+        :class="{
+          'context-menu__item--disabled': item.disabled,
+          'context-menu__item--divider': item.divider,
+          'context-menu__item--danger': item.danger,
+        }"
+        @click="handleItemClick(item)"
+      >
         <template v-if="item.divider">
           <div class="context-menu__divider" />
         </template>
@@ -23,119 +29,119 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
-import type { ContextMenuItem } from '../../types'
+import { ref, computed, onMounted, onUnmounted } from "vue";
+import type { ContextMenuItem } from "../../types";
 
 /** 右键菜单入参 */
 export interface Props {
-  items?: ContextMenuItem[]
+  items?: ContextMenuItem[];
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  items: () => []
-})
+  items: () => [],
+});
 
 // Emits
 const emit = defineEmits<{
-  select: [key: string]
-  close: []
-}>()
+  select: [key: string];
+  close: [];
+}>();
 
 // Refs
-const visible = ref(false)
-const position = ref({ x: 0, y: 0 })
+const visible = ref(false);
+const position = ref({ x: 0, y: 0 });
 
 // Computed
-const menuItems = computed(() => props.items)
+const menuItems = computed(() => props.items);
 
 const menuStyle = computed(() => ({
   left: `${position.value.x}px`,
-  top: `${position.value.y}px`
-}))
+  top: `${position.value.y}px`,
+}));
 
 // 显示菜单
 function show(x: number, y: number) {
-  position.value = { x, y }
-  visible.value = true
+  position.value = { x, y };
+  visible.value = true;
 
   // 防止菜单超出屏幕
   setTimeout(() => {
-    adjustPosition()
-  }, 0)
+    adjustPosition();
+  }, 0);
 }
 
 // 隐藏菜单
 function hide() {
-  visible.value = false
-  emit('close')
+  visible.value = false;
+  emit("close");
 }
 
 // 调整位置（防止超出屏幕）
 function adjustPosition() {
-  const menu = document.querySelector('.context-menu') as HTMLElement
-  if (!menu) return
+  const menu = document.querySelector(".context-menu") as HTMLElement;
+  if (!menu) return;
 
-  const rect = menu.getBoundingClientRect()
-  const windowWidth = window.innerWidth
-  const windowHeight = window.innerHeight
+  const rect = menu.getBoundingClientRect();
+  const windowWidth = window.innerWidth;
+  const windowHeight = window.innerHeight;
 
-  let { x, y } = position.value
+  let { x, y } = position.value;
 
   // 右侧超出
   if (rect.right > windowWidth) {
-    x = windowWidth - rect.width - 10
+    x = windowWidth - rect.width - 10;
   }
 
   // 底部超出
   if (rect.bottom > windowHeight) {
-    y = windowHeight - rect.height - 10
+    y = windowHeight - rect.height - 10;
   }
 
   // 左侧超出
   if (x < 0) {
-    x = 10
+    x = 10;
   }
 
   // 顶部超出
   if (y < 0) {
-    y = 10
+    y = 10;
   }
 
-  position.value = { x, y }
+  position.value = { x, y };
 }
 
 // 处理菜单项点击
 function handleItemClick(item: ContextMenuItem) {
-  if (item.disabled || item.divider) return
+  if (item.disabled || item.divider) return;
 
-  emit('select', item.key)
-  hide()
+  emit("select", item.key);
+  hide();
 }
 
 // 监听点击外部关闭菜单
 function handleClickOutside(event: MouseEvent) {
-  const target = event.target as HTMLElement
+  const target = event.target as HTMLElement;
   // 只在左键点击时隐藏菜单，忽略右键菜单事件
-  if (visible.value && !target.closest('.context-menu') && event.button === 0) {
-    hide()
+  if (visible.value && !target.closest(".context-menu") && event.button === 0) {
+    hide();
   }
 }
 
 onMounted(() => {
-  document.addEventListener('click', handleClickOutside)
-  document.addEventListener('contextmenu', handleClickOutside)
-})
+  document.addEventListener("click", handleClickOutside);
+  document.addEventListener("contextmenu", handleClickOutside);
+});
 
 onUnmounted(() => {
-  document.removeEventListener('click', handleClickOutside)
-  document.removeEventListener('contextmenu', handleClickOutside)
-})
+  document.removeEventListener("click", handleClickOutside);
+  document.removeEventListener("contextmenu", handleClickOutside);
+});
 
 // 暴露方法
 defineExpose({
   show,
-  hide
-})
+  hide,
+});
 </script>
 
 <style>

@@ -52,6 +52,20 @@
       @clip:dblclick="onClipDblClick"
       @drop-media="onDropMedia"
     >
+      <!-- 工具栏外壳前后：透传宿主插槽 -->
+      <template #toolbar-before>
+        <slot name="toolbar-before" />
+      </template>
+      <template #toolbar-after>
+        <slot name="toolbar-after" />
+      </template>
+      <template #operations-prepend>
+        <slot name="operations-prepend" />
+      </template>
+      <template #operations-append>
+        <slot name="operations-append" />
+      </template>
+
       <template #track-control="{ track }">
         <button
           v-if="track.type === 'audio'"
@@ -76,7 +90,18 @@
         >
           <AlignStartHorizontal :size="16" />
         </button>
+        <!--
+          TODO: 宿主扩展按钮不会自动跟随 readonly 禁用，需宿主自行处理。
+          追加在静音/对齐之后
+        -->
+        <slot name="track-control" :track="track" />
       </template>
+
+      <!--
+        TODO: 暂不向 Editor 导出 context-menu-item。
+        原因：1) ContextMenu 按 item.slot 动态名渲染，与 VideoTrack #menu-item 接线不一致；
+        2) Timeline 菜单配置写死且未暴露给宿主。修好接线并暴露 track/clip-context-menu 后再透传。
+      -->
 
       <!-- 字幕 / 贴图 clip 自定义内容 -->
       <template #clip-content="{ clip }">

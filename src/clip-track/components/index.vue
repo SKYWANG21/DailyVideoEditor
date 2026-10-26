@@ -115,7 +115,10 @@
 
     <!-- 右键菜单 -->
     <ContextMenu ref="contextMenuRef" :items="contextMenuItems" @select="handleContextMenuSelect">
-      <!-- 自定义菜单项插槽 -->
+      <!--
+        TODO: ContextMenu 实际按 item.slot 动态名渲染，此处 #menu-item 仅在 item.slot==='menu-item' 时生效。
+        需统一为固定 menu-item / context-menu-item，或透传动态 slot，再对外导出。
+      -->
       <template #menu-item="slotProps">
         <slot name="context-menu-item" v-bind="slotProps" />
       </template>

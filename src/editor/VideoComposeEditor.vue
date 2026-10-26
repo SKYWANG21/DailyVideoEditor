@@ -154,7 +154,11 @@
         @drop-subtitle-asset="onTimelineDropSubtitleAsset"
         @drop-text-template="onTimelineDropTextTemplate"
         @inspect-track="onInspectTrack"
-      />
+      >
+        <template v-for="name in forwardedTimelineSlots" :key="name" #[name]="slotProps">
+          <slot :name="name" v-bind="slotProps || {}" />
+        </template>
+      </VideoComposeTimeline>
     </div>
 
     <BgmUploadModal v-model:open="uploadAudioModalOpen" :submitting="false" @uploaded="onAudioUploaded" />
@@ -198,13 +202,7 @@ import { installComposeElementPlus } from "./installComposeElementPlus";
 import { COMPOSE_ALGORITHM_BASE } from "./composeRuntime";
 import { COMPOSE_MEDIA_RESOLVER, createComposeMediaResolver } from "@/service/resolveComposeMediaUrl";
 import type { TrackTypeConfig } from "@/clip-track";
-import type {
-  BgmItem,
-  ComposeClip,
-  ComposeSegmentClipAssets,
-  ComposeSubtitleAsset,
-  VideoComposeEditorModel,
-} from "@/types/videoCompose";
+import type { BgmItem, ComposeClip, ComposeSegmentClipAssets, ComposeSubtitleAsset, VideoComposeEditorModel } from "@/types/videoCompose";
 
 const props = withDefaults(
   defineProps<{
@@ -284,20 +282,30 @@ const actionSlotNames = ["video-actions", "audio-actions", "subtitle-actions", "
 /** 侧栏「应用到全局」前的插槽，供宿主插入自定义控件 */
 const sidebarSlotNames = ["before-apply-video", "before-apply-audio", "before-apply-subtitle", "before-apply-text"] as const;
 
+/**
+ * 时间轴插槽名（透传 clip-track 已有具名 slot）。
+ * TODO: 待 clip-track ContextMenu 接线修好且 Timeline 暴露菜单配置后，再导出 context-menu-item。
+ */
+const timelineSlotNames = ["toolbar-before", "toolbar-after", "operations-prepend", "operations-append", "track-control"] as const;
+
 type ActionSlotName = (typeof actionSlotNames)[number];
 type SidebarSlotName = (typeof sidebarSlotNames)[number];
+type TimelineSlotName = (typeof timelineSlotNames)[number];
 
 /**
  * 外壳传入的插槽。
  * 类型写死，避免和模板里的动态插槽互相推断，声明生成时变成 any。
  */
-const editorSlots = useSlots() as Partial<Record<ActionSlotName | SidebarSlotName, Slot | undefined>>;
+const editorSlots = useSlots() as Partial<Record<ActionSlotName | SidebarSlotName | TimelineSlotName, Slot | undefined>>;
 
 /** 只转发外壳真正传入的分类操作插槽 */
 const forwardedActionSlots = computed((): ActionSlotName[] => actionSlotNames.filter((name) => editorSlots[name]));
 
 /** 只转发外壳真正传入的侧栏插槽 */
 const forwardedSidebarSlots = computed((): SidebarSlotName[] => sidebarSlotNames.filter((name) => editorSlots[name]));
+
+/** 只转发外壳真正传入的时间轴插槽 */
+const forwardedTimelineSlots = computed((): TimelineSlotName[] => timelineSlotNames.filter((name) => editorSlots[name]));
 
 const {
   validate,
