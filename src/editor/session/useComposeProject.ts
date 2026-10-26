@@ -6,7 +6,6 @@ import {
   isComposeClipDurationProbeable,
   probeClipDurationsWithRetry,
 } from "@/hooks/useResolveComposeClips";
-import { buildMockVideoClips, isVideoComposeMockEnabled } from "../shared/videoComposeMockClips";
 import type { ComposeEditorEmit, ComposeEditorProps, ComposeEditorState } from "./createComposeEditorState";
 import type { ComposeEditorPorts } from "./ports";
 import { tracksStructureSig } from "./trackLookup";
@@ -227,7 +226,7 @@ export function useComposeProject(
     });
   }
 
-  /** 会话启动一次建轨。Mock 用样片建主轨；非 mock 只 import tracks，空轨不建主轨 */
+  /** 会话启动一次建轨：有 tracks 则 import，空轨不建主轨 */
   async function bootstrapTimeline(): Promise<void> {
     state.playerRef.value?.pause();
     await nextTick();
@@ -237,11 +236,7 @@ export function useComposeProject(
     durationProbeSeq += 1;
     const seq = durationProbeSeq;
 
-    if (isVideoComposeMockEnabled()) {
-      const clips = buildMockVideoClips();
-      await probeClipDurationsWithRetry(clips, undefined, probeOptions);
-      state.timelineRef.value?.bootstrapMainFromClips(clips);
-    } else if (!didBootstrap) {
+    if (!didBootstrap) {
       didBootstrap = true;
       const tracks = props.modelValue.tracks;
       const hasTracks = Boolean(tracks?.some((track) => track.clips.length > 0));

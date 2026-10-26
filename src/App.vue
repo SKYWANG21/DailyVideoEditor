@@ -30,19 +30,77 @@ import { ElMessage } from "element-plus";
 import { VideoComposeEditor } from "@/editor";
 import type { ComposeCatalogUploadPayload } from "@/editor/session/createComposeEditorState";
 import VideoClipUploadModal, { type UploadedComposeClip } from "@/editor/modals/VideoClipUploadModal.vue";
-import type { TextTemplateItem } from "@/editor/shared/textTemplateCatalog";
-import {
-  buildMockSfxAssets,
-  buildMockTextTemplates,
-  buildMockVideoAssets,
-  isVideoComposeMockEnabled,
-} from "@/editor/shared/videoComposeMockClips";
+import { createTextTemplateItem, type TextTemplateItem } from "@/editor/shared/textTemplateCatalog";
 import {
   createDefaultVideoComposeEditorModel,
   type BgmItem,
   type ComposeSegmentClipAssets,
   type VideoComposeEditorModel,
 } from "@/types/videoCompose";
+/** demo 花字：仅 App 引用，不会打进 lib */
+import coolRaw from "@/assets/svg/TextTemplate/cool.svg?raw";
+import hiRaw from "@/assets/svg/TextTemplate/hi.svg?raw";
+import likeRaw from "@/assets/svg/TextTemplate/like.svg?raw";
+import lolRaw from "@/assets/svg/TextTemplate/lol.svg?raw";
+import ooopsRaw from "@/assets/svg/TextTemplate/ooops.svg?raw";
+import pleaseRaw from "@/assets/svg/TextTemplate/please.svg?raw";
+import selfieRaw from "@/assets/svg/TextTemplate/selfie.svg?raw";
+import yepRaw from "@/assets/svg/TextTemplate/yep.svg?raw";
+import yesRaw from "@/assets/svg/TextTemplate/yes.svg?raw";
+import coolUrl from "@/assets/svg/TextTemplate/cool.svg";
+import hiUrl from "@/assets/svg/TextTemplate/hi.svg";
+import likeUrl from "@/assets/svg/TextTemplate/like.svg";
+import lolUrl from "@/assets/svg/TextTemplate/lol.svg";
+import ooopsUrl from "@/assets/svg/TextTemplate/ooops.svg";
+import pleaseUrl from "@/assets/svg/TextTemplate/please.svg";
+import selfieUrl from "@/assets/svg/TextTemplate/selfie.svg";
+import yepUrl from "@/assets/svg/TextTemplate/yep.svg";
+import yesUrl from "@/assets/svg/TextTemplate/yes.svg";
+
+/** demo 内置花字源（id + SVG 原文 + 资源地址） */
+const DEMO_TEXT_TEMPLATE_FILES: Array<{ id: string; raw: string; url: string }> = [
+  { id: "cool", raw: coolRaw, url: coolUrl },
+  { id: "hi", raw: hiRaw, url: hiUrl },
+  { id: "like", raw: likeRaw, url: likeUrl },
+  { id: "lol", raw: lolRaw, url: lolUrl },
+  { id: "ooops", raw: ooopsRaw, url: ooopsUrl },
+  { id: "please", raw: pleaseRaw, url: pleaseUrl },
+  { id: "selfie", raw: selfieRaw, url: selfieUrl },
+  { id: "yep", raw: yepRaw, url: yepUrl },
+  { id: "yes", raw: yesRaw, url: yesUrl },
+];
+
+/**
+ * demo 音效：仅 App 引用 `@/assets/audio`，Vite 打包进 demo，不进 lib。
+ * 展示顺序固定；url 由 glob 解析为带 hash 的资源地址。
+ */
+const DEMO_SFX_NAMES: string[] = [
+  "系统警告",
+  "牛叫",
+  "闪亮登场",
+  "突然加速",
+  "综艺尴尬背景音",
+  "鼠标点击声",
+  "疑问",
+  "警告音",
+  "颤抖",
+  "魔法音效",
+  "滴",
+];
+
+/** path → url；文件名（无扩展名）即展示名 */
+const DEMO_SFX_URL_BY_NAME: Record<string, string> = Object.fromEntries(
+  Object.entries(
+    import.meta.glob<string>("@/assets/audio/*.mp3", {
+      eager: true,
+      query: "?url",
+      import: "default",
+    }),
+  ).map(([path, url]) => {
+    const fileName = path.split("/").pop() ?? "";
+    return [fileName.replace(/\.mp3$/i, ""), url];
+  }),
+);
 
 /** 工程状态：轨道在 model.tracks；侧栏素材不进 model */
 const model = ref<VideoComposeEditorModel>(
@@ -52,13 +110,18 @@ const model = ref<VideoComposeEditorModel>(
   }),
 );
 
-const mockOn = isVideoComposeMockEnabled();
-
 /** 侧栏四类素材种子（上传后 Editor 内部维护；emit 带回全量时可回写） */
-const videoAssets = ref<ComposeSegmentClipAssets[]>(mockOn ? buildMockVideoAssets() : []);
+const videoAssets = ref<ComposeSegmentClipAssets[]>([]);
 const audioAssets = ref<BgmItem[]>([]);
-const sfxAssets = ref<BgmItem[]>(mockOn ? buildMockSfxAssets() : []);
-const textTemplates = ref<TextTemplateItem[]>(mockOn ? buildMockTextTemplates() : []);
+const sfxAssets = ref<BgmItem[]>(
+  DEMO_SFX_NAMES.flatMap((name) => {
+    const url = DEMO_SFX_URL_BY_NAME[name];
+    return url ? [{ name, url, durationSec: 0 }] : [];
+  }),
+);
+const textTemplates = ref<TextTemplateItem[]>(
+  DEMO_TEXT_TEMPLATE_FILES.map((file) => createTextTemplateItem(file.id, file.id, file.raw, file.url)),
+);
 
 const uploadClipOpen = ref(false);
 

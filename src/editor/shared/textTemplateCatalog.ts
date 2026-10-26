@@ -95,7 +95,7 @@ export function loadTextTemplateSvg(sourceUrl: string): Promise<string> {
   return Promise.resolve(getCachedTextTemplateSvg(sourceUrl));
 }
 
-/** 解析 SVG 并写入原文缓存，供拖入贴图轨 / 宿主 mock 组装 */
+/** 解析 SVG 并写入原文缓存，供拖入贴图轨 / 宿主组装 */
 export function createTextTemplateItem(id: string, name: string, raw: string, url: string): TextTemplateItem {
   const defaults = parseFirstTextDefaults(raw);
   const viewBox = parseViewBoxSize(raw);
@@ -139,7 +139,7 @@ export async function appendUploadedTextTemplate(file: File): Promise<TextTempla
   return item;
 }
 
-/** 返回当前会话花字目录（不再自动灌 mock；mock 由宿主经 props.textTemplates 传入） */
+/** 返回当前会话花字目录（宿主经 props.textTemplates 注入） */
 export async function loadTextTemplateCatalog(): Promise<TextTemplateItem[]> {
   return textTemplateCatalog.value;
 }
