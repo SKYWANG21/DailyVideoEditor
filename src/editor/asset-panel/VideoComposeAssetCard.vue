@@ -86,7 +86,7 @@ const cardClass = computed(() => [
   isSubtitle.value ? "items-center justify-center p-1.5" : isAudio.value ? "" : "items-end p-1.5",
   canDrag.value ? "cursor-grab active:cursor-grabbing" : isAudio.value ? "cursor-pointer" : "",
   dragging.value ? "opacity-60" : "",
-  props.playing ? "ring-2 ring-[var(--compose-accent)] ring-inset" : "",
+  props.playing ? "compose-asset-card--playing" : "",
 ]);
 
 /** 字幕预览字色 / 粗斜体；默认卡不注入内联样式 */
@@ -146,3 +146,29 @@ function onClick(): void {
   emit("preview");
 }
 </script>
+
+<style scoped lang="scss">
+/* 试听中：inset 边框明暗闪烁，不挤占 72px 布局 */
+.compose-asset-card--playing {
+  box-shadow: inset 0 0 0 2px var(--compose-accent);
+  animation: compose-asset-card-pulse 1s ease-in-out infinite;
+}
+
+@keyframes compose-asset-card-pulse {
+  0%,
+  100% {
+    box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--compose-accent) 35%, transparent);
+  }
+
+  50% {
+    box-shadow: inset 0 0 0 2px var(--compose-accent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .compose-asset-card--playing {
+    animation: none;
+    box-shadow: inset 0 0 0 2px var(--compose-accent);
+  }
+}
+</style>
