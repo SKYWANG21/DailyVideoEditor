@@ -25,12 +25,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from "vue";
+import { onMounted, ref } from "vue";
 import { ElMessage } from "element-plus";
 import { VideoComposeEditor } from "@/editor";
 import type { ComposeCatalogUploadPayload } from "@/editor/session/createComposeEditorState";
 import VideoClipUploadModal, { type UploadedComposeClip } from "@/editor/modals/VideoClipUploadModal.vue";
 import { createTextTemplateItem, type TextTemplateItem } from "@/editor/shared/textTemplateCatalog";
+import {
+  COMPOSE_CLIP_PLACEHOLDER_DURATION_SEC,
+  isComposeClipDurationProbeable,
+  probeAudioDuration,
+} from "@/hooks/useResolveComposeClips";
 import {
   createDefaultVideoComposeEditorModel,
   type BgmItem,
@@ -124,6 +129,25 @@ const textTemplates = ref<TextTemplateItem[]>(
 );
 
 const uploadClipOpen = ref(false);
+
+/** 批量探测 demo 音效时长并写回侧栏种子 */
+async function probeDemoSfxDurations(): Promise<void> {
+  const list = sfxAssets.value;
+  if (!list.length) return;
+  const next = await Promise.all(
+    list.map(async (item) => {
+      if (!item.url?.trim() || !isComposeClipDurationProbeable(item.durationSec)) return item;
+      const durationSec = await probeAudioDuration(item.url);
+      if (durationSec <= COMPOSE_CLIP_PLACEHOLDER_DURATION_SEC) return item;
+      return { ...item, durationSec };
+    }),
+  );
+  sfxAssets.value = next;
+}
+
+onMounted(() => {
+  void probeDemoSfxDurations();
+});
 
 /** 内置上传弹窗结果写入 videoAssets 种子 */
 function onVideoUploaded(clips: UploadedComposeClip[]): void {

@@ -55,8 +55,12 @@
             <VideoComposeAssetCard
               v-for="(item, index) in audioAssets"
               :key="`${item.url}-${index}`"
+              card-type="audio"
               :label="item.name || '音频'"
+              :duration-sec="item.durationSec"
+              :playing="previewUrl === item.url"
               :readonly="readonly"
+              @preview="onAudioPreview(item)"
               @drag-start="onAudioDragStart($event, item)"
             />
           </div>
@@ -74,7 +78,11 @@
             <VideoComposeAssetCard
               v-for="item in subtitleAssets"
               :key="item.id"
+              card-type="subtitle"
               :label="item.text || '字幕'"
+              :text-color="item.color"
+              :text-bold="item.bold"
+              :text-italic="item.italic"
               :readonly="readonly"
               @drag-start="onSubtitleDragStart($event, item)"
             />
@@ -106,8 +114,12 @@
             <VideoComposeAssetCard
               v-for="(item, index) in sfxAssets"
               :key="`${item.url}-${index}`"
+              card-type="audio"
               :label="item.name || '音效'"
+              :duration-sec="item.durationSec"
+              :playing="previewUrl === item.url"
               :readonly="readonly"
+              @preview="onAudioPreview(item)"
               @drag-start="onAudioDragStart($event, item)"
             />
           </div>
@@ -212,6 +224,46 @@ function onSubtitleDragStart(event: DragEvent, item: ComposeSubtitleAsset): void
   writeAssetDrag(event, COMPOSE_SUBTITLE_ASSET_DRAG_MIME, item);
 }
 
+/** 当前试听中的音频 URL；空表示未在播 */
+const previewUrl = ref("");
+/** 侧栏共用一个 Audio，同时只试听一条 */
+let previewAudio: HTMLAudioElement | null = null;
+
+/** 停止试听并清空高亮 */
+function stopAudioPreview(): void {
+  if (previewAudio) {
+    previewAudio.pause();
+    previewAudio.removeAttribute("src");
+    previewAudio.load();
+  }
+  previewUrl.value = "";
+}
+
+/** 点击音频 / 音效卡试听：同 URL 再点停止，换卡先停后播 */
+function onAudioPreview(item: BgmItem): void {
+  const url = item.url?.trim();
+  if (!url) return;
+  if (previewUrl.value === url) {
+    stopAudioPreview();
+    return;
+  }
+  if (!previewAudio) {
+    previewAudio = new Audio();
+    previewAudio.addEventListener("ended", () => {
+      previewUrl.value = "";
+    });
+    previewAudio.addEventListener("error", () => {
+      previewUrl.value = "";
+    });
+  }
+  previewAudio.pause();
+  previewAudio.src = url;
+  previewUrl.value = url;
+  void previewAudio.play().catch(() => {
+    previewUrl.value = "";
+  });
+}
+
 /** 花字 SVG 选择框。宿主接管上传时不使用 */
 const fancyFileRef = ref<HTMLInputElement | null>(null);
 
@@ -278,6 +330,8 @@ onMounted(() => {
 onBeforeUnmount(() => {
   paneObserver?.disconnect();
   paneObserver = null;
+  stopAudioPreview();
+  previewAudio = null;
 });
 </script>
 
