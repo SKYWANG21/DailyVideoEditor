@@ -1,11 +1,11 @@
 {
   "name": "daily-video-editor",
   "private": false,
-  "version": "0.0.5",
+  "version": "0.0.6",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vue-tsc --noEmit && vite build --mode lib",
+    "build": "vue-tsc --noEmit && node scripts/bump-version.mjs && vite build --mode lib",
     "build:demo": "vue-tsc --noEmit && vite build",
     "typecheck": "vue-tsc --noEmit"
   },

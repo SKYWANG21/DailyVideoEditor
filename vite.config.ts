@@ -37,6 +37,88 @@ function emitStyleCss(): Plugin {
   };
 }
 
+/**
+ * lib 构建时仅剥离项目源码中的 console.log（跳过 node_modules），保留 warn/error。
+ * 不改源文件、不开 minify、不处理依赖库。
+ */
+function dropConsoleLog(): Plugin {
+  const callRe = /\bconsole\.log\s*\(/g;
+
+  function stripConsoleLog(code: string): string {
+    let out = "";
+    let last = 0;
+    callRe.lastIndex = 0;
+    let match = callRe.exec(code);
+    while (match) {
+      const start = match.index;
+      let i = callRe.lastIndex;
+      let depth = 1;
+      let inSingle = false;
+      let inDouble = false;
+      let inTemplate = false;
+      let escaped = false;
+      for (; i < code.length && depth > 0; i += 1) {
+        const ch = code[i];
+        if (escaped) {
+          escaped = false;
+          continue;
+        }
+        if (ch === "\\" && (inSingle || inDouble || inTemplate)) {
+          escaped = true;
+          continue;
+        }
+        if (!inDouble && !inTemplate && ch === "'" && !inSingle) {
+          inSingle = true;
+          continue;
+        }
+        if (inSingle) {
+          if (ch === "'") inSingle = false;
+          continue;
+        }
+        if (!inSingle && !inTemplate && ch === '"' && !inDouble) {
+          inDouble = true;
+          continue;
+        }
+        if (inDouble) {
+          if (ch === '"') inDouble = false;
+          continue;
+        }
+        if (!inSingle && !inDouble && ch === "`" && !inTemplate) {
+          inTemplate = true;
+          continue;
+        }
+        if (inTemplate) {
+          if (ch === "`") inTemplate = false;
+          continue;
+        }
+        if (ch === "(") depth += 1;
+        else if (ch === ")") depth -= 1;
+      }
+      let end = i;
+      while (end < code.length && /\s/.test(code[end])) end += 1;
+      if (code[end] === ";") end += 1;
+      out += code.slice(last, start);
+      last = end;
+      callRe.lastIndex = end;
+      match = callRe.exec(code);
+    }
+    out += code.slice(last);
+    return out;
+  }
+
+  return {
+    name: "drop-console-log",
+    apply: "build",
+    enforce: "post",
+    transform(code, id) {
+      if (id.includes("node_modules")) return null;
+      if (!/\.(vue|[cm]?[jt]sx?)($|\?)/.test(id)) return null;
+      if (!/\bconsole\.log\s*\(/.test(code)) return null;
+      return { code: stripConsoleLog(code), map: null };
+    },
+  };
+}
+
 export default defineConfig(({ mode }) => {
   const lib = mode === "lib";
   return {
@@ -45,6 +127,7 @@ export default defineConfig(({ mode }) => {
       tailwindcss(),
       ...(lib
         ? [
+            dropConsoleLog(),
             emitStyleCss(),
             copyAlgorithmAssets(),
             dts({
