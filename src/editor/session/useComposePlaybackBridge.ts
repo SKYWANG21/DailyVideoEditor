@@ -87,7 +87,7 @@ export function useComposePlaybackBridge(state: ComposeEditorState, ports: Compo
     return total > 0 && timeSec >= total - 0.04;
   }
 
-  /** 时间线播放 → Player（以时间轴游标为准；play 内部按需 seek，避免连 seek 两次） */
+  /** 时间线播放 → Player：先按时间轴游标对齐，再 play（避免轴已跳转但 Player 仍在旧点） */
   function onTimelinePlay(): void {
     if (clock.suppressTimelinePlaybackEmit) return;
 
@@ -122,10 +122,13 @@ export function useComposePlaybackBridge(state: ComposeEditorState, ports: Compo
       }
       void (async () => {
         try {
+          // 退出素材预览用 resync；其余一律按游标 seek，再 play
           if (exitedPreview) {
             await state.playerRef.value?.resync?.(timeSec);
-            if (seq !== clock.playSeq) return;
+          } else {
+            await state.playerRef.value?.seek?.(timeSec);
           }
+          if (seq !== clock.playSeq) return;
           await state.playerRef.value?.play?.();
           if (seq !== clock.playSeq) return;
           syncTimelinePlaybackUi(true);
@@ -186,11 +189,20 @@ export function useComposePlaybackBridge(state: ComposeEditorState, ports: Compo
     else state.timelineRef.value?.play?.();
   }
 
-  /** 预览播放条跳转。钳制到主轨总时长（与播放条 durationSec 一致） */
+  /**
+   * 预览播放条跳转（转到开始/结束）。
+   * 直接 seek Player，再用 suppress 同步时间轴，避免被播放回写的 suppress 吞掉。
+   */
   function onPreviewSeek(timeSec: number): void {
     const duration = state.previewDurationSec.value;
     const next = Math.max(0, Math.min(timeSec, duration > 0 ? duration : 0));
+    state.globalTime.value = next;
+    void state.playerRef.value?.seek?.(next);
+    clock.suppressTimelineSeekToPlayer = true;
     state.timelineRef.value?.seekTo?.(next);
+    requestAnimationFrame(() => {
+      clock.suppressTimelineSeekToPlayer = false;
+    });
   }
 
   /**
@@ -205,8 +217,15 @@ export function useComposePlaybackBridge(state: ComposeEditorState, ports: Compo
 
     if (!playing) {
       if (clock.playInFlight) return;
-      if (clock.playerDrivingTimeline) {
+      // 播放刚结束：把最终游标写回时间轴（此前暂停分支直接 return，光标会停在倒数几帧）
+      const wasDriving = clock.playerDrivingTimeline;
+      if (wasDriving) {
         clock.playerDrivingTimeline = false;
+        clock.suppressTimelineSeekToPlayer = true;
+        state.timelineRef.value?.seekTo?.(timeSec);
+        requestAnimationFrame(() => {
+          clock.suppressTimelineSeekToPlayer = false;
+        });
       }
       syncTimelinePlaybackUi(false);
       return;

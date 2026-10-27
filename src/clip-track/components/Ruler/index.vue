@@ -124,19 +124,26 @@ const marks = computed(() => {
   return result
 })
 
-// 游标在内容中的位置（用于拖拽计算）
+// 游标在时间轴内容中的像素位置（仅由 currentTime / 缩放决定，不因拖滚动条而改时间）
 const cursorPosition = computed(() => {
   return playbackStore.currentTime * actualPixelsPerSecond.value
 })
 
-// 游标显示位置（考虑滚动和控制栏偏移）
+/**
+ * 视口内绘制位置：内容坐标减去 scrollLeft，使光标锚定在时间点上。
+ * 必须依赖 props.scrollLeft（与轨道同步），拖动滚动条时随内容滚出视口，而不是粘在视口上。
+ */
 const cursorDisplayPosition = computed(() => {
   return props.trackControlWidth + cursorPosition.value - (props.scrollLeft || 0)
 })
 
-// 游标是否可见（不在轨道控制栏区域）
+// 游标是否落在刻度可视区内（随内容滚出左右边界后隐藏）
 const cursorVisible = computed(() => {
-  return cursorDisplayPosition.value >= props.trackControlWidth
+  const viewW = props.width || 0
+  const x = cursorDisplayPosition.value
+  if (x < props.trackControlWidth) return false
+  if (viewW > 0 && x > props.trackControlWidth + viewW) return false
+  return true
 })
 
 // 格式化刻度时间
@@ -311,27 +318,10 @@ onUnmounted(() => {
   }
 })
 
-// 监听外部滚动变化，同步到时间线
+// 监听外部滚动变化，同步到时间线（仅同步刻度滚动，不改 currentTime）
 watch(() => props.scrollLeft, (newScrollLeft) => {
   if (rulerWrapperRef.value && rulerWrapperRef.value.scrollLeft !== newScrollLeft) {
     rulerWrapperRef.value.scrollLeft = newScrollLeft
-  }
-})
-
-// 监听游标位置，自动滚动
-watch(cursorPosition, (newPos) => {
-  // 拖拽时不自动滚动，由拖拽逻辑控制
-  if (isDraggingCursor.value) return
-  if (!rulerWrapperRef.value) return
-
-  const containerWidth = rulerWrapperRef.value.clientWidth
-  const currentScrollLeft = rulerWrapperRef.value.scrollLeft
-
-  // 如果游标超出可视区域，自动滚动
-  if (newPos < currentScrollLeft) {
-    rulerWrapperRef.value.scrollLeft = newPos
-  } else if (newPos > currentScrollLeft + containerWidth) {
-    rulerWrapperRef.value.scrollLeft = newPos - containerWidth + 50
   }
 })
 </script>
