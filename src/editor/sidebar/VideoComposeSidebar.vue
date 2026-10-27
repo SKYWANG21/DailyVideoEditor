@@ -87,13 +87,17 @@
               <span class="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-[12px] text-[var(--compose-fg-3)]">px</span>
             </div>
             <div class="flex items-center gap-2">
-              <div class="relative h-10 w-10 shrink-0 overflow-hidden rounded-[8px] bg-[var(--compose-surface-2)]">
-                <input
-                  type="color"
-                  :value="subtitleStyle.color"
-                  class="absolute -inset-2.5 h-[60px] w-[60px] cursor-pointer border-0 p-0"
-                  @input="onColorInput"
-                />
+              <div
+                class="h-10 w-10 shrink-0 rounded-[4px] border border-[var(--el-border-color,#dcdfe6)] bg-[var(--compose-surface)] p-1"
+              >
+                <div class="relative h-full w-full overflow-hidden rounded-[2px]">
+                  <input
+                    type="color"
+                    :value="subtitleStyle.color"
+                    class="absolute -inset-2.5 h-[60px] w-[60px] cursor-pointer border-0 p-0"
+                    @input="onColorInput"
+                  />
+                </div>
               </div>
               <input
                 :value="subtitleStyle.color"

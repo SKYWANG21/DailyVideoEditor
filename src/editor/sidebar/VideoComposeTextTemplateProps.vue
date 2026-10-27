@@ -22,13 +22,16 @@
         <span class="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-[12px] text-[var(--compose-fg-3)]">px</span>
       </div>
       <div class="flex items-center gap-2">
-        <el-color-picker
-          :model-value="pickerColor"
-          color-format="hex"
-          size="large"
-          class="text-template-color-picker shrink-0"
-          @update:model-value="onPickerColor"
-        />
+        <div class="h-10 w-10 shrink-0 rounded-[4px] border border-[var(--el-border-color,#dcdfe6)] bg-[var(--compose-surface)] p-1">
+          <div class="relative h-full w-full overflow-hidden rounded-[2px]">
+            <input
+              type="color"
+              :value="swatchColor"
+              class="absolute -inset-2.5 h-[60px] w-[60px] cursor-pointer border-0 p-0"
+              @input="onColorInput"
+            />
+          </div>
+        </div>
         <input
           :value="colorDraft"
           maxlength="7"
@@ -44,6 +47,9 @@
 import { computed, ref, watch } from "vue";
 import { isCssHexColor } from "../shared/textTemplateCatalog";
 
+/** 原生 color 在非 hex（空串 / 渐变）时的占位色 */
+const SWATCH_FALLBACK = "#000000";
+
 const props = defineProps<{
   /** 贴图文案 */
   text: string;
@@ -57,8 +63,8 @@ const emit = defineEmits<{
   change: [patch: { text?: string; fontSize?: number; color?: string }];
 }>();
 
-/** 色板只吃 hex；`url(#id)` 等传 null，触发器留空 */
-const pickerColor = computed((): string | null => (isCssHexColor(props.color) ? props.color.trim() : null));
+/** 色块展示值；非 hex 时用占位，避免原生 color 失效 */
+const swatchColor = computed(() => (isCssHexColor(props.color) ? props.color.trim() : SWATCH_FALLBACK));
 
 /** hex 文本框草稿：非 hex 时空白，输入中未成形的字符不立刻写回 clip */
 const colorDraft = ref("");
@@ -80,11 +86,12 @@ function onFontSizeInput(e: Event): void {
   emit("change", { fontSize });
 }
 
-/** 清空为 ""，预览不覆盖模板渐变 fill */
-function onPickerColor(val: string | null): void {
-  emit("change", { color: val ?? "" });
+/** 取色器写回贴图颜色 */
+function onColorInput(e: Event): void {
+  emit("change", { color: (e.target as HTMLInputElement).value });
 }
 
+/** 清空为 ""，预览不覆盖模板渐变 fill；合法 hex 才写回 */
 function onColorTextInput(e: Event): void {
   const raw = (e.target as HTMLInputElement).value;
   colorDraft.value = raw;
@@ -94,14 +101,3 @@ function onColorTextInput(e: Event): void {
   }
 }
 </script>
-
-<style scoped lang="scss">
-.text-template-color-picker {
-  :deep(.el-color-picker__trigger) {
-    width: 40px;
-    height: 40px;
-    padding: 4px;
-    border-radius: var(--radius-sm, 4px);
-  }
-}
-</style>

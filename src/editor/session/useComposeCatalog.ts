@@ -209,9 +209,14 @@ export function useComposeCatalog(
     action(false);
   }
 
-  /** 退出素材库预览，恢复时间轴同步播放 */
+  /** 退出素材库预览，回到时间轴游标且不自动播放 */
   function clearCatalogPreview(): void {
     if (!exitCatalogPreviewIfNeeded()) return;
+    state.clock.playSeq += 1;
+    state.clock.playInFlight = false;
+    state.clock.playerDrivingTimeline = false;
+    state.playerRef.value?.pause?.();
+    ports.syncTimelinePlaybackUi(false);
     const timeSec = state.timelineRef.value?.getCurrentTime?.() ?? state.globalTime.value;
     void nextTick(() => {
       void state.playerRef.value?.resync?.(timeSec);

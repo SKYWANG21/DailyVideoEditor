@@ -186,9 +186,9 @@ export function useComposePlaybackBridge(state: ComposeEditorState, ports: Compo
     else state.timelineRef.value?.play?.();
   }
 
-  /** 预览播放条跳转。时间轴 seek 会再驱动预览 */
+  /** 预览播放条跳转。钳制到主轨总时长（与播放条 durationSec 一致） */
   function onPreviewSeek(timeSec: number): void {
-    const duration = state.timelineRef.value?.getDuration?.() ?? state.previewDurationSec.value;
+    const duration = state.previewDurationSec.value;
     const next = Math.max(0, Math.min(timeSec, duration > 0 ? duration : 0));
     state.timelineRef.value?.seekTo?.(next);
   }

@@ -34,9 +34,26 @@ export function useComposeProject(
   /** 时长探测与预览共用同一套跨域解析 */
   const probeOptions: ComposeProbeOptions = { resolve: (url) => mediaResolver.resolve(url) };
 
-  /** 把时间轴总时长同步到预览播放条 */
+  /**
+   * 预览播放条总时长：以主视频轨终点为准。
+   * 不用时间轴 getDuration（全轨最长），避免音轨/字幕更长时显示偏大。
+   */
   function syncPreviewDuration(): void {
-    state.previewDurationSec.value = Math.max(0, state.timelineRef.value?.getDuration?.() ?? 0);
+    const clips = state.derivedMainClips.value;
+    if (!clips.length) {
+      state.previewDurationSec.value = 0;
+      return;
+    }
+    let maxEnd = 0;
+    let hasAbs = false;
+    for (const clip of clips) {
+      if (clip.endTime != null) {
+        hasAbs = true;
+        maxEnd = Math.max(maxEnd, clip.endTime);
+      }
+    }
+    const mainSec = hasAbs ? maxEnd : clips.reduce((sum, clip) => sum + (clip.durationSec || 0), 0);
+    state.previewDurationSec.value = Math.max(0, mainSec);
   }
 
   /** 主轨布局签名。音量、美颜不进签名，避免拖滑块时重同步预览 */
