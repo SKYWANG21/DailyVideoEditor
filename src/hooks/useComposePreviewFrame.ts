@@ -186,6 +186,8 @@ export function useComposePreviewFrame(options: UseComposePreviewFrameOptions) {
     const clipId = clip.id;
     const rawUrl = clip.url;
     const next = list[index + 1];
+    // 负缓存命中：跳过本帧 resolve，减少无用 async
+    if (mediaResolver.isFailed(rawUrl)) return;
     void (async () => {
       let url: string;
       try {
@@ -204,6 +206,7 @@ export function useComposePreviewFrame(options: UseComposePreviewFrameOptions) {
         algorithmBaseUrl: algorithmBase.value,
       });
       if (!next?.url || next.id === prefetchedId) return;
+      if (mediaResolver.isFailed(next.url)) return;
       prefetchedId = next.id;
       try {
         const nextUrl = await mediaResolver.resolve(next.url);

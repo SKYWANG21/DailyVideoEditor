@@ -581,6 +581,8 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
     const clip = clips.value[clipIdx];
     const standby = standbyVideoEl.value;
     if (!clip?.url || !standby) return false;
+    // 负缓存命中：本会话不再重试，避免 RAF 每帧 resolve
+    if (mediaResolver.isFailed(clip.url)) return false;
     if (standbyReadyIdx === clipIdx && urlMatches(standby, clip.url)) return true;
     if (preparingIdx === clipIdx) return standbyReadyIdx === clipIdx;
 
@@ -589,6 +591,8 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
     standby.muted = true;
     try {
       const srcChanged = await applyVideoElementSrc(standby, clip.url);
+      // 解析失败（含首次写入负缓存）：勿空等 metadata
+      if (mediaResolver.isFailed(clip.url)) return false;
       if (srcChanged || standby.readyState < HTMLMediaElement.HAVE_METADATA) {
         await waitForMetadata(standby);
       }
@@ -663,11 +667,15 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
     const v = activeVideoEl.value;
     const clip = clips.value[idx];
     if (!v || !clip) return;
+    // 负缓存命中：跳过换源，避免反复抛错
+    if (clip.url && mediaResolver.isFailed(clip.url)) return;
     exitGap();
     bindVideoEvents(v);
     suppressMediaEvents = true;
     try {
       const srcChanged = await applyVideoElementSrc(v, clip.url);
+      // 解析失败（含首次写入负缓存）：勿空等 metadata
+      if (clip.url && mediaResolver.isFailed(clip.url)) return;
       if (srcChanged || v.readyState < HTMLMediaElement.HAVE_METADATA) {
         await waitForMetadata(v);
       }

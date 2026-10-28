@@ -10,6 +10,8 @@ export const COMPOSE_MEDIA_RESOLVER: InjectionKey<ComposeMediaResolver> = Symbol
 export interface ComposeMediaResolver {
   /** 同源、blob、data，或已经解析过的地址。跨域且未完成时返回 null */
   peek: (url: string) => string | null;
+  /** 该 URL 是否已在本会话判定解析失败（负缓存命中） */
+  isFailed: (url: string) => boolean;
   /** 解析地址。跨域默认拉成 blob；失败抛出说明 */
   resolve: (url: string) => Promise<string>;
   /** 释放本次会话创建的 blob URL */
@@ -28,9 +30,12 @@ export interface CreateComposeMediaResolverOptions {
 /**
  * 创建会话级媒体解析器。
  * blob / data / 同源地址原样返回；跨域先走宿主 resolve，否则 fetch 成 blob。
+ * 失败写入负缓存，本会话内不再重复请求，直至 revokeAll。
  */
 export function createComposeMediaResolver(options: CreateComposeMediaResolverOptions = {}): ComposeMediaResolver {
   const cache = new Map<string, string>();
+  /** 失败负缓存：原始 URL → 错误文案 */
+  const failed = new Map<string, string>();
   const inflight = new Map<string, Promise<string>>();
   const ownedBlobs: string[] = [];
   const reported = new Set<string>();
@@ -42,16 +47,26 @@ export function createComposeMediaResolver(options: CreateComposeMediaResolverOp
     return cache.get(trimmed) ?? null;
   }
 
+  /** 跨域地址是否已负缓存为失败 */
+  function isFailed(url: string): boolean {
+    const trimmed = url.trim();
+    if (!trimmed || isPassthroughMediaUrl(trimmed)) return false;
+    return failed.has(trimmed);
+  }
+
   async function resolve(url: string): Promise<string> {
     const trimmed = url.trim();
     if (!trimmed || isPassthroughMediaUrl(trimmed)) return trimmed;
     const cached = cache.get(trimmed);
     if (cached) return cached;
+    const failedMessage = failed.get(trimmed);
+    if (failedMessage) throw new Error(failedMessage);
     const pending = inflight.get(trimmed);
     if (pending) return pending;
 
     const task = loadCrossOrigin(trimmed, options, ownedBlobs).catch((error: unknown) => {
       const message = error instanceof Error && error.message ? error.message : mediaCorsMessage(trimmed);
+      failed.set(trimmed, message);
       if (!reported.has(trimmed)) {
         reported.add(trimmed);
         options.onError?.(message);
@@ -74,10 +89,12 @@ export function createComposeMediaResolver(options: CreateComposeMediaResolverOp
     }
     ownedBlobs.length = 0;
     cache.clear();
+    failed.clear();
     inflight.clear();
+    reported.clear();
   }
 
-  return { peek, resolve, revokeAll };
+  return { peek, isFailed, resolve, revokeAll };
 }
 
 /** 元素当前 src 是否已经是目标地址（含相对路径补全） */
@@ -111,7 +128,14 @@ export async function assignResolvedMediaSrc(
   url: string,
   resolver: ComposeMediaResolver,
 ): Promise<boolean> {
-  const resolved = await resolver.resolve(url);
+  if (resolver.isFailed(url)) return false;
+  let resolved: string;
+  try {
+    resolved = await resolver.resolve(url);
+  } catch {
+    // resolve 已写入负缓存并触发 onError；此处不再向上抛
+    return false;
+  }
   if (!resolved) return false;
   applyMediaCrossOrigin(el, resolved);
   const changed = !mediaElementUsesUrl(el, resolved);
@@ -137,6 +161,16 @@ export function mediaCorsMessage(url: string): string {
   return `媒体无法跨域读取（${url}）。请为资源开启 CORS，或传入 resolveMediaUrl 走同源代理。`;
 }
 
+/** HTTP 非 2xx 时给界面的说明 */
+export function mediaHttpErrorMessage(url: string, status: number): string {
+  return `媒体加载失败（HTTP ${status}）：${url}`;
+}
+
+/** 宿主自定义解析返回空地址时的说明 */
+export function mediaResolveEmptyMessage(url: string): string {
+  return `媒体地址解析失败（${url}）。请检查 resolveMediaUrl 返回值。`;
+}
+
 async function loadCrossOrigin(
   url: string,
   options: CreateComposeMediaResolverOptions,
@@ -145,7 +179,7 @@ async function loadCrossOrigin(
   const custom = options.getResolve?.() ?? options.resolve;
   if (custom) {
     const next = (await custom(url)).trim();
-    if (!next) throw new Error(mediaCorsMessage(url));
+    if (!next) throw new Error(mediaResolveEmptyMessage(url));
     return next;
   }
   return fetchAsBlobUrl(url, ownedBlobs);
@@ -158,7 +192,7 @@ async function fetchAsBlobUrl(url: string, ownedBlobs: string[]): Promise<string
   } catch {
     throw new Error(mediaCorsMessage(url));
   }
-  if (!response.ok) throw new Error(mediaCorsMessage(url));
+  if (!response.ok) throw new Error(mediaHttpErrorMessage(url, response.status));
   const blobUrl = URL.createObjectURL(await response.blob());
   ownedBlobs.push(blobUrl);
   return blobUrl;

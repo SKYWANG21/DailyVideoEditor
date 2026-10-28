@@ -162,6 +162,11 @@ export function createPreviewAudioMixer(resolver: ComposeMediaResolver): Preview
 
   /** 同步能命中则立刻换 src；跨域则后台解析，避免每帧重复 fetch */
   function assignAudioSrc(el: HTMLMediaElement, url: string): void {
+    // 负缓存命中：本会话不再 resolve，避免 RAF sync 狂刷
+    if (resolver.isFailed(url)) {
+      pendingSrc.delete(el);
+      return;
+    }
     const peeked = resolver.peek(url);
     if (peeked) {
       pendingSrc.delete(el);
@@ -171,14 +176,18 @@ export function createPreviewAudioMixer(resolver: ComposeMediaResolver): Preview
     }
     if (pendingSrc.get(el) === url) return;
     pendingSrc.set(el, url);
-    void resolver.resolve(url).then((resolved) => {
-      if (pendingSrc.get(el) !== url) return;
-      pendingSrc.delete(el);
-      applyMediaCrossOrigin(el, resolved);
-      if (!mediaElementUsesUrl(el, resolved)) el.src = resolved;
-    }).catch(() => {
-      if (pendingSrc.get(el) === url) pendingSrc.delete(el);
-    });
+    void resolver
+      .resolve(url)
+      .then((resolved) => {
+        if (pendingSrc.get(el) !== url) return;
+        pendingSrc.delete(el);
+        applyMediaCrossOrigin(el, resolved);
+        if (!mediaElementUsesUrl(el, resolved)) el.src = resolved;
+      })
+      .catch(() => {
+        // 失败已进 resolver 负缓存；清 pending 后由 isFailed 短路后续帧
+        if (pendingSrc.get(el) === url) pendingSrc.delete(el);
+      });
   }
 
   function ensureClipAudio(clip: PreviewAudioClip): HTMLAudioElement {

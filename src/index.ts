@@ -29,6 +29,7 @@ export {
   createComposeMediaResolver,
   isPassthroughMediaUrl,
   mediaCorsMessage,
+  mediaHttpErrorMessage,
   type ComposeMediaResolver,
   type ResolveMediaUrl,
 } from "./service/resolveComposeMediaUrl";
