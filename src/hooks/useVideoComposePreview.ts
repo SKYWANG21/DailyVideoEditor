@@ -126,8 +126,15 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
     return list.reduce((sum, c) => sum + (c.durationSec || 0), 0);
   }
 
-  /** 预览时间轴总长：取视频与音频轨并集，支持无视频纯音轨预览 */
-  const totalDurationSec = computed(() => Math.max(maxVideoTimelineEndSec(), maxAudioTimelineEndSec()));
+  /**
+   * 预览播放总长：有主视频轨时以主轨终点为准（与播放条 durationSec / previewDurationSec 对齐）；
+   * 无视频的纯音轨预览才用音轨终点。
+   */
+  const totalDurationSec = computed(() => {
+    const videoEnd = maxVideoTimelineEndSec();
+    if (videoEnd > 0) return videoEnd;
+    return maxAudioTimelineEndSec();
+  });
 
   /** 无视频 clip、仅有音轨/BGM 时的纯音频预览 */
   const isAudioOnlyPreview = computed(() => !clips.value.length && maxAudioTimelineEndSec() > 0);

@@ -89,7 +89,7 @@ const props = withDefaults(
   {
     title: "上传音频",
     pickerText: "点击或拖拽上传音频",
-    successText: "已添加本地音频",
+    successText: "已添加到音频列表",
   },
 );
 

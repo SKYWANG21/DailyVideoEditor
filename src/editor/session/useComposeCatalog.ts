@@ -22,12 +22,7 @@ import {
   setHostTextTemplates,
   type TextTemplateItem,
 } from "../shared/textTemplateCatalog";
-import type {
-  ComposeBgmUploadResult,
-  ComposeEditorEmit,
-  ComposeEditorProps,
-  ComposeEditorState,
-} from "./createComposeEditorState";
+import type { ComposeBgmUploadResult, ComposeEditorEmit, ComposeEditorProps, ComposeEditorState } from "./createComposeEditorState";
 import type { ComposeEditorPorts } from "./ports";
 import { useComposeMediaResolver } from "../composeRuntime";
 import { applyMediaCrossOrigin } from "@/service/resolveComposeMediaUrl";
@@ -156,10 +151,13 @@ export function useComposeCatalog(
     if (!url) return;
     const video = document.createElement("video");
     video.preload = "metadata";
-    void mediaResolver.resolve(url).then((src) => {
-      applyMediaCrossOrigin(video, src);
-      video.src = src;
-    }).catch(() => undefined);
+    void mediaResolver
+      .resolve(url)
+      .then((src) => {
+        applyMediaCrossOrigin(video, src);
+        video.src = src;
+      })
+      .catch(() => undefined);
     video.onloadedmetadata = () => {
       if (Number.isFinite(video.duration) && video.duration > 0) {
         state.previewClipDuration.value = video.duration;
@@ -378,13 +376,11 @@ export function useComposeCatalog(
     ports.onAddTextTemplate(item, payload.startTime);
   }
 
-  /** 将音频条目写入时间轴与侧栏列表，并通知宿主 */
+  /** 将音频写入侧栏列表并通知宿主（与视频上传一致：不上轴，需拖入时间轴） */
   function commitAudioAsset(bgm: BgmItem, file: File): void {
-    const clipId = state.timelineRef.value?.addAudioClip({ ...bgm });
     const items = [...state.audioAssets.value, bgm];
     state.audioAssets.value = items;
     emit("audio-uploaded", { file, item: bgm, items });
-    void probeAndWidenAudioClip(clipId, bgm);
   }
 
   /** 侧栏上传音频弹窗确认；有 adapter.uploadAudio 则先走宿主上传 */
