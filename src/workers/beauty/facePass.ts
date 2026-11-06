@@ -16,6 +16,7 @@ export class FacePass {
   private landmarker: FaceLandmarker | null = null;
   private createOptions: { wasmBaseUrl: string; modelUrl: string } | null = null;
   private lastTimestamp = -1;
+  private lastSourceTimestamp = -1;
   private lastDetectAt = 0;
   private lastLandmarks: Float32Array<ArrayBufferLike> = new Float32Array(0);
 
@@ -31,22 +32,30 @@ export class FacePass {
   close(): void {
     this.landmarker?.close();
     this.landmarker = null;
+    this.reset();
+  }
+
+  /** 换片段时清除旧关键点；检测时间戳单调递增，无需因 seek 重建模型 */
+  reset(): void {
+    this.lastDetectAt = 0;
+    this.lastSourceTimestamp = -1;
+    this.lastLandmarks = new Float32Array(0);
   }
 
   /**
-   * 检测一帧。时间回退时重建检测器，正向播放大约每 100ms 检测一次。
+   * 检测一个视频快照。时间回退时清缓存，检测时间戳保持单调。
    * @param frame 当前视频帧，不会被关闭
    * @param sourceTimeUs 源时间（微秒），用作 VIDEO 模式时间戳
    */
-  async detect(frame: VideoFrame, sourceTimeUs: number): Promise<Float32Array<ArrayBufferLike>> {
+  async detect(frame: ImageBitmap, sourceTimeUs: number): Promise<Float32Array<ArrayBufferLike>> {
     if (!this.landmarker) return this.lastLandmarks;
     let timestamp = Math.max(0, Math.round(sourceTimeUs / 1000));
     let forceDetect = false;
-    if (timestamp + 50 < this.lastTimestamp) {
-      await this.createLandmarker();
-      this.lastTimestamp = -1;
+    if (timestamp + 50 < this.lastSourceTimestamp) {
+      this.reset();
       forceDetect = true;
     }
+    this.lastSourceTimestamp = timestamp;
     if (timestamp <= this.lastTimestamp) timestamp = this.lastTimestamp + 1;
     const now = performance.now();
     if (!forceDetect && this.lastLandmarks.length > 0 && now - this.lastDetectAt < DETECT_INTERVAL_MS) {
@@ -84,12 +93,12 @@ export class FacePass {
   }
 
   /** 缩到检测尺寸。ImageBitmap 可以被 Face Landmarker 直接读取 */
-  private async downscale(frame: VideoFrame): Promise<ImageBitmap> {
-    const longest = Math.max(frame.displayWidth, frame.displayHeight, 1);
+  private async downscale(frame: ImageBitmap): Promise<ImageBitmap> {
+    const longest = Math.max(frame.width, frame.height, 1);
     const scale = Math.min(1, DETECT_MAX_EDGE / longest);
     return createImageBitmap(frame, {
-      resizeWidth: Math.max(1, Math.round(frame.displayWidth * scale)),
-      resizeHeight: Math.max(1, Math.round(frame.displayHeight * scale)),
+      resizeWidth: Math.max(1, Math.round(frame.width * scale)),
+      resizeHeight: Math.max(1, Math.round(frame.height * scale)),
       resizeQuality: "low",
     });
   }

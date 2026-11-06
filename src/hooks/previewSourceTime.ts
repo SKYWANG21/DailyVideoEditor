@@ -13,7 +13,7 @@ export function previewClipStartSec(clips: VideoClipItem[], index: number): numb
 }
 
 /**
- * 全局时间轴时间换成源内时间（微秒），供 WebCodecs 取帧。
+ * 全局时间轴时间换成源内时间（微秒），供活动 video 定位和快照校验。
  * @param clips 当前播放列表
  * @param index 当前片段下标
  * @param globalTimeSec 时间轴时间（秒）

@@ -12,7 +12,7 @@
         class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-[4px] bg-black"
         :style="stageStyle"
       >
-        <!-- 美颜关闭时双 video 出画；打开时只出声。canvas 交给 GPUPixel，不要 getContext -->
+        <!-- 双 video 只解码与播放原声；普通和美颜画面始终显示在同一块 Canvas -->
         <div
           class="absolute"
           :class="catalogPreviewActive ? 'inset-0 overflow-hidden' : undefined"
@@ -23,8 +23,7 @@
             preload="auto"
             playsinline
             crossorigin="anonymous"
-            class="pointer-events-none absolute inset-0 h-full w-full"
-            :class="[directVideoLayerClass(0), catalogPreviewActive ? 'object-contain' : 'object-fill']"
+            class="pointer-events-none absolute inset-0 h-full w-full opacity-0"
             @loadedmetadata="onDirectVideoMetadata"
           />
           <video
@@ -32,16 +31,16 @@
             preload="auto"
             playsinline
             crossorigin="anonymous"
-            class="pointer-events-none absolute inset-0 h-full w-full"
-            :class="[directVideoLayerClass(1), catalogPreviewActive ? 'object-contain' : 'object-fill']"
+            class="pointer-events-none absolute inset-0 h-full w-full opacity-0"
             @loadedmetadata="onDirectVideoMetadata"
           />
           <canvas
-            :id="GPU_PIXEL_CANVAS_ID"
             ref="previewCanvasRef"
             class="pointer-events-none absolute inset-0 h-full w-full"
-            :class="[showPreviewFrame ? 'opacity-100' : 'opacity-0', catalogPreviewActive ? 'object-contain' : 'object-fill']"
+            :class="catalogPreviewActive ? 'object-contain' : 'object-fill'"
           />
+          <!-- WebGL 与显示 Canvas 分离；不随美颜开关卸载 -->
+          <canvas ref="gpuCanvasRef" class="pointer-events-none absolute size-px opacity-0" aria-hidden="true" />
         </div>
 
         <!-- 拖动热区在贴图、字幕之下。点空白画面才移动视频；画幅外靠浮层手柄 -->
@@ -104,11 +103,7 @@
             :style="draftBoxStyle"
             @mousedown="startBoxDrag($event, 'move')"
           >
-            <div
-              ref="adjustSubtitleContentRef"
-              class="w-full overflow-visible text-center break-words"
-              :style="subtitleTextStyle"
-            >
+            <div ref="adjustSubtitleContentRef" class="w-full overflow-visible text-center break-words" :style="subtitleTextStyle">
               <template v-for="sub in adjustPreviewSubtitles" :key="sub.id">
                 <div
                   v-if="editingSubtitleId === sub.id"
@@ -238,7 +233,6 @@ import type {
   VideoClipItem,
   VideoFrameTransform,
 } from "@/types/videoCompose";
-import { readBeautyParams } from "@/types/composeMedia";
 import type { PreviewVideoSize } from "@/types/beautyPreview";
 import { useVideoComposePreview } from "@/hooks/useVideoComposePreview";
 import { useComposePreviewFrame } from "@/hooks/useComposePreviewFrame";
@@ -250,7 +244,6 @@ import {
   type EnterSubtitleAdjustOptions,
   type SubtitleAdjustCommit,
 } from "@/hooks/useVideoComposeSubtitleAdjust";
-import { GPU_PIXEL_CANVAS_ID } from "@/utils/beauty/gpuPixelPreview";
 import VideoComposeTextStickerOverlay from "./VideoComposeTextStickerOverlay.vue";
 import VideoComposeFrameBox from "./VideoComposeFrameBox.vue";
 import { containFrameStage, frameBoxStyle } from "../shared/videoFrame";
@@ -339,6 +332,10 @@ const effectiveClips = computed<VideoClipItem[]>(() => {
 const videoARef = ref<HTMLVideoElement | null>(null);
 const videoBRef = ref<HTMLVideoElement | null>(null);
 const previewCanvasRef = ref<HTMLCanvasElement | null>(null);
+/** GPUPixel 独占的内部 WebGL 画布 */
+const gpuCanvasRef = ref<HTMLCanvasElement | null>(null);
+/** 算法预热期间保持普通 video 播放时钟 */
+const beautyReady = ref(false);
 const playerContainerRef = ref<HTMLElement | null>(null);
 /** 画幅画布。字幕和贴图相对它的边缘定位 */
 const canvasHostRef = ref<HTMLElement | null>(null);
@@ -396,13 +393,13 @@ const {
   globalTime,
   isPlaying,
   inGap,
-  activeSlot,
   activeVideoEl,
-  directVideoAligned,
+  mediaReady,
+  playbackError,
   sampleTime,
   renderGeneration,
   onFramePresented,
-  onFrameMissed,
+  onFrameFailed,
   pause,
   play,
   toggle,
@@ -420,6 +417,7 @@ const {
   audioClips: audioClipsRef,
   config: composeConfigRef,
   previewMuted,
+  beautyReady,
 });
 
 /** 播放条两侧的次按钮 */
@@ -437,8 +435,11 @@ function fmtClock(sec: number): string {
   return hours > 0 ? `${hours}:${mm}:${ss}` : `${minutes}:${ss}`;
 }
 
-const { videoSize, frameReady, previewError } = useComposePreviewFrame({
+const { videoSize, previewError: frameError } = useComposePreviewFrame({
   canvas: previewCanvasRef,
+  gpuCanvas: gpuCanvasRef,
+  video: activeVideoEl,
+  mediaReady,
   clips: effectiveClips,
   currentIdx: playingIdx,
   sampleTime,
@@ -446,14 +447,12 @@ const { videoSize, frameReady, previewError } = useComposePreviewFrame({
   isPlaying,
   inGap,
   onFramePresented,
-  onFrameMissed,
+  onFrameFailed,
+  beautyReady,
 });
 
-/** 当前片段美颜总开关。强度为 0 仍显示 canvas */
-const beautyPreviewOn = computed(() => readBeautyParams(effectiveClips.value[playingIdx.value]?.beauty).enabled);
-
-/** 美颜打开且已经画出一帧时才显示 canvas。空隙保持黑屏 */
-const showPreviewFrame = computed(() => effectiveClips.value.length > 0 && !inGap.value && beautyPreviewOn.value && frameReady.value);
+/** 加载、取帧和算法降级错误统一显示 */
+const previewError = computed<string>(() => playbackError.value || frameError.value);
 
 /** 活动 video 的像素尺寸。美颜关闭时贴图按它对齐 */
 const directVideoSize = ref<PreviewVideoSize | null>(null);
@@ -480,15 +479,8 @@ watch(activeVideoEl, (el) => {
   directVideoSize.value = readDirectVideoSize(el);
 });
 
-/** 该缓冲层是否直接出画：活动层、美颜关闭、不在空隙、且已对齐游标 */
-function directVideoLayerClass(slot: 0 | 1): string {
-  const visible =
-    activeSlot.value === slot && !beautyPreviewOn.value && !inGap.value && directVideoAligned.value && effectiveClips.value.length > 0;
-  return visible ? "opacity-100" : "opacity-0";
-}
-
-/** 贴图像素尺寸：美颜用 Worker 回传，否则用活动 video。画布定位不使用它 */
-const overlayVideoSize = computed<PreviewVideoSize | null>(() => (beautyPreviewOn.value ? videoSize.value : directVideoSize.value));
+/** 已提交画面的像素尺寸，首帧前回退活动 video 元数据 */
+const overlayVideoSize = computed<PreviewVideoSize | null>(() => videoSize.value || directVideoSize.value);
 
 /** 添加贴图时用画布像素，使默认框钉在画幅上 */
 function getVideoSize(): { width: number; height: number } | null {

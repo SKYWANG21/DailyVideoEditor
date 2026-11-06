@@ -22,6 +22,8 @@ export interface PreviewAudioMixerSyncState {
   globalTime: number;
   /** 是否正在播放 */
   isPlaying: boolean;
+  /** 内部逐帧等待；用户仍处于播放态，但所有音轨必须暂停 */
+  playbackWaiting: boolean;
   /** 工具栏全局倍速 */
   globalPlaybackRate: number;
   /** 合成参数（legacy BGM 回退） */
@@ -299,7 +301,13 @@ export function createPreviewAudioMixer(resolver: ComposeMediaResolver): Preview
   }
 
   function sync(state: PreviewAudioMixerSyncState): void {
-    const { audioClips, globalTime, isPlaying, globalPlaybackRate, composeConfig, bgmEl } = state;
+    // 等待期间仅暂停，不能按尚未推进的游标把音轨倒回上一采样点。
+    if (state.playbackWaiting) {
+      pauseAll(state.bgmEl);
+      return;
+    }
+    const { audioClips, globalTime, globalPlaybackRate, composeConfig, bgmEl } = state;
+    const isPlaying = state.isPlaying;
     if (audioClips.length) {
       if (bgmEl && !bgmEl.paused) bgmEl.pause();
       syncPool(state);

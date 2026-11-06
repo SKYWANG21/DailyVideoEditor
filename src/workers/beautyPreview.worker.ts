@@ -1,151 +1,85 @@
-import type { BeautyFrameEvent, BeautyMissEvent, BeautyWorkerEvent, BeautyWorkerRequest } from "@/types/beautyPreview";
-import { copyFrameRgba } from "./beauty/copyFrameRgba";
-import { DecodeSession } from "./beauty/decodeSession";
+import type { BeautyRenderRequest, BeautyWorkerEvent, BeautyWorkerRequest } from "@/types/beautyPreview";
+import { copyFrameRgba, releaseFrameRgba } from "./beauty/copyFrameRgba";
 import { installImportScripts } from "./beauty/installImportScripts";
 import { FacePass } from "./beauty/facePass";
 
 installImportScripts();
 
-/** 模块 Worker 上的 postMessage 与页面 Window 签名不同，这里收成预览线程要用的形状 */
+/** Worker 只接收快照，不再请求视频 URL 或独立解码 */
 interface PreviewWorkerScope {
-  /** 用来拼模型地址 */
+  /** 用来解析模型路径 */
   location: Location;
-  /** 主线程消息 */
-  onmessage: ((this: PreviewWorkerScope, ev: MessageEvent<BeautyWorkerRequest>) => void) | null;
-  /** 把帧或错误发回主线程。transfer 里的缓冲会被转移 */
+  /** 主线程消息入口 */
+  onmessage: ((event: MessageEvent<BeautyWorkerRequest>) => void) | null;
+  /** 转移 RGBA 所有权 */
   postMessage(message: BeautyWorkerEvent, transfer?: Transferable[]): void;
 }
 
 const scope = self as unknown as PreviewWorkerScope;
-
-/** 人脸模型。默认同源 /algorithm，可由主线程 algorithmBaseUrl 覆盖 */
-let faceModelUrl = new URL("/algorithm/face_landmarker.task", scope.location.origin).href;
-
-/** MediaPipe SIMD wasm 目录 */
-let faceWasmUrl = new URL("/algorithm/mediapipe/", scope.location.origin).href;
-let algorithmBaseApplied = false;
-
-/** 只采用第一帧带来的模型根路径 */
-function applyAlgorithmBase(base: string | undefined): void {
-  if (!base || algorithmBaseApplied) return;
-  const normalized = base.endsWith("/") ? base : `${base}/`;
-  const root = new URL(normalized, scope.location.origin);
-  faceModelUrl = new URL("face_landmarker.task", root).href;
-  faceWasmUrl = new URL("mediapipe/", root).href;
-  algorithmBaseApplied = true;
-}
-
-const decodeSession = new DecodeSession();
 const facePass = new FacePass();
-
 let faceInit: Promise<void> | null = null;
-let faceFailed = false;
-let renderChain: Promise<void> = Promise.resolve();
-let latestRender: Extract<BeautyWorkerRequest, { type: "render" }> | null = null;
+let faceWarning = "";
+let disposed = false;
+/** 片段变化时清掉关键点缓存，防止新片段复用旧人脸 */
+let faceClipId = "";
 
-/** 把错误发回主线程，不中断后续帧 */
-function postError(requestId: number, error: unknown): void {
-  const message = error instanceof Error ? error.message : "预览画面失败";
-  const event: BeautyWorkerEvent = { type: "error", requestId, message };
-  scope.postMessage(event);
-}
-
-/** 人脸模块只初始化一次。失败后跳过检测，解码继续 */
-function ensureFace(): Promise<void> {
-  if (faceFailed) return Promise.reject(new Error("人脸检测不可用"));
+/** 人脸模型失败只降级关键点效果，普通磨皮、美白继续 */
+async function ensureFace(base: string): Promise<void> {
+  if (faceWarning) return;
   if (!faceInit) {
-    faceInit = facePass.init(faceWasmUrl, faceModelUrl).catch((error: unknown) => {
-      faceFailed = true;
-      faceInit = null;
-      throw error;
+    const root = new URL(base.endsWith("/") ? base : `${base}/`, scope.location.origin);
+    faceInit = facePass.init(new URL("mediapipe/", root).href, new URL("face_landmarker.task", root).href).catch((error: unknown) => {
+      faceWarning = `人脸检测不可用，已停用瘦脸和大眼：${error instanceof Error ? error.message : "模型加载失败"}`;
     });
   }
-  return faceInit;
+  await faceInit;
+  if (disposed) facePass.close();
 }
 
-/** 解一帧、按需检测，再把 RGBA 和关键点转交主线程 */
-async function runRender(request: Extract<BeautyWorkerRequest, { type: "render" }>): Promise<void> {
-  applyAlgorithmBase(request.algorithmBaseUrl);
-  const frame = await decodeSession.tick(request.clipId, request.url, request.sourceTimeUs);
-  if (latestRender && latestRender.requestId > request.requestId) {
-    frame?.close();
-    return;
-  }
-  if (!frame) {
-    const miss: BeautyMissEvent = {
-      type: "miss",
-      requestId: request.requestId,
-      clipId: request.clipId,
-      sourceTimeUs: request.sourceTimeUs,
-    };
-    scope.postMessage(miss);
-    return;
-  }
+/** 处理一个已解码快照；成功、失败和取消最终都关闭 bitmap */
+async function render(request: BeautyRenderRequest): Promise<void> {
+  const { generation, requestId, clipId, sourceTimeUs, bitmap } = request;
+  const identity = { generation, requestId, clipId, sourceTimeUs };
   try {
-    let landmarks: Float32Array<ArrayBufferLike> = new Float32Array(0);
-    if (request.detectFace) {
+    if (disposed) return;
+    if (faceClipId !== clipId) {
+      facePass.reset();
+      faceClipId = clipId;
+    }
+    let landmarks = new Float32Array(0);
+    if (request.detectFace && !faceWarning) {
       try {
-        await ensureFace();
-        landmarks = await facePass.detect(frame, request.sourceTimeUs);
+        landmarks = new Float32Array(await facePass.detect(bitmap, sourceTimeUs));
       } catch (error: unknown) {
-        landmarks = new Float32Array(0);
-        console.log(error instanceof Error ? error.message : error);
+        faceWarning = `人脸检测不可用，已停用瘦脸和大眼：${error instanceof Error ? error.message : "检测失败"}`;
       }
     }
-    if (latestRender && latestRender.requestId > request.requestId) return;
-    const rgba = await copyFrameRgba(frame);
-    const landmarksCopy = new Float32Array(landmarks);
-    const event: BeautyFrameEvent = {
-      type: "frame",
-      requestId: request.requestId,
-      clipId: request.clipId,
-      width: rgba.width,
-      height: rgba.height,
-      sourceTimeUs: request.sourceTimeUs,
-      buffer: rgba.buffer,
-      landmarks: landmarksCopy,
-    };
-    const transfers: Transferable[] = [rgba.buffer];
-    if (landmarksCopy.buffer instanceof ArrayBuffer && landmarksCopy.byteLength > 0) {
-      transfers.push(landmarksCopy.buffer);
-    }
-    scope.postMessage(event, transfers);
+    if (disposed) return;
+    const rgba = copyFrameRgba(bitmap);
+    scope.postMessage({ type: "frame", ...identity, ...rgba, landmarks, warning: faceWarning || undefined }, [
+      rgba.buffer,
+      landmarks.buffer,
+    ]);
+  } catch (error: unknown) {
+    if (!disposed) scope.postMessage({ type: "error", ...identity, message: error instanceof Error ? error.message : "预览像素读取失败" });
   } finally {
-    frame.close();
+    bitmap.close();
   }
 }
 
-/** 渲染任务串行执行，队列里只留最新一帧 */
-function drainRenders(): Promise<void> {
-  const job = latestRender;
-  if (!job) return Promise.resolve();
-  latestRender = null;
-  return runRender(job)
-    .catch((error: unknown) => postError(job.requestId, error))
-    .then(() => {
-      if (latestRender) return drainRenders();
-      return undefined;
-    });
-}
-
-/** 新的取帧请求覆盖还没开始的那一帧 */
-function enqueueRender(request: Extract<BeautyWorkerRequest, { type: "render" }>): void {
-  latestRender = request;
-  renderChain = renderChain.then(drainRenders).catch(() => undefined);
-}
-
-scope.onmessage = (event: MessageEvent<BeautyWorkerRequest>) => {
+/** 主线程最多发送一个处理任务；预热消息不携带视频帧 */
+scope.onmessage = (event: MessageEvent<BeautyWorkerRequest>): void => {
   const message = event.data;
   if (message.type === "dispose") {
-    latestRender = null;
-    decodeSession.destroy();
+    disposed = true;
     facePass.close();
-    return;
+    releaseFrameRgba();
+  } else if (message.type === "init") {
+    void (async (): Promise<void> => {
+      if (message.detectFace) await ensureFace(message.algorithmBaseUrl);
+      if (!disposed) scope.postMessage({ type: "ready", requestId: message.requestId, warning: faceWarning || undefined });
+    })();
+  } else {
+    void render(message);
   }
-  if (message.type === "prefetch") {
-    applyAlgorithmBase(message.algorithmBaseUrl);
-    decodeSession.prefetch(message.clipId, message.url);
-    return;
-  }
-  enqueueRender(message);
 };

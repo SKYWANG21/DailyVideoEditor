@@ -8,37 +8,36 @@ export interface FrameRgba {
   height: number;
 }
 
-/**
- * 把 VideoFrame 拷成紧密排列的 RGBA。
- * GPUPixel 只接受这份内存，不接受 VideoFrame。
- * VideoFrame 首行是画面顶边，WebGL 把缓冲首行当纹理底边，拷完后翻行才正立。
- */
-export async function copyFrameRgba(frame: VideoFrame): Promise<FrameRgba> {
-  const width = frame.displayWidth;
-  const height = frame.displayHeight;
-  if (width <= 0 || height <= 0) {
-    throw new Error("视频帧尺寸无效");
+/** 每个 Worker 复用同一块离屏画布，只在分辨率变化时调整尺寸 */
+let surface: OffscreenCanvas | null = null;
+let context: OffscreenCanvasRenderingContext2D | null = null;
+
+/** 从 video 快照读取 RGBA，并保留 GPUPixel 所需的上下翻行 */
+export function copyFrameRgba(frame: ImageBitmap): FrameRgba {
+  const { width, height } = frame;
+  if (width <= 0 || height <= 0) throw new Error("视频帧尺寸无效");
+  if (!surface) {
+    surface = new OffscreenCanvas(width, height);
+    context = surface.getContext("2d", { willReadFrequently: true });
   }
-  const layout = [{ offset: 0, stride: width * 4 }];
-  const byteLength = frame.allocationSize({ format: "RGBA", layout });
-  const buffer = new ArrayBuffer(byteLength);
-  await frame.copyTo(buffer, { format: "RGBA", layout });
-  flipRgbaRows(buffer, width, height);
-  return { buffer, width, height };
+  if (!context) throw new Error("预览像素读取不可用");
+  if (surface.width !== width) surface.width = width;
+  if (surface.height !== height) surface.height = height;
+  context.drawImage(frame, 0, 0);
+  const pixels = context.getImageData(0, 0, width, height).data;
+  const stride = width * 4;
+  const row = new Uint8ClampedArray(stride);
+  for (let top = 0, bottom = (height - 1) * stride; top < bottom; top += stride, bottom -= stride) {
+    row.set(pixels.subarray(top, top + stride));
+    pixels.copyWithin(top, bottom, bottom + stride);
+    pixels.set(row, bottom);
+  }
+  return { buffer: pixels.buffer as ArrayBuffer, width, height };
 }
 
-/** 上下对调每一行，使首行变成画面底边 */
-function flipRgbaRows(buffer: ArrayBuffer, width: number, height: number): void {
-  const view = new Uint8Array(buffer);
-  const stride = width * 4;
-  const row = new Uint8Array(stride);
-  let top = 0;
-  let bottom = (height - 1) * stride;
-  while (top < bottom) {
-    row.set(view.subarray(top, top + stride));
-    view.copyWithin(top, bottom, bottom + stride);
-    view.set(row, bottom);
-    top += stride;
-    bottom -= stride;
-  }
+/** 卸载 Worker 时释放离屏像素存储 */
+export function releaseFrameRgba(): void {
+  if (surface) surface.width = surface.height = 0;
+  context = null;
+  surface = null;
 }

@@ -4,8 +4,8 @@ import dataUrl from "@/algorithm/wasm/gpupixel.data?url";
 import type { BeautyParams } from "@/types/composeMedia";
 import { beautyLevelsForFrame, beautyNeedsFace } from "@/types/beautyPreview";
 
-/** 页面上 GPUPixel 独占的画布 id。创建前不能对它调用 getContext */
-export const GPU_PIXEL_CANVAS_ID = "gpupixel_preview_canvas";
+/** 每个播放器的 WebGL 画布拥有独立 id，避免实例跨画布绑定 */
+let canvasSequence = 0;
 
 /** GPUPixel 滤镜链。结果直接画到创建时绑定的 canvas */
 interface GpuPixelPipeline {
@@ -103,6 +103,7 @@ export class GpuPixelPreview {
   private heapPtr = 0;
   private heapCap = 0;
   private loading: Promise<void> | null = null;
+  private disposed = false;
 
   constructor(private readonly canvas: HTMLCanvasElement) {}
 
@@ -119,7 +120,7 @@ export class GpuPixelPreview {
   draw(rgba: Uint8Array, width: number, height: number, beauty: BeautyParams, landmarks: Float32Array<ArrayBufferLike>): void {
     const pipeline = this.pipeline;
     const module = this.module;
-    if (!pipeline || !module || width <= 0 || height <= 0) return;
+    if (this.disposed || !pipeline || !module || width <= 0 || height <= 0) throw new Error("美颜画布尚未就绪");
     if (this.canvas.width !== width) this.canvas.width = width;
     if (this.canvas.height !== height) this.canvas.height = height;
     const levels = beautyLevelsForFrame(beauty);
@@ -133,12 +134,26 @@ export class GpuPixelPreview {
     pipeline.process(ptr, width, height);
   }
 
+  /** 释放播放器独占的像素堆及 WebGL 资源，阻止加载完成后重新创建管道 */
+  destroy(): void {
+    this.disposed = true;
+    const initialized = this.pipeline !== null;
+    if (this.heapPtr) this.module?._free(this.heapPtr);
+    this.heapPtr = 0;
+    this.heapCap = 0;
+    this.pipeline = null;
+    this.module = null;
+    if (initialized) this.canvas.getContext("webgl2")?.getExtension("WEBGL_lose_context")?.loseContext();
+  }
+
   /** 加载查找表并创建管道。失败时下次 init 可以重试 */
   private async load(): Promise<void> {
     try {
-      if (!this.canvas.id) this.canvas.id = GPU_PIXEL_CANVAS_ID;
+      if (!this.canvas.id) this.canvas.id = `gpupixel_preview_${++canvasSequence}`;
       const createGpuPixelModule = await loadCreateGpuPixelModule();
+      if (this.disposed) return;
       const module = await createGpuPixelModule({ locateFile: locateGpuPixelFile });
+      if (this.disposed) return;
       this.module = module;
       this.pipeline = module.create(`#${this.canvas.id}`);
     } catch (error) {
@@ -159,13 +174,7 @@ export class GpuPixelPreview {
   }
 }
 
-let sharedPreview: GpuPixelPreview | null = null;
-
-/**
- * 取得与这块 canvas 绑定的 GPUPixel。
- * 已绑定过别的元素时仍返回旧实例，因为 wasm 不能改绑画布。
- */
+/** 每个播放器持有自己的实例；只共享脚本加载器 */
 export function acquireGpuPixelPreview(canvas: HTMLCanvasElement): GpuPixelPreview {
-  if (!sharedPreview) sharedPreview = new GpuPixelPreview(canvas);
-  return sharedPreview;
+  return new GpuPixelPreview(canvas);
 }
