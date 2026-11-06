@@ -217,6 +217,7 @@ export function useComposeProject(
       (clip) => {
         rebuildMainClipThumbnail(clip.id, clip.durationSec);
         ports.syncDerivedClipsFromTimeline();
+        syncPreviewDuration();
       },
       probeOptions,
     );
@@ -266,6 +267,7 @@ export function useComposeProject(
     didBootstrap = true;
     ports.syncDerivedClipsFromTimeline();
     ports.syncSidebarFromTracks();
+    syncPreviewDuration();
     emit("ready");
 
     await applyProbedMainClipDurations();

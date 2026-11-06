@@ -14,6 +14,10 @@ interface KeyboardCallbacks {
   onPaste?: (clips: any[], trackId: string, time: number) => void
   onPlay?: () => void
   onPause?: () => void
+  /** 撤销后回调（用于向外同步 history:changed） */
+  onUndo?: () => void
+  /** 重做后回调 */
+  onRedo?: () => void
 }
 
 interface UseKeyboardOptions {
@@ -111,7 +115,9 @@ export function useKeyboard(options: UseKeyboardOptions = {}) {
     // Ctrl/Cmd + Z：撤销
     if (modKey && event.code === 'KeyZ' && !event.shiftKey) {
       event.preventDefault()
+      if (!historyStore.canUndo) return
       historyStore.undo()
+      callbacks.onUndo?.()
       return
     }
 
@@ -121,7 +127,9 @@ export function useKeyboard(options: UseKeyboardOptions = {}) {
       (modKey && event.shiftKey && event.code === 'KeyZ')
     ) {
       event.preventDefault()
+      if (!historyStore.canRedo) return
       historyStore.redo()
+      callbacks.onRedo?.()
       return
     }
 

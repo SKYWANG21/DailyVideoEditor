@@ -563,6 +563,12 @@ const keyboardCallbacks = {
   onPause: () => {
     emit("playback:pause");
   },
+  onUndo: () => {
+    emit("history:changed", getHistoryState());
+  },
+  onRedo: () => {
+    emit("history:changed", getHistoryState());
+  },
 };
 
 // Composables - 传入容器 ref 使快捷键只在组件内生效
@@ -800,10 +806,10 @@ function handleOperation(operation: string) {
       handleReset();
       break;
     case "undo":
-      historyStore.undo();
+      undo();
       break;
     case "redo":
-      historyStore.redo();
+      redo();
       break;
     case "split":
       handleSplit();
@@ -1528,16 +1534,33 @@ function getHistoryState() {
   };
 }
 
-// 撤销（带事件）
+// 撤销（带事件，供工具栏 / 快捷键 / 外部 API 共用）
 function undo() {
+  if (!historyStore.canUndo) return;
   historyStore.undo();
   emit("history:changed", getHistoryState());
 }
 
 // 重做（带事件）
 function redo() {
+  if (!historyStore.canRedo) return;
   historyStore.redo();
   emit("history:changed", getHistoryState());
+}
+
+/** 开始合并历史：其间 add/update/remove 的 pushSnapshot 不入栈 */
+function beginHistoryBatch(description?: string) {
+  historyStore.beginHistoryBatch(description);
+}
+
+/** 结束合并并提交一条快照 */
+function endHistoryBatch(description?: string) {
+  historyStore.endHistoryBatch(description);
+}
+
+/** 回调内不写历史（空轨清理等） */
+function runWithoutHistory(fn: () => void) {
+  historyStore.runWithoutHistory(fn);
 }
 
 // 暴露方法给父组件
@@ -1607,6 +1630,9 @@ defineExpose({
   undo,
   redo,
   getHistoryState,
+  beginHistoryBatch,
+  endHistoryBatch,
+  runWithoutHistory,
 });
 </script>
 

@@ -236,6 +236,11 @@ interface VideoTrackExpose {
   setScrollLeft?: (left: number) => void;
   getViewportWidth?: () => number;
   reset: () => void;
+  /** 合并多次 add/update/remove 为一条历史 */
+  beginHistoryBatch?: (description?: string) => void;
+  endHistoryBatch?: (description?: string) => void;
+  /** 回调内不写历史（空轨清理、探测回填等） */
+  runWithoutHistory?: (fn: () => void) => void;
 }
 
 type TrackWithMute = Track & {
@@ -652,7 +657,33 @@ function onDataChanged(): void {
   if (!zoomGesture) readZoomView();
 }
 
-/** 非主轨且无有效 clip（忽略 transition）则删除 */
+/**
+ * 在历史批次中执行多次改轨，只记一条快照。
+ * API 不可用时直接执行（仍可能拆成多条历史）。
+ */
+function withHistoryBatch(api: VideoTrackExpose, description: string, fn: () => void): void {
+  if (!api.beginHistoryBatch || !api.endHistoryBatch) {
+    fn();
+    return;
+  }
+  api.beginHistoryBatch(description);
+  try {
+    fn();
+  } finally {
+    api.endHistoryBatch(description);
+  }
+}
+
+/** 不写历史地执行（探测回填 / 空轨清理） */
+function withoutHistory(api: VideoTrackExpose, fn: () => void): void {
+  if (!api.runWithoutHistory) {
+    fn();
+    return;
+  }
+  api.runWithoutHistory(fn);
+}
+
+/** 非主轨且无有效 clip（忽略 transition）则删除；不单独入历史 */
 function removeEmptyNonMainTracks(): void {
   const api = videoTrackRef.value;
   if (!api) return;
@@ -660,9 +691,12 @@ function removeEmptyNonMainTracks(): void {
     .getTracks()
     .filter((track) => !track.isMain && !(track.clips || []).some((clip) => clip.type !== "transition"))
     .map((track) => track.id);
-  for (const id of emptyIds) {
-    api.removeTrack(id);
-  }
+  if (!emptyIds.length) return;
+  withoutHistory(api, () => {
+    for (const id of emptyIds) {
+      api.removeTrack(id);
+    }
+  });
 }
 
 /** 音频轨是否整轨静音 */
@@ -697,17 +731,19 @@ function alignTrackClipsForward(track: Track): void {
   let cursor = 0;
   let moved = false;
   suppressEmit = true;
-  for (const clip of sorted) {
-    const duration = Math.max(0.1, clip.endTime - clip.startTime);
-    if (Math.abs(clip.startTime - cursor) > 1e-3) {
-      api.updateClip(clip.id, {
-        startTime: cursor,
-        endTime: cursor + duration,
-      });
-      moved = true;
+  withHistoryBatch(api, "向前对齐", () => {
+    for (const clip of sorted) {
+      const duration = Math.max(0.1, clip.endTime - clip.startTime);
+      if (Math.abs(clip.startTime - cursor) > 1e-3) {
+        api.updateClip(clip.id, {
+          startTime: cursor,
+          endTime: cursor + duration,
+        });
+        moved = true;
+      }
+      cursor += duration;
     }
-    cursor += duration;
-  }
+  });
   suppressEmit = false;
   if (moved) onDataChanged();
 }
@@ -1490,39 +1526,40 @@ function insertClipToMainAt(
   const insertIndex = sorted.findIndex((c) => c.startTime >= t);
 
   suppressEmit = true;
-
-  let startAt: number;
-  if (insertIndex === -1) {
-    const last = sorted[sorted.length - 1];
-    startAt = last ? Math.max(last.endTime, t) : t;
-  } else {
-    startAt = t;
-    for (let i = insertIndex; i < sorted.length; i++) {
-      const c = sorted[i];
-      const cDuration = c.endTime - c.startTime;
-      const newStart = c.startTime + duration;
-      api.updateClip(c.id, {
-        startTime: newStart,
-        endTime: newStart + cDuration,
-      });
+  withHistoryBatch(api, "插入片段", () => {
+    let startAt: number;
+    if (insertIndex === -1) {
+      const last = sorted[sorted.length - 1];
+      startAt = last ? Math.max(last.endTime, t) : t;
+    } else {
+      startAt = t;
+      for (let i = insertIndex; i < sorted.length; i++) {
+        const c = sorted[i];
+        const cDuration = c.endTime - c.startTime;
+        const newStart = c.startTime + duration;
+        api.updateClip(c.id, {
+          startTime: newStart,
+          endTime: newStart + cDuration,
+        });
+      }
     }
-  }
 
-  api.addClip(main.id, {
-    id: clipId,
-    trackId: main.id,
-    type: "video",
-    name: item.title || "视频片段",
-    sourceUrl: item.url,
-    originalDuration: duration,
-    trimStart: 0,
-    trimEnd: duration,
-    playbackRate: 1,
-    volume: 0.8,
-    startTime: startAt,
-    endTime: startAt + duration,
-    selected: false,
-    config: item.taskId ? { taskId: item.taskId } : undefined,
+    api.addClip(main.id, {
+      id: clipId,
+      trackId: main.id,
+      type: "video",
+      name: item.title || "视频片段",
+      sourceUrl: item.url,
+      originalDuration: duration,
+      trimStart: 0,
+      trimEnd: duration,
+      playbackRate: 1,
+      volume: 0.8,
+      startTime: startAt,
+      endTime: startAt + duration,
+      selected: false,
+      config: item.taskId ? { taskId: item.taskId } : undefined,
+    });
   });
   suppressEmit = false;
   onDataChanged();
@@ -1772,32 +1809,34 @@ function replaceSubtitleClips(items: Array<{ start: number; end: number; text: s
   const track = api.getTracks().find((t) => t.id === trackId);
   const style = normalizeSubtitleClipStyle({});
   suppressEmit = true;
-  if (track) {
-    [...track.clips].forEach((c) => api.removeClip(c.id));
-  }
-  for (const item of items) {
-    if (!item.text?.trim() || item.start >= item.end) continue;
-    api.addClip(trackId, {
-      id: `sub-${generateId()}`,
-      trackId,
-      type: "subtitle",
-      name: "字幕",
-      text: item.text.trim(),
-      fontFamily: style.fontFamily,
-      fontSize: style.fontSize,
-      color: style.color,
-      bold: style.bold,
-      italic: style.italic,
-      alignment: style.alignment,
-      marginL: style.marginL,
-      marginR: style.marginR,
-      marginV: style.marginV,
-      visible: style.visible,
-      startTime: item.start,
-      endTime: item.end,
-      selected: false,
-    });
-  }
+  withHistoryBatch(api, "替换字幕", () => {
+    if (track) {
+      [...track.clips].forEach((c) => api.removeClip(c.id));
+    }
+    for (const item of items) {
+      if (!item.text?.trim() || item.start >= item.end) continue;
+      api.addClip(trackId, {
+        id: `sub-${generateId()}`,
+        trackId,
+        type: "subtitle",
+        name: "字幕",
+        text: item.text.trim(),
+        fontFamily: style.fontFamily,
+        fontSize: style.fontSize,
+        color: style.color,
+        bold: style.bold,
+        italic: style.italic,
+        alignment: style.alignment,
+        marginL: style.marginL,
+        marginR: style.marginR,
+        marginV: style.marginV,
+        visible: style.visible,
+        startTime: item.start,
+        endTime: item.end,
+        selected: false,
+      });
+    }
+  });
   suppressEmit = false;
   onDataChanged();
 }
@@ -1813,31 +1852,34 @@ function bootstrapMainFromClips(clips: VideoClipItem[]): void {
     main = api.getMainTrack();
   }
   if (!main) return;
-  if (main.name !== "视频") api.updateTrack(main.id, { name: "视频" });
-  // 仅清空主轨片段，避免 wipe 音频/字幕轨
-  [...main.clips].forEach((c) => api.removeClip(c.id));
-  let cursor = 0;
-  for (const clip of clips) {
-    if (!clip.url) continue;
-    const duration = Math.max(0.1, clip.durationSec || 0.1);
-    api.addClip(main.id, {
-      id: clip.id || `clip-${generateId()}`,
-      trackId: main.id,
-      type: "video",
-      name: clip.title || "视频片段",
-      sourceUrl: clip.url,
-      originalDuration: duration,
-      trimStart: 0,
-      trimEnd: duration,
-      playbackRate: clip.playbackRate && clip.playbackRate > 0 ? clip.playbackRate : 1,
-      volume: clip.volume != null ? clip.volume : 0.8,
-      startTime: cursor,
-      endTime: cursor + duration,
-      selected: false,
-      config: clip.taskId ? { taskId: clip.taskId } : undefined,
-    });
-    cursor += duration;
-  }
+  const mainId = main.id;
+  withHistoryBatch(api, "重建主轨", () => {
+    if (main.name !== "视频") api.updateTrack(mainId, { name: "视频" });
+    // 仅清空主轨片段，避免 wipe 音频/字幕轨
+    [...main.clips].forEach((c) => api.removeClip(c.id));
+    let cursor = 0;
+    for (const clip of clips) {
+      if (!clip.url) continue;
+      const duration = Math.max(0.1, clip.durationSec || 0.1);
+      api.addClip(mainId, {
+        id: clip.id || `clip-${generateId()}`,
+        trackId: mainId,
+        type: "video",
+        name: clip.title || "视频片段",
+        sourceUrl: clip.url,
+        originalDuration: duration,
+        trimStart: 0,
+        trimEnd: duration,
+        playbackRate: clip.playbackRate && clip.playbackRate > 0 ? clip.playbackRate : 1,
+        volume: clip.volume != null ? clip.volume : 0.8,
+        startTime: cursor,
+        endTime: cursor + duration,
+        selected: false,
+        config: clip.taskId ? { taskId: clip.taskId } : undefined,
+      });
+      cursor += duration;
+    }
+  });
   bootstrapped = true;
   suppressEmit = false;
   onDataChanged();
@@ -1922,35 +1964,38 @@ function rebuildMainClipAt(clipId: string, durationSec: number): void {
   const playbackRate = media.playbackRate && media.playbackRate > 0 ? media.playbackRate : 1;
   const volume = media.volume != null ? media.volume : 0.8;
 
+  // 探测/缩略图重建：不写历史，避免一次上轴拆成多条撤回
   suppressEmit = true;
-  // 先挪开后续 clip，避免新时长与旧邻接片段重叠
-  if (Math.abs(delta) > 0.001) {
-    for (const c of main.clips) {
-      if (c.id === clipId || c.type === "transition") continue;
-      if (c.startTime >= oldEnd - 0.001) {
-        api.updateClip(c.id, {
-          startTime: c.startTime + delta,
-          endTime: c.endTime + delta,
-        });
+  withoutHistory(api, () => {
+    // 先挪开后续 clip，避免新时长与旧邻接片段重叠
+    if (Math.abs(delta) > 0.001) {
+      for (const c of main.clips) {
+        if (c.id === clipId || c.type === "transition") continue;
+        if (c.startTime >= oldEnd - 0.001) {
+          api.updateClip(c.id, {
+            startTime: c.startTime + delta,
+            endTime: c.endTime + delta,
+          });
+        }
       }
     }
-  }
-  api.removeClip(clipId);
-  api.addClip(main.id, {
-    id: clipId,
-    trackId: main.id,
-    type: "video",
-    name: clip.name || "视频片段",
-    sourceUrl: media.sourceUrl || "",
-    originalDuration: duration,
-    trimStart: 0,
-    trimEnd: duration,
-    playbackRate,
-    volume,
-    startTime,
-    endTime: startTime + duration,
-    selected: false,
-    config: media.config,
+    api.removeClip(clipId);
+    api.addClip(main.id, {
+      id: clipId,
+      trackId: main.id,
+      type: "video",
+      name: clip.name || "视频片段",
+      sourceUrl: media.sourceUrl || "",
+      originalDuration: duration,
+      trimStart: 0,
+      trimEnd: duration,
+      playbackRate,
+      volume,
+      startTime,
+      endTime: startTime + duration,
+      selected: false,
+      config: media.config,
+    });
   });
   suppressEmit = false;
   onDataChanged();
@@ -1969,23 +2014,26 @@ function updateMainClipDuration(clipId: string, durationSec: number): void {
   const newEnd = clip.startTime + durationSec;
   const delta = newEnd - oldEnd;
 
+  // 时长探测回填：并入上一次用户操作，不另开历史
   suppressEmit = true;
-  api.updateClip(clipId, {
-    originalDuration: durationSec,
-    trimEnd: durationSec,
-    endTime: newEnd,
-  });
-  if (Math.abs(delta) > 0.001) {
-    for (const c of main.clips) {
-      if (c.id === clipId || c.type === "transition") continue;
-      if (c.startTime >= oldEnd - 0.001) {
-        api.updateClip(c.id, {
-          startTime: c.startTime + delta,
-          endTime: c.endTime + delta,
-        });
+  withoutHistory(api, () => {
+    api.updateClip(clipId, {
+      originalDuration: durationSec,
+      trimEnd: durationSec,
+      endTime: newEnd,
+    });
+    if (Math.abs(delta) > 0.001) {
+      for (const c of main.clips) {
+        if (c.id === clipId || c.type === "transition") continue;
+        if (c.startTime >= oldEnd - 0.001) {
+          api.updateClip(c.id, {
+            startTime: c.startTime + delta,
+            endTime: c.endTime + delta,
+          });
+        }
       }
     }
-  }
+  });
   suppressEmit = false;
   onDataChanged();
 }
@@ -2007,29 +2055,32 @@ function updateAudioClipDuration(clipId: string, durationSec: number): void {
     }
   }
   if (!hostTrack || !clip) return;
+  const trackRef = hostTrack;
 
   const oldEnd = clip.endTime;
   const newEnd = clip.startTime + durationSec;
   const delta = newEnd - oldEnd;
 
   suppressEmit = true;
-  api.updateClip(clipId, {
-    originalDuration: durationSec,
-    trimStart: 0,
-    trimEnd: durationSec,
-    endTime: newEnd,
-  });
-  if (Math.abs(delta) > 0.001) {
-    for (const c of hostTrack.clips) {
-      if (c.id === clipId) continue;
-      if (c.startTime >= oldEnd - 0.001) {
-        api.updateClip(c.id, {
-          startTime: c.startTime + delta,
-          endTime: c.endTime + delta,
-        });
+  withoutHistory(api, () => {
+    api.updateClip(clipId, {
+      originalDuration: durationSec,
+      trimStart: 0,
+      trimEnd: durationSec,
+      endTime: newEnd,
+    });
+    if (Math.abs(delta) > 0.001) {
+      for (const c of trackRef.clips) {
+        if (c.id === clipId) continue;
+        if (c.startTime >= oldEnd - 0.001) {
+          api.updateClip(c.id, {
+            startTime: c.startTime + delta,
+            endTime: c.endTime + delta,
+          });
+        }
       }
     }
-  }
+  });
   suppressEmit = false;
   onDataChanged();
 }
@@ -2061,23 +2112,26 @@ function setMediaClipPlaybackRate(clipId: string, rate: number): void {
   const oldEnd = clip.endTime;
   const newEnd = clip.startTime + newDur;
   const delta = newEnd - oldEnd;
+  const trackClips = hostTrack.clips;
 
   suppressEmit = true;
-  api.updateClip(clipId, {
-    playbackRate: nextRate,
-    endTime: newEnd,
-  });
-  if (Math.abs(delta) > 0.001) {
-    for (const item of hostTrack.clips) {
-      if (item.id === clipId || item.type === "transition") continue;
-      if (item.startTime >= oldEnd - 0.001) {
-        api.updateClip(item.id, {
-          startTime: item.startTime + delta,
-          endTime: item.endTime + delta,
-        });
+  withHistoryBatch(api, "调整倍速", () => {
+    api.updateClip(clipId, {
+      playbackRate: nextRate,
+      endTime: newEnd,
+    });
+    if (Math.abs(delta) > 0.001) {
+      for (const item of trackClips) {
+        if (item.id === clipId || item.type === "transition") continue;
+        if (item.startTime >= oldEnd - 0.001) {
+          api.updateClip(item.id, {
+            startTime: item.startTime + delta,
+            endTime: item.endTime + delta,
+          });
+        }
       }
     }
-  }
+  });
   suppressEmit = false;
   onDataChanged();
 }
@@ -2092,11 +2146,13 @@ function removeMainClipsByUrl(url: string): void {
   if (!normalized) return;
 
   suppressEmit = true;
-  for (const clip of [...main.clips]) {
-    if (clip.type === "video" && clip.sourceUrl?.trim() === normalized) {
-      api.removeClip(clip.id);
+  withHistoryBatch(api, "移除主轨片段", () => {
+    for (const clip of [...main.clips]) {
+      if (clip.type === "video" && clip.sourceUrl?.trim() === normalized) {
+        api.removeClip(clip.id);
+      }
     }
-  }
+  });
   suppressEmit = false;
   onDataChanged();
 }
