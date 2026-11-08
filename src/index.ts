@@ -1,5 +1,10 @@
 import "./style";
 
+export type { ComposeTransition, TransitionAlgorithm, TransitionEffectDefinition, TransitionRenderContext, TransitionRenderRequest } from "./types/transition";
+export { TransitionEngine } from "./transitions/engine";
+export { TransitionRegistry } from "./transitions/registry";
+export { createTransitionRegistry, crossfadeDefinition } from "./transitions/catalog";
+
 export { VideoComposeEditor, createDefaultVideoComposeEditorModel } from "./editor";
 
 export type {

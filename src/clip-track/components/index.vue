@@ -92,6 +92,9 @@
         </template>
 
         <!-- Clip 内容自定义 -->
+        <template #track-overlay="slotProps">
+          <slot name="track-overlay" v-bind="slotProps" />
+        </template>
         <template #clip-content="slotProps">
           <slot name="clip-content" v-bind="slotProps" />
         </template>

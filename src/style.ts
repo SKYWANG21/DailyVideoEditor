@@ -14,3 +14,5 @@ import "element-plus/theme-chalk/el-button.css";
 import "element-plus/theme-chalk/el-overlay.css";
 import "element-plus/theme-chalk/el-message.css";
 import "element-plus/theme-chalk/el-message-box.css";
+import "element-plus/theme-chalk/el-popover.css";
+import "element-plus/theme-chalk/el-popper.css";

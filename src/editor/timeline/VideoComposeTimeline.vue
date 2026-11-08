@@ -30,6 +30,7 @@
       @data:changed="scheduleDataChanged"
       @track:added="onTrackAdded"
       @track:removed="onTrackRemoved"
+      @track:updated="scheduleDataChanged"
       @clip:drag-end="scheduleDataChanged"
       @clip-move="scheduleDataChanged"
       @clip:added="scheduleDataChanged"
@@ -53,6 +54,12 @@
       @drop-media="onDropMedia"
     >
       <!-- 工具栏外壳前后：透传宿主插槽 -->
+      <template #track-overlay="{ track, pixelsPerSecond }">
+        <ComposeTransitionHandles
+          :track="track" :pixels-per-second="pixelsPerSecond" :readonly="readonly" :selected-key="selectedSeamKey"
+          @select="selectedSeamKey = $event" @apply="applyTransition" @remove="removeTransition"
+        />
+      </template>
       <template #toolbar-before>
         <slot name="toolbar-before" />
       </template>
@@ -191,6 +198,9 @@ import {
   normalizeComposeTimelineScale,
 } from "@/types/videoCompose";
 import { normalizeFrameAspect } from "../shared/videoFrame";
+import ComposeTransitionHandles from "./ComposeTransitionHandles.vue";
+import { useTimelineTransitions } from "./useTimelineTransitions";
+import { normalizeTrackTransitions } from "@/transitions/timing";
 import { clampPlaybackRate } from "../shared/playbackRate";
 import type { MediaClip, SubtitleClip, TextClip, Clip, ClipTypeConfig, TrackTypeConfig } from "@/clip-track";
 
@@ -271,6 +281,8 @@ const props = withDefaults(defineProps<VideoComposeTimelineProps>(), {
 });
 
 const emit = defineEmits<{
+  /** 转场添加后切回工程预览，播放头保持不变。 */
+  "transition-applied": [];
   "update:tracks": [value: ComposeTrack[]];
   "selection-changed": [selectedClipIds: string[]];
   "time-update": [timeSec: number];
@@ -299,6 +311,9 @@ const emit = defineEmits<{
 }>();
 
 const videoTrackRef = ref<VideoTrackExpose | null>(null);
+const { selectedSeamKey, apply: applyTransition, remove: removeTransition } = useTimelineTransitions(
+  videoTrackRef, computed(() => props.readonly), onDataChanged, () => emit("transition-applied"),
+);
 /** 时间轴根节点：用于拖放命中与坐标换算 */
 const timelineRootRef = ref<HTMLElement | null>(null);
 /** 视口尺寸变化时重算缩放条 */
@@ -631,6 +646,7 @@ function mapLibTrackToCompose(track: Track): ComposeTrack | null {
     muted: Boolean((track as TrackWithMute).muted),
     clips,
     order: track.order ?? 0,
+    transitions: track.transitions ? normalizeTrackTransitions(track.clips, track.transitions) : undefined,
     frameAspect: readTrackFrameAspect(track),
     nativeFrameWidth: readPositiveFrameSize(track, "nativeFrameWidth"),
     nativeFrameHeight: readPositiveFrameSize(track, "nativeFrameHeight"),
@@ -1091,6 +1107,7 @@ function onPlayheadVisibilityChange(): void {
 
 /** 选中变化：通知父级以驱动侧栏作用域 */
 function onSelectionChanged(selectedClipIds: string[]): void {
+  selectedSeamKey.value = null;
   emit("selection-changed", selectedClipIds || []);
 }
 
@@ -1887,6 +1904,7 @@ function bootstrapMainFromClips(clips: VideoClipItem[]): void {
 
 /** 从持久化 tracks 回灌 */
 function importTracks(tracks: ComposeTrack[]): void {
+  selectedSeamKey.value = null;
   const api = videoTrackRef.value;
   if (!api) return;
   suppressEmit = true;
@@ -1902,6 +1920,7 @@ function importTracks(tracks: ComposeTrack[]): void {
         muted: t.muted === true,
         order: t.order ?? order,
         clips: t.clips as Track["clips"],
+        transitions: t.transitions ? normalizeTrackTransitions(t.clips, t.transitions) : undefined,
         frameAspect: t.frameAspect,
         nativeFrameWidth: t.nativeFrameWidth,
         nativeFrameHeight: t.nativeFrameHeight,
@@ -2271,6 +2290,7 @@ function setMainTrackFrame(patch: { frameAspect?: ComposeFrameAspect; nativeFram
 }
 
 defineExpose({
+  applyTransition,
   getMainTrack: () => videoTrackRef.value?.getMainTrack(),
   addClipToMain,
   insertClipToMainAt,

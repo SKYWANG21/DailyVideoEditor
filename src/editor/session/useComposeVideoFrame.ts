@@ -140,6 +140,7 @@ export function useComposeVideoFrame(props: ComposeEditorProps, state: ComposeEd
   }
 
   return {
+    mainTrack,
     frameAspect,
     canvasSize,
     visibleClipId: computed(() => visibleClip.value?.id ?? ""),

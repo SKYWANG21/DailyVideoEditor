@@ -1,514 +1,391 @@
 import { computed, inject, onUnmounted, ref, watch, type Ref } from "vue";
-import type { GpuPixelPreview } from "@/utils/beauty/gpuPixelPreview";
 import { readBeautyParams, type BeautyParams } from "@/types/composeMedia";
-import {
-  beautyNeedsFace,
-  type BeautyFrameEvent,
-  type BeautyWorkerEvent,
-  type PreviewFrameIdentity,
-  type PreviewVideoSize,
-} from "@/types/beautyPreview";
-import type { VideoClipItem } from "@/types/videoCompose";
-import { previewSourceTimeUs } from "@/hooks/previewSourceTime";
-import { seekPreviewVideo, VIDEO_FRAME_TIMEOUT_MS } from "@/hooks/previewVideoFrame";
+import type { PreviewFrameIdentity, PreviewVideoSize } from "@/types/beautyPreview";
+import type { ComposeTrack, VideoClipItem, VideoFrameTransform } from "@/types/videoCompose";
+import type { TransitionSample } from "@/types/transition";
+import { previewSourceTimeUs, previewSeekTimeSec } from "./previewSourceTime";
+import { seekPreviewVideo } from "./previewVideoFrame";
 import { COMPOSE_ALGORITHM_BASE } from "@/editor/composeRuntime";
-import BeautyPreviewWorker from "../workers/beautyPreview.worker.ts?worker&inline";
+import { readVideoFrameTransform } from "@/editor/shared/videoFrame";
+import { createTransitionRegistry } from "@/transitions/catalog";
+import { TransitionEngine } from "@/transitions/engine";
+import { resolveTransitionAtTime } from "@/transitions/timing";
+import { ComposeFrameProcessor } from "./composeFrameProcessor";
+import { drawPreviewCanvasFrame } from "./previewCanvasFrame";
 
+/** 单一画面提交者的输入，播放时钟仍属于 useVideoComposePreview。 */
 interface UseComposePreviewFrameOptions {
-  /** 唯一可见的 2D 画布 */
+  /** 唯一可见画布。 */
   canvas: Ref<HTMLCanvasElement | null>;
-  /** 独立且稳定挂载的内部 WebGL 画布 */
+  /** 美颜独占内部画布。 */
   gpuCanvas: Ref<HTMLCanvasElement | null>;
-  /** 当前活动 video 解码层 */
+  /** 当前主解码槽。 */
   video: Ref<HTMLVideoElement | null>;
-  /** 活动层已完成换源与定位 */
+  /** 转场期间预留给另一侧的解码槽。 */
+  standbyVideo: Ref<HTMLVideoElement | null>;
+  /** 双侧定位准备完成。 */
   mediaReady: Ref<boolean>;
-  /** 当前播放列表 */
+  /** 播放列表。 */
   clips: Ref<VideoClipItem[]>;
-  /** 当前片段下标 */
+  /** 当前自然时间所属片段。 */
   currentIdx: Ref<number>;
-  /** 当前采样目标（时间轴秒） */
+  /** 请求采样点。 */
   sampleTime: Ref<number>;
-  /** 控制操作代次 */
+  /** 使旧任务失效的控制代次。 */
   renderGeneration: Ref<number>;
-  /** 用户播放意图 */
+  /** 用户播放意图。 */
   isPlaying: Ref<boolean>;
-  /** 真实时间轴空隙 */
+  /** 真实空隙。 */
   inGap: Ref<boolean>;
-  /** 算法预热完成后才切换时钟 */
+  /** 现有美颜逐帧时钟准备状态。 */
   beautyReady: Ref<boolean>;
-  /** 最终画面成功提交 */
-  onFramePresented: (identity: PreviewFrameIdentity) => void;
-  /** 取帧失败时暂停所有实际媒体并提示 */
-  onFrameFailed: (message: string) => void;
+  /** 当前主轨；素材库单片预览为空。 */
+  transitionTrack: Ref<ComposeTrack | undefined>;
+  /** 项目画布像素。 */
+  canvasSize: Ref<PreviewVideoSize | null>;
+  /** 兼容没有轨道元数据的普通预览变换。 */
+  frame: Ref<VideoFrameTransform | null | undefined>;
+  /** 只有当前帧真正提交后才能推进逐帧时钟。 */
+  onFramePresented(identity: PreviewFrameIdentity): void;
+  /** 加载/解码失败必须暂停。 */
+  onFrameFailed(message: string): void;
 }
 
-/** 双 video 统一解码，普通与美颜结果始终提交到同一可见 Canvas */
+/** 普通、美颜和双侧转场统一提交同一个项目坐标画布。 */
 export function useComposePreviewFrame(options: UseComposePreviewFrameOptions) {
   const { canvas, gpuCanvas, video, mediaReady, clips, currentIdx, sampleTime, renderGeneration, isPlaying, inGap, beautyReady } = options;
   const algorithmBase = inject(
     COMPOSE_ALGORITHM_BASE,
     computed(() => "/algorithm/"),
   );
+  const registry = createTransitionRegistry();
+  const engine = new TransitionEngine(registry);
+  const layers = new Map<string, OffscreenCanvas>();
   const videoSize = ref<PreviewVideoSize | null>(null);
   const frameReady = ref(false);
   const previewError = ref("");
+  /** 同一个采样定义贯穿定位、两侧处理和最终回执。 */
+  const transition = computed(() => {
+    const track = options.transitionTrack.value;
+    return track ? resolveTransitionAtTime(track.clips, track.transitions ?? [], sampleTime.value) : null;
+  });
+  let processor: ComposeFrameProcessor | null = null;
+  let processorCanvas: HTMLCanvasElement | null = null;
   let disposed = false;
-  let worker: Worker | null = null;
-  let gpu: GpuPixelPreview | null = null;
-  let gpuElement: HTMLCanvasElement | null = null;
-  let gpuLoading: Promise<void> | null = null;
-  let requestId = 0;
-  let warmupId = 0;
   let revision = 0;
-  let failed = false;
-  let frameFailed = false;
-  let reportingFailure = false;
+  let warmupRevision = 0;
+  let requestId = 0;
   let busy = false;
-  let pendingRender = false;
-  let renderTimer = 0;
-  let requestAbort: AbortController | null = null;
+  let pending = false;
+  let timer = 0;
+  let request: AbortController | null = null;
   let unbindVideo: (() => void) | null = null;
-  let lastVideoTime = -1;
+  let lastTime = -1;
   let lastVideo: HTMLVideoElement | null = null;
-  let faceWarning = "";
-  /** Worker 内只允许一个实际处理请求，取消只作废结果，不积压新帧 */
-  let pendingFrame: { identity: PreviewFrameIdentity; resolve: (frame: BeautyFrameEvent) => void; reject: (error: Error) => void } | null =
-    null;
-  const warmups = new Map<number, { resolve: () => void; reject: (error: Error) => void }>();
 
-  /** 当前美颜参数；读取时不修改外部配置 */
-  function currentBeauty(): BeautyParams {
-    return readBeautyParams(clips.value[currentIdx.value]?.beauty);
+  /** 按 ID 获取两侧各自的美颜参数。 */
+  function requiredBeauty(): BeautyParams[] {
+    const sample = transition.value;
+    return sample
+      ? [sample.clipA.id, sample.clipB.id].map((id) => readBeautyParams(clips.value.find((clip) => clip.id === id)?.beauty))
+      : [readBeautyParams(clips.value[currentIdx.value]?.beauty)];
   }
 
-  /** 只有实际绘制成功才更新尺寸和 frameReady；等待时保留原像素 */
+  /** 内部 WebGL 画布重新挂载时释放旧上下文，实例间不共享处理状态。 */
+  function ensureProcessor(): ComposeFrameProcessor | null {
+    const target = gpuCanvas.value;
+    if (!target) return null;
+    if (processorCanvas !== target) {
+      processor?.dispose();
+      processorCanvas = target;
+      processor = new ComposeFrameProcessor(target, algorithmBase.value, (message, fallback) => {
+        previewError.value = message;
+        if (fallback) beautyReady.value = false;
+      });
+    }
+    return processor;
+  }
+
+  /** 所有输入变化使旧定位和提交失效。 */
+  function invalidate(): void {
+    revision += 1;
+    request?.abort();
+    clearTimeout(timer);
+    pending = false;
+  }
+
+  /** 绘制失败不会冒充成功推进时钟。 */
+  function fail(error: unknown): void {
+    previewError.value = error instanceof Error ? error.message : "视频取帧失败";
+    options.onFrameFailed(previewError.value);
+  }
+
+  /** 完整图层一次性提交，准备期间保留上一次画面。 */
   function commit(source: CanvasImageSource, width: number, height: number): void {
     const target = canvas.value;
-    if (!target || disposed || width <= 0 || height <= 0) throw new Error("预览画布尚未就绪");
-    const context = target.getContext("2d");
-    if (!context) throw new Error("当前环境不支持 Canvas 预览");
+    const ctx = target?.getContext("2d");
+    if (!target || !ctx || disposed) throw new Error("预览画布尚未就绪");
     if (target.width !== width) target.width = width;
     if (target.height !== height) target.height = height;
-    context.drawImage(source, 0, 0, width, height);
+    ctx.clearRect(0, 0, width, height);
+    ctx.drawImage(source, 0, 0, width, height);
     videoSize.value = { width, height };
     frameReady.value = true;
   }
 
-  /** 普通播放和算法预热直接画 video，不做 RGBA 读回或加载美颜模块 */
+  /** 普通画面和转场输入使用完全相同的画面变换。 */
+  function makeLayer(
+    source: CanvasImageSource,
+    width: number,
+    height: number,
+    id: string,
+    sourceWidth: number,
+    sourceHeight: number,
+  ): OffscreenCanvas {
+    let layer = layers.get(id);
+    if (!layer || layer.width !== width || layer.height !== height) {
+      layer = new OffscreenCanvas(width, height);
+      layers.set(id, layer);
+    }
+    // 只保留当前双侧，长工程不能不断累积整帧缓冲。
+    while (layers.size > 2) layers.delete(layers.keys().next().value!);
+    const ctx = layer.getContext("2d");
+    if (!ctx) throw new Error("当前环境不支持预览画布");
+    ctx.clearRect(0, 0, width, height);
+    const clip = options.transitionTrack.value?.clips.find((item) => item.id === id);
+    const frame = clip ? readVideoFrameTransform(clip.config) : options.frame.value;
+    drawPreviewCanvasFrame(ctx, source, sourceWidth, sourceHeight, width, height, frame);
+    return layer;
+  }
+
+  /** 原生帧回调只绘制无需异步处理的普通画面。 */
   function drawVideo(force = false): void {
     const source = video.value;
     if (
       disposed ||
-      frameFailed ||
       inGap.value ||
       beautyReady.value ||
+      transition.value ||
       !mediaReady.value ||
       !source ||
       source.seeking ||
       source.readyState < 2
     )
       return;
-    if (!force && source === lastVideo && source.currentTime === lastVideoTime) return;
-    if (source.videoWidth <= 0 || source.videoHeight <= 0) return;
+    if (!force && source === lastVideo && source.currentTime === lastTime) return;
+    if (!source.videoWidth || !source.videoHeight) return;
+    const size = options.canvasSize.value ?? { width: source.videoWidth, height: source.videoHeight };
     try {
-      commit(source, source.videoWidth, source.videoHeight);
-      lastVideo = source;
-      lastVideoTime = source.currentTime;
-    } catch (error: unknown) {
-      failFrame(error);
-    }
-  }
-
-  /** 真实空隙清黑；时间轴清空时清除历史画面和尺寸 */
-  function clearCanvas(empty: boolean): void {
-    const target = canvas.value;
-    const context = target?.getContext("2d");
-    if (target && context) {
-      context.clearRect(0, 0, target.width, target.height);
-    }
-    lastVideo = null;
-    lastVideoTime = -1;
-    if (empty) {
-      videoSize.value = null;
-      frameReady.value = false;
-    }
-  }
-
-  /** 帧错误必须暂停，不能把空帧当作成功继续采样 */
-  function failFrame(error: unknown): void {
-    if (reportingFailure) return;
-    const message = error instanceof Error ? error.message : "视频取帧失败";
-    previewError.value = message;
-    frameFailed = true;
-    reportingFailure = true;
-    try {
-      options.onFrameFailed(message);
-    } finally {
-      reportingFailure = false;
-      invalidate();
-    }
-  }
-
-  /** 算法失败回退普通 Canvas，保留用户的美颜参数 */
-  function fallback(error: unknown): void {
-    failed = true;
-    previewError.value = `美颜已回退普通预览：${error instanceof Error ? error.message : "算法初始化失败"}`;
-    beautyReady.value = false;
-    invalidate();
-    drawVideo(true);
-  }
-
-  /** 只接收与正在等待的请求完全一致的 Worker 结果 */
-  function onWorkerEvent(event: BeautyWorkerEvent): void {
-    if (event.type === "ready") {
-      const waiting = warmups.get(event.requestId);
-      if (!waiting) return;
-      warmups.delete(event.requestId);
-      faceWarning = event.warning || "";
-      waiting.resolve();
-      return;
-    }
-    const pending = pendingFrame;
-    if (
-      !pending ||
-      event.requestId !== pending.identity.requestId ||
-      event.generation !== pending.identity.generation ||
-      event.clipId !== pending.identity.clipId ||
-      event.sourceTimeUs !== pending.identity.sourceTimeUs
-    )
-      return;
-    pendingFrame = null;
-    if (event.type === "error") pending.reject(new Error(event.message));
-    else pending.resolve(event);
-  }
-
-  /** 懒创建 Worker；普通预览不启动线程 */
-  function ensureWorker(): Worker {
-    if (worker) return worker;
-    const next = new BeautyPreviewWorker();
-    next.onmessage = (event: MessageEvent<BeautyWorkerEvent>): void => onWorkerEvent(event.data);
-    next.onerror = (): void => {
-      const error = new Error("美颜预览线程失败");
-      pendingFrame?.reject(error);
-      pendingFrame = null;
-      for (const pending of warmups.values()) pending.reject(error);
-      warmups.clear();
-      next.terminate();
-      worker = null;
-      if (!disposed) fallback(error);
-    };
-    worker = next;
-    return next;
-  }
-
-  /** 按播放器内部画布创建独立 GPUPixel；仅脚本加载器可共享 */
-  async function ensureGpu(): Promise<void> {
-    const element = gpuCanvas.value;
-    if (!element) throw new Error("美颜内部画布尚未挂载");
-    if (gpuElement === element && gpuLoading) return gpuLoading;
-    gpu?.destroy();
-    gpu = null;
-    gpuElement = element;
-    const loading = (async (): Promise<void> => {
-      const { acquireGpuPixelPreview } = await import("@/utils/beauty/gpuPixelPreview");
-      if (disposed || gpuElement !== element) return;
-      const instance = acquireGpuPixelPreview(element);
-      gpu = instance;
-      await instance.init();
-      if (disposed || gpuElement !== element) instance.destroy();
-    })();
-    gpuLoading = loading;
-    try {
-      await loading;
-    } catch (error: unknown) {
-      if (gpuLoading === loading) gpuLoading = null;
-      throw error;
-    }
-  }
-
-  /** 模型加载期间仍使用普通视频时钟，准备好后从当前播放位置开始 */
-  async function warmup(): Promise<void> {
-    const id = ++warmupId;
-    beautyReady.value = false;
-    if (!currentBeauty().enabled || !gpuCanvas.value || failed || disposed) return;
-    try {
-      await Promise.all([
-        ensureGpu(),
-        new Promise<void>((resolve, reject) => {
-          const next = ensureWorker();
-          warmups.set(id, { resolve, reject });
-          next.postMessage({
-            type: "init",
-            requestId: id,
-            detectFace: beautyNeedsFace(currentBeauty()),
-            algorithmBaseUrl: algorithmBase.value,
-          });
-        }),
-      ]);
-      if (disposed || id !== warmupId || !currentBeauty().enabled || failed) return;
-      previewError.value = faceWarning;
-      beautyReady.value = true;
-      schedule();
-    } catch (error: unknown) {
-      if (!disposed && id === warmupId) fallback(error);
-    }
-  }
-
-  /** 控制操作、暂停及参数调整立即作废旧结果，同时取消尚未发送的等待 */
-  function invalidate(): void {
-    revision += 1;
-    requestAbort?.abort();
-    window.clearTimeout(renderTimer);
-    renderTimer = 0;
-    pendingRender = false;
-  }
-
-  /** 暂停拖动合并 80ms 内的连续请求，播放时立刻处理当前采样 */
-  function schedule(): void {
-    if (disposed || frameFailed || !beautyReady.value || !mediaReady.value || inGap.value || !canvas.value) return;
-    window.clearTimeout(renderTimer);
-    pendingRender = true;
-    renderTimer = window.setTimeout(
-      () => {
-        renderTimer = 0;
-        void render();
-      },
-      isPlaying.value ? 0 : 80,
-    );
-  }
-
-  /** 请求同时包含本地序号、控制代次、片段和源时间 */
-  function identityForCurrentFrame(): PreviewFrameIdentity {
-    return {
-      requestId: ++requestId,
-      generation: renderGeneration.value,
-      clipId: clips.value[currentIdx.value]?.id || "",
-      sourceTimeUs: previewSourceTimeUs(clips.value, currentIdx.value, sampleTime.value),
-    };
-  }
-
-  /** 检查异步阶段是否仍属于相同片段、源时间和控制代次 */
-  function isCurrent(identity: PreviewFrameIdentity, token: number, source: HTMLVideoElement): boolean {
-    return (
-      !disposed &&
-      token === revision &&
-      identity.generation === renderGeneration.value &&
-      identity.clipId === clips.value[currentIdx.value]?.id &&
-      source === video.value &&
-      identity.sourceTimeUs === previewSourceTimeUs(clips.value, currentIdx.value, sampleTime.value) &&
-      beautyReady.value &&
-      !inGap.value &&
-      mediaReady.value
-    );
-  }
-
-  /** 转移快照给 Worker，8 秒内未返回则失败；过期帧也等待释放处理槽 */
-  function processBitmap(bitmap: ImageBitmap, identity: PreviewFrameIdentity): Promise<BeautyFrameEvent> {
-    return new Promise((resolve, reject) => {
-      const timer = window.setTimeout(() => {
-        pendingFrame = null;
-        worker?.terminate();
-        worker = null;
-        reject(new Error("美颜处理超时（8 秒）"));
-      }, VIDEO_FRAME_TIMEOUT_MS);
-      pendingFrame = {
-        identity,
-        resolve: (frame): void => {
-          window.clearTimeout(timer);
-          resolve(frame);
-        },
-        reject: (error): void => {
-          window.clearTimeout(timer);
-          reject(error);
-        },
-      };
-      try {
-        ensureWorker().postMessage({ type: "render", ...identity, bitmap, detectFace: beautyNeedsFace(currentBeauty()) }, [bitmap]);
-      } catch (error: unknown) {
-        window.clearTimeout(timer);
-        pendingFrame = null;
-        bitmap.close();
-        reject(error);
-      }
-    });
-  }
-
-  /** 快照创建也受 8 秒阈值约束；迟到的 bitmap 必须关闭 */
-  function captureBitmap(source: HTMLVideoElement, signal: AbortSignal): Promise<ImageBitmap> {
-    return new Promise((resolve, reject) => {
-      let expired = false;
-      /** 取消后立即腾出处理槽；快照若迟到仍由下方回调关闭 */
-      const cancel = (): void => {
-        expired = true;
-        release();
-        reject(new DOMException("预览请求已取消", "AbortError"));
-      };
-      /** 所有退出路径都移除定时器和取消监听 */
-      const release = (): void => {
-        window.clearTimeout(timer);
-        signal.removeEventListener("abort", cancel);
-      };
-      const timer = window.setTimeout(() => {
-        expired = true;
-        release();
-        reject(new Error("视频快照超时（8 秒）"));
-      }, VIDEO_FRAME_TIMEOUT_MS);
-      signal.addEventListener("abort", cancel, { once: true });
-      if (signal.aborted) {
-        cancel();
-        return;
-      }
-      void createImageBitmap(source).then(
-        (bitmap) => {
-          release();
-          if (expired || disposed) {
-            bitmap.close();
-            if (!expired) reject(new DOMException("播放器已卸载", "AbortError"));
-          } else resolve(bitmap);
-        },
-        (error: unknown) => {
-          release();
-          reject(error);
-        },
+      commit(
+        makeLayer(source, size.width, size.height, clips.value[currentIdx.value]?.id ?? "", source.videoWidth, source.videoHeight),
+        size.width,
+        size.height,
       );
-    });
+      lastVideo = source;
+      lastTime = source.currentTime;
+    } catch (error: unknown) {
+      fail(error);
+    }
   }
 
-  /** 串行定位、快照、处理和提交；只保留最后一次暂停拖动 */
-  async function render(): Promise<void> {
-    if (busy || !pendingRender || disposed || !beautyReady.value || !mediaReady.value || inGap.value) return;
-    const source = video.value;
-    if (!source) return;
-    pendingRender = false;
-    busy = true;
-    const token = revision;
-    const identity = identityForCurrentFrame();
-    const controller = new AbortController();
-    requestAbort = controller;
-    let bitmap: ImageBitmap | null = null;
+  /** 暂停拖动合并请求；播放立即处理，始终只有一个实际任务。 */
+  function schedule(): void {
+    if (disposed || !mediaReady.value || inGap.value) return;
+    pending = true;
+    clearTimeout(timer);
+    timer = window.setTimeout(() => void render(), isPlaying.value ? 0 : 80);
+  }
+
+  /** 定位并处理一侧，随采样而不是随当前播放片段读取美颜。 */
+  async function renderSide(
+    index: number,
+    source: HTMLVideoElement,
+    identity: PreviewFrameIdentity,
+    signal: AbortSignal,
+  ): Promise<OffscreenCanvas> {
+    const clip = clips.value[index];
+    if (!clip) throw new Error("转场关联片段不存在");
+    const sourceTimeUs = previewSourceTimeUs(clips.value, index, sampleTime.value);
+    await seekPreviewVideo(source, previewSeekTimeSec(clips.value, index, sampleTime.value), signal);
+    signal.throwIfAborted();
+    const prepared =
+      (await ensureProcessor()?.process(source, readBeautyParams(clip.beauty), { ...identity, clipId: clip.id, sourceTimeUs }, signal)) ??
+      source;
+    signal.throwIfAborted();
+    const size = options.canvasSize.value ?? { width: source.videoWidth, height: source.videoHeight };
+    return makeLayer(prepared, size.width, size.height, clip.id, source.videoWidth, source.videoHeight);
+  }
+
+  /** 两侧串行共享美颜资源；算法异常降级为当前自然片段。 */
+  async function renderTransition(
+    sample: TransitionSample,
+    identity: PreviewFrameIdentity,
+    signal: AbortSignal,
+  ): Promise<CanvasImageSource> {
+    const a = clips.value.findIndex((clip) => clip.id === sample.clipA.id);
+    const b = clips.value.findIndex((clip) => clip.id === sample.clipB.id);
+    const active = video.value;
+    const standby = options.standbyVideo.value;
+    if (!active || !standby || a < 0 || b < 0) throw new Error("转场双侧画面尚未就绪");
+    const outgoing = await renderSide(a, currentIdx.value === a ? active : standby, identity, signal);
+    const incoming = await renderSide(b, currentIdx.value === b ? active : standby, identity, signal);
     try {
-      await seekPreviewVideo(source, identity.sourceTimeUs / 1e6, controller.signal);
-      if (!isCurrent(identity, token, source)) return;
-      bitmap = await captureBitmap(source, controller.signal);
-      if (!isCurrent(identity, token, source)) return;
-      const processing = processBitmap(bitmap, identity);
-      bitmap = null;
-      const frame = await processing;
-      if (!isCurrent(identity, token, source) || !gpu || !gpuCanvas.value) return;
-      const beauty = currentBeauty();
-      const levels = frame.warning ? { ...beauty, slim: 0, eye: 0 } : beauty;
-      try {
-        gpu.draw(new Uint8Array(frame.buffer), frame.width, frame.height, levels, frame.landmarks);
-      } catch (error: unknown) {
-        fallback(error);
-        return;
-      }
-      // WebGL 默认缓冲可能在本轮结束后清除，必须立即复制到可见 2D 画布。
-      commit(gpuCanvas.value, frame.width, frame.height);
-      previewError.value = frame.warning || faceWarning;
+      const result = await engine.render({
+        effectId: sample.transition.effectId,
+        outgoing,
+        incoming,
+        width: outgoing.width,
+        height: outgoing.height,
+        progress: sample.progress,
+        params: sample.transition.params,
+      });
+      signal.throwIfAborted();
+      return result;
+    } catch (error: unknown) {
+      signal.throwIfAborted();
+      previewError.value = `转场已回退普通画面：${error instanceof Error ? error.message : "算法失败"}`;
+      return sample.progress < 0.5 ? outgoing : incoming;
+    }
+  }
+
+  /** 串行提交，并核对控制代次、采样和转场配置，拒绝所有迟到帧。 */
+  async function render(): Promise<void> {
+    if (busy || !pending || disposed || !mediaReady.value || inGap.value) return;
+    if (!transition.value && !beautyReady.value) {
+      pending = false;
+      drawVideo(true);
+      return;
+    }
+    busy = true;
+    pending = false;
+    const token = revision;
+    const sample = transition.value;
+    const time = sampleTime.value;
+    const identity: PreviewFrameIdentity = {
+      generation: renderGeneration.value,
+      requestId: ++requestId,
+      clipId: clips.value[currentIdx.value]?.id ?? "",
+      sourceTimeUs: previewSourceTimeUs(clips.value, currentIdx.value, time),
+      timelineTimeSec: time,
+      transitionId: sample?.transition.id,
+      secondaryClipId: sample?.clipB.id,
+      secondarySourceTimeUs: sample
+        ? previewSourceTimeUs(
+            clips.value,
+            clips.value.findIndex((clip) => clip.id === sample.clipB.id),
+            time,
+          )
+        : undefined,
+    };
+    const controller = new AbortController();
+    request = controller;
+    try {
+      const source = video.value;
+      if (!source) return;
+      const result = sample
+        ? await renderTransition(sample, identity, controller.signal)
+        : await renderSide(currentIdx.value, source, identity, controller.signal);
+      if (disposed || token !== revision || identity.generation !== renderGeneration.value || time !== sampleTime.value) return;
+      const size = options.canvasSize.value ?? { width: source.videoWidth, height: source.videoHeight };
+      commit(result, size.width, size.height);
       options.onFramePresented(identity);
     } catch (error: unknown) {
-      if (!isCurrent(identity, token, source)) {
-        // 过期任务超时后已终止 Worker，新请求必须重新预热其模型。
-        if (!worker && !disposed && beautyReady.value) void warmup();
-        return;
-      }
-      failFrame(error);
-      if (!worker) {
-        failed = true;
-        beautyReady.value = false;
-      }
+      if (!controller.signal.aborted && token === revision && !disposed) fail(error);
     } finally {
-      bitmap?.close();
       busy = false;
-      if (requestAbort === controller) requestAbort = null;
-      if (pendingRender && !disposed) schedule();
+      if (request === controller) request = null;
+      if (pending && !disposed) schedule();
     }
   }
 
-  /** 原生视频帧回调优先；不支持时按媒体时间去重的 RAF 回退 */
+  /** 原生播放由解码帧驱动，暂停和 seek 主动补画。 */
   function bindVideo(): void {
     unbindVideo?.();
     const source = video.value;
     if (!source) return;
-    let frameCallback = 0;
-    let animationCallback = 0;
+    let callback = 0;
+    let raf = 0;
     let cancelled = false;
-    /** 播放期间按解码帧提交普通画面 */
     const tick = (): void => {
       if (cancelled || disposed) return;
       drawVideo();
-      if (typeof source.requestVideoFrameCallback === "function") frameCallback = source.requestVideoFrameCallback(tick);
-      else animationCallback = requestAnimationFrame(tick);
+      if (source.requestVideoFrameCallback) callback = source.requestVideoFrameCallback(tick);
+      else raf = requestAnimationFrame(tick);
     };
-    /** 暂停 seek、首帧加载及尺寸变化主动补画 */
     const redraw = (): void => drawVideo(true);
     const events = ["loadeddata", "seeked", "pause", "resize", "canplay"];
-    for (const event of events) source.addEventListener(event, redraw);
+    events.forEach((event) => source.addEventListener(event, redraw));
     tick();
     unbindVideo = (): void => {
       cancelled = true;
-      if (frameCallback) source.cancelVideoFrameCallback?.(frameCallback);
-      cancelAnimationFrame(animationCallback);
-      for (const event of events) source.removeEventListener(event, redraw);
+      source.cancelVideoFrameCallback?.(callback);
+      cancelAnimationFrame(raf);
+      events.forEach((event) => source.removeEventListener(event, redraw));
     };
   }
 
-  /** 只在总开关、人脸需求或内部画布变化时预热，不随每个采样重复加载 */
+  /** 美颜参数发生实质变化时预热；采样时间变化不重复初始化。 */
   watch(
-    [gpuCanvas, () => currentBeauty().enabled, () => beautyNeedsFace(currentBeauty())],
-    () => {
-      failed = false;
-      invalidate();
-      void warmup();
+    [gpuCanvas, () => JSON.stringify(requiredBeauty())],
+    async () => {
+      const token = ++warmupRevision;
+      const levels = requiredBeauty();
+      const next = ensureProcessor();
+      next?.resetFailure();
+      const ready = (await next?.warmup(levels)) ?? false;
+      if (!disposed && token === warmupRevision) {
+        beautyReady.value = ready;
+        invalidate();
+        schedule();
+      }
     },
     { immediate: true, flush: "post" },
   );
 
-  /** 所有操作先使旧快照失效，再安排当前最终目标 */
+  /** 控制、布局或工程参数变化均废弃旧帧；真实空隙清画布。 */
   watch(
-    [renderGeneration, sampleTime, mediaReady, isPlaying, inGap, video, () => JSON.stringify(clips.value[currentIdx.value]?.beauty)],
+    [
+      renderGeneration,
+      sampleTime,
+      mediaReady,
+      isPlaying,
+      inGap,
+      video,
+      () => JSON.stringify(options.transitionTrack.value),
+      options.canvasSize,
+      options.frame,
+    ],
     () => {
-      if (!reportingFailure) frameFailed = false;
       invalidate();
-      if (!clips.value.length) clearCanvas(true);
-      else if (inGap.value) clearCanvas(false);
-      else if (beautyReady.value) schedule();
+      if (!clips.value.length || inGap.value) {
+        const target = canvas.value;
+        target?.getContext("2d")?.clearRect(0, 0, target.width, target.height);
+        if (!clips.value.length) {
+          videoSize.value = null;
+          frameReady.value = false;
+        }
+      } else if (transition.value || beautyReady.value) schedule();
       else drawVideo(true);
     },
     { flush: "sync" },
   );
-  /** 活动 video 或可见画布重新挂载时更新原生帧监听 */
+  /** 解码槽或画布重新挂载后重绑原生帧回调。 */
   watch(
     [video, canvas],
     () => {
       bindVideo();
       drawVideo(true);
     },
-    { flush: "post", immediate: true },
+    { immediate: true, flush: "post" },
   );
-  /** 退出美颜后补画同一个 Canvas，保持已有帧到定位完成 */
-  watch(beautyReady, (ready) => {
-    if (!ready) drawVideo(true);
-  });
-
   onUnmounted(() => {
     disposed = true;
+    warmupRevision += 1;
     invalidate();
-    warmupId += 1;
     unbindVideo?.();
-    worker?.postMessage({ type: "dispose" });
-    worker?.terminate();
-    worker = null;
-    pendingFrame?.reject(new DOMException("播放器已卸载", "AbortError"));
-    pendingFrame = null;
-    for (const pending of warmups.values()) pending.reject(new DOMException("播放器已卸载", "AbortError"));
-    warmups.clear();
-    gpu?.destroy();
-    gpu = null;
+    processor?.dispose();
+    layers.clear();
     beautyReady.value = false;
   });
-
   return { videoSize, frameReady, previewError };
 }

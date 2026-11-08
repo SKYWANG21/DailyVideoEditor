@@ -14,9 +14,7 @@
       >
         <!-- 双 video 只解码与播放原声；普通和美颜画面始终显示在同一块 Canvas -->
         <div
-          class="absolute"
-          :class="catalogPreviewActive ? 'inset-0 overflow-hidden' : undefined"
-          :style="catalogPreviewActive ? undefined : videoBoxStyle"
+          class="absolute inset-0 overflow-hidden"
         >
           <video
             ref="videoARef"
@@ -226,6 +224,7 @@ import { ref, computed, watch, nextTick, toRef, onBeforeUnmount, onMounted, type
 import { Pause, Play, SkipBack, SkipForward, Video, Volume2, VolumeX } from "@lucide/vue";
 import type {
   ComposeConfig,
+  ComposeTrack,
   ComposeTextOverlayClip,
   PreviewAudioClip,
   SubtitleItem,
@@ -250,6 +249,8 @@ import { containFrameStage, frameBoxStyle } from "../shared/videoFrame";
 import type { RectConfig } from "@/clip-track";
 
 const props = defineProps<{
+  /** 主视频轨及转场；素材库临时预览自动停用。 */
+  transitionTrack?: ComposeTrack;
   /** 视频片段列表（时间轴派生） */
   videoClips: VideoClipItem[];
   /** 素材库预览时临时 override 主播放器（单 clip） */
@@ -387,6 +388,8 @@ const audioClipsRef = computed(() => props.audioClips || []);
 const composeConfigRef = toRef(props, "composeConfig");
 /** 预览静音。不写回片段音量 */
 const previewMuted = ref(false);
+/** 素材库预览不得混入工程时间线的接缝。 */
+const transitionTrackRef = computed(() => props.catalogPreviewActive ? undefined : props.transitionTrack);
 
 const {
   currentIdx: playingIdx,
@@ -394,6 +397,7 @@ const {
   isPlaying,
   inGap,
   activeVideoEl,
+  standbyVideoEl,
   mediaReady,
   playbackError,
   sampleTime,
@@ -410,6 +414,7 @@ const {
   init,
   refreshBgm,
 } = useVideoComposePreview({
+  transitionTrack: transitionTrackRef,
   videoA: videoARef,
   videoB: videoBRef,
   bgmEl: bgmAudioRef,
@@ -439,6 +444,10 @@ const { videoSize, previewError: frameError } = useComposePreviewFrame({
   canvas: previewCanvasRef,
   gpuCanvas: gpuCanvasRef,
   video: activeVideoEl,
+  standbyVideo: standbyVideoEl,
+  transitionTrack: transitionTrackRef,
+  canvasSize: canvasSizeRef,
+  frame: computed(() => props.catalogPreviewActive ? null : props.videoFrame),
   mediaReady,
   clips: effectiveClips,
   currentIdx: playingIdx,
@@ -474,9 +483,12 @@ function onDirectVideoMetadata(event: Event): void {
   emit("update:source-size", { clipId, width: size.width, height: size.height });
 }
 
-/** 切到另一层时，用该 video 上已经加载好的像素尺寸 */
-watch(activeVideoEl, (el) => {
-  directVideoSize.value = readDirectVideoSize(el);
+/** 切到另一层时同步已加载尺寸，包含待命槽提前完成元数据加载的情况。 */
+watch([activeVideoEl, playingIdx], ([el]) => {
+  const size = readDirectVideoSize(el);
+  directVideoSize.value = size;
+  const clipId = effectiveClips.value[playingIdx.value]?.id;
+  if (clipId && size) emit("update:source-size", { clipId, ...size });
 });
 
 /** 已提交画面的像素尺寸，首帧前回退活动 video 元数据 */

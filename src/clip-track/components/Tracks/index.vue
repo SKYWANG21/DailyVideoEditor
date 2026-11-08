@@ -46,6 +46,9 @@
               <template #clip-content="slotProps">
                 <slot name="clip-content" v-bind="slotProps" />
               </template>
+              <template #track-overlay="slotProps">
+                <slot name="track-overlay" v-bind="slotProps" />
+              </template>
             </TrackArea>
           </div>
         </div>

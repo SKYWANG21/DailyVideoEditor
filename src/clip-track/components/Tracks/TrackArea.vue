@@ -35,6 +35,7 @@
       </ClipItem>
 
       <!-- 拖拽预览框 -->
+      <slot name="track-overlay" :track="track" :pixels-per-second="actualPixelsPerSecond" />
       <DragPreview v-if="showDragPreview" :track="track" />
     </div>
   </div>

@@ -1,16 +1,21 @@
 import { ref, computed, watch, onUnmounted, type Ref, type ComputedRef } from "vue";
-import type { VideoClipItem, ComposeConfig, PreviewAudioClip } from "@/types/videoCompose";
+import type { VideoClipItem, ComposeConfig, PreviewAudioClip, ComposeTrack } from "@/types/videoCompose";
 import type { PreviewFrameIdentity } from "@/types/beautyPreview";
 import { createPreviewAudioMixer, type PreviewAudioMixerSyncState } from "@/hooks/previewAudioMixer";
 import { applyMediaCrossOrigin, mediaElementUsesUrl } from "@/service/resolveComposeMediaUrl";
 import { useComposeMediaResolver } from "@/editor/composeRuntime";
 import { applyPreviewGain, primePreviewAudioContext } from "@/hooks/previewMediaGain";
 import { clampGain } from "@/editor/volumeDb";
-import { previewClipStartSec, previewSourceTimeUs } from "@/hooks/previewSourceTime";
+import { previewClipStartSec, previewSourceTimeUs, previewSeekTimeSec } from "@/hooks/previewSourceTime";
 import { readBeautyParams } from "@/types/composeMedia";
 import { seekPreviewVideo } from "@/hooks/previewVideoFrame";
+import { resolveTransitionAtTime, resolveTransitionSeams } from "@/transitions/timing";
+import { createTransitionRegistry } from "@/transitions/catalog";
+import type { TransitionSample } from "@/types/transition";
 
 interface UseVideoComposePreviewOptions {
+  /** 当前主轨配置，素材库单片预览不传。 */
+  transitionTrack: Ref<ComposeTrack | undefined>;
   /** 双缓冲 video 同时负责解码和原声，画面统一由 Canvas 显示 */
   videoA: Ref<HTMLVideoElement | null>;
   /** 双缓冲视频 B */
@@ -44,6 +49,7 @@ function clipRate(clip: VideoClipItem | undefined): number {
 export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
   const { videoA, videoB, bgmEl, clips, previewMuted, beautyReady } = options;
   const composeConfig = options.config;
+  const transitionRegistry = createTransitionRegistry();
   const mediaResolver = useComposeMediaResolver();
   const audioMixer = createPreviewAudioMixer(mediaResolver);
   const isPlaying = ref(false);
@@ -117,7 +123,16 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
 
   /** 当前参数已预热才接管时钟；首次加载继续普通播放 */
   function framePaced(): boolean {
-    return beautyReady.value && readBeautyParams(clips.value[currentIdx.value]?.beauty).enabled && !inGap.value;
+    return (
+      Boolean(transitionAt(sampleTime.value)) ||
+      (beautyReady.value && readBeautyParams(clips.value[currentIdx.value]?.beauty).enabled && !inGap.value)
+    );
+  }
+
+  /** 时间窗命中独立于自然片段所属；未知效果由绘制层提示回退。 */
+  function transitionAt(time: number): TransitionSample | null {
+    const track = options.transitionTrack.value;
+    return track ? resolveTransitionAtTime(track.clips, track.transitions ?? [], time) : null;
   }
 
   /** 全局倍速与片段倍速相乘 */
@@ -203,7 +218,7 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
     if (!mediaElementUsesUrl(video, resolved)) video.src = resolved;
     video.pause();
     video.muted = true;
-    await seekPreviewVideo(video, previewSourceTimeUs(clips.value, index, time) / 1e6, signal);
+    await seekPreviewVideo(video, previewSeekTimeSec(clips.value, index, time), signal);
   }
 
   /** 待命层复用 video 解码器；不再预取独立 MP4 解码会话 */
@@ -252,7 +267,11 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
 
   /** 为当前目标暂停媒体；快照钩子负责 seek、处理和最终提交 */
   function requestSample(time: number): void {
-    if (!mediaReady.value || !framePaced()) return;
+    if (!mediaReady.value) return;
+    if (!transitionAt(time) && !(beautyReady.value && readBeautyParams(clips.value[currentIdx.value]?.beauty).enabled)) {
+      void seek(time);
+      return;
+    }
     playbackWaiting.value = true;
     holdMedia();
     sampleTime.value = time;
@@ -265,10 +284,29 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
     const clip = clips.value[currentIdx.value];
     if (disposed || identity.generation !== renderGeneration.value || identity.clipId !== clip?.id) return;
     if (identity.sourceTimeUs !== previewSourceTimeUs(clips.value, currentIdx.value, sampleTime.value) || !framePaced()) return;
+    const transition = transitionAt(sampleTime.value);
+    if (
+      identity.transitionId !== transition?.transition.id ||
+      (identity.timelineTimeSec != null && identity.timelineTimeSec !== sampleTime.value)
+    )
+      return;
+    if (
+      transition &&
+      (identity.secondaryClipId !== transition.clipB.id ||
+        identity.secondarySourceTimeUs !==
+          previewSourceTimeUs(
+            clips.value,
+            clips.value.findIndex((item) => item.id === transition.clipB.id),
+            sampleTime.value,
+          ))
+    )
+      return;
     if (!isPlaying.value) {
       playbackWaiting.value = false;
       return;
     }
+    // 同一采样因画幅/参数变化重绘时替换续播计时器，不能重复推进。
+    window.clearTimeout(paceTimer);
     globalTime.value = sampleTime.value;
     const index = currentIdx.value;
     const end = clipEnd(index);
@@ -340,6 +378,16 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
         activeSlot.value = activeSlot.value === 0 ? 1 : 0;
       }
       currentIdx.value = index;
+      // 转场期间另一槽保留 A/B 的另一侧，禁止下一段预加载覆盖它。
+      const transition = transitionAt(time);
+      if (transition) {
+        const otherId = clip.id === transition.clipA.id ? transition.clipB.id : transition.clipA.id;
+        const otherIndex = clips.value.findIndex((item) => item.id === otherId);
+        const standby = standbyVideoEl.value;
+        if (!standby || otherIndex < 0) throw new Error("转场关联视频尚未就绪");
+        await loadVideo(standby, otherIndex, time, controller.signal);
+        if (controller.signal.aborted || disposed) return;
+      }
       standbyReadyIdx = -1;
       mediaReady.value = true;
       syncVolumes();
@@ -349,7 +397,7 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
       if (controller.signal.aborted || disposed) return;
       if (isPlaying.value) startLoop();
       syncBgm();
-      if (index + 1 < clips.value.length) void prepareStandby(index + 1);
+      if (!transition && index + 1 < clips.value.length) void prepareStandby(index + 1);
     } catch (error: unknown) {
       if (!controller.signal.aborted && !disposed) onFrameFailed(error instanceof Error ? error.message : "视频画面读取失败");
     }
@@ -397,12 +445,24 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
     else if (mediaReady.value && !framePaced() && !playbackWaiting.value) {
       const video = activeVideoEl.value;
       if (video && !video.seeking) globalTime.value = mediaTime(video);
+      if (transitionAt(globalTime.value)) {
+        void seek(globalTime.value);
+        return;
+      }
       const index = currentIdx.value;
       const remain = clipEnd(index) - globalTime.value;
       const next = index + 1;
       if (next < clips.value.length && remain <= PREPARE_AHEAD_SEC) void prepareStandby(next);
       const seamless = next < clips.value.length && clipStart(next) <= clipEnd(index) + 0.000001;
-      if (remain <= 0.001 || video?.ended || (seamless && remain <= SWAP_AHEAD_SEC && standbyReadyIdx === next)) advancePastClip(index);
+      const track = options.transitionTrack.value;
+      const upcoming = track
+        ? resolveTransitionSeams(track.clips, track.transitions).find((seam) => seam.transition && seam.clipA.id === clips.value[index]?.id)
+        : undefined;
+      if (upcoming?.transition && upcoming.cut - upcoming.transition.durationSec / 2 - globalTime.value <= PREPARE_AHEAD_SEC) {
+        void transitionRegistry.resolve(upcoming.transition.effectId).catch(() => undefined);
+      }
+      if (remain <= 0.001 || video?.ended || (seamless && !upcoming && remain <= SWAP_AHEAD_SEC && standbyReadyIdx === next))
+        advancePastClip(index);
     }
     syncBgm();
     if (isPlaying.value) rafId = requestAnimationFrame(loop);
@@ -490,6 +550,14 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
     { flush: "sync" },
   );
 
+  /** 配置变化保持游标重建双侧定位，删除时恢复普通播放。 */
+  watch(
+    () => JSON.stringify(options.transitionTrack.value?.transitions),
+    () => {
+      if (!disposed && clips.value.length) void resync(globalTime.value);
+    },
+  );
+
   /** 参数改变作废处理中的画面，保留当前游标重新取样 */
   watch(
     () => JSON.stringify(clips.value[currentIdx.value]?.beauty),
@@ -534,6 +602,7 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
     totalDurationSec,
     activeSlot,
     activeVideoEl,
+    standbyVideoEl,
     mediaReady,
     playbackWaiting,
     playbackError,

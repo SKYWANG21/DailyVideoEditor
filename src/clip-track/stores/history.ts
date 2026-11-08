@@ -34,6 +34,7 @@ export const useHistoryStore = defineStore("history", () => {
   // 方法：创建快照
   function createSnapshot(description?: string): HistoryItem {
     const tracksStore = boundTracksStore();
+    tracksStore.reconcileTransitions();
     const snapshot: HistoryItem = {
       id: `${Date.now()}-${Math.random()}`,
       timestamp: Date.now(),

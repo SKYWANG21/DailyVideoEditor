@@ -36,6 +36,8 @@ export function waitForPreviewMedia(video: HTMLMediaElement, ready: () => boolea
 export async function seekPreviewVideo(video: HTMLMediaElement, sourceSec: number, signal: AbortSignal): Promise<void> {
   await waitForPreviewMedia(video, () => video.readyState >= HTMLMediaElement.HAVE_METADATA, signal);
   if (signal.aborted) throw new DOMException("预览请求已取消", "AbortError");
-  if (Math.abs(video.currentTime - sourceSec) > 0.000001) video.currentTime = sourceSec;
+  // 片尾保持最后有效像素，不能 seek 到 duration 之后的无帧位置。
+  const target = Number.isFinite(video.duration) ? Math.max(0, Math.min(sourceSec, video.duration - 0.001)) : Math.max(0, sourceSec);
+  if (Math.abs(video.currentTime - target) > 0.000001) video.currentTime = target;
   await waitForPreviewMedia(video, () => !video.seeking && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA, signal);
 }

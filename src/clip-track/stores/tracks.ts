@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { Track, Clip, ClipType, TrackType, MediaClip, TransitionClip, TrackTypeConfig } from '../types'
 import { normalizeTime } from '../utils/helpers'
+import { normalizeTrackTransitions } from '@/transitions/timing'
 
 export const useTracksStore = defineStore('tracks', () => {
   // 状态
@@ -119,6 +120,14 @@ export const useTracksStore = defineStore('tracks', () => {
    */
   function setTracks(tracksData: Track[]) {
     tracks.value = normalizeTracks(tracksData)
+    reconcileTransitions()
+  }
+
+  /** 编辑事务完成后统一清理，拖动中的临时布局不触发删除。 */
+  function reconcileTransitions(): void {
+    for (const track of tracks.value) {
+      if (track.transitions) track.transitions = normalizeTrackTransitions(track.clips, track.transitions)
+    }
   }
 
   /**
@@ -1040,6 +1049,7 @@ export const useTracksStore = defineStore('tracks', () => {
     updateTrack,
     getTrackCountByType,
     setTracks,
+    reconcileTransitions,
     normalizeTracks,
     normalizeClipDuration,
     addClip,

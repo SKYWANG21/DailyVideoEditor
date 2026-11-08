@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "vue-tsc --noEmit && node scripts/bump-version.mjs && vite build --mode lib",
     "build:demo": "vue-tsc --noEmit && vite build",
-    "typecheck": "vue-tsc --noEmit"
+    "typecheck": "vue-tsc --noEmit",
+    "test": "vitest run",
+    "test:browser": "node tests/browser-transitions.mjs"
   },
   "types": "./dist/index.d.ts",
   "files": [
@@ -34,11 +36,13 @@
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
     "@vitejs/plugin-vue": "^5.2.4",
+    "prettier": "^3.9.10",
     "sass-embedded": "^1.105.2",
     "tailwindcss": "^4.3.3",
     "typescript": "^5.9.3",
     "vite": "^6.4.4",
     "vite-plugin-dts": "4.5.4",
+    "vitest": "^3.2.7",
     "vue": "^3.5.44",
     "vue-tsc": "^3.3.13"
   }

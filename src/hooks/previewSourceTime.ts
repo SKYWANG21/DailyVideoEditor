@@ -29,6 +29,15 @@ export function previewSourceTimeUs(clips: VideoClipItem[], index: number, globa
   return Math.max(0, Math.round(Math.min(sourceSec, trimEnd) * 1e6));
 }
 
+/** 实际解码使用出点之前的有效像素，逻辑采样身份仍使用精确出点。 */
+export function previewSeekTimeSec(clips: VideoClipItem[], index: number, globalTimeSec: number): number {
+  const clip = clips[index];
+  if (!clip) return 0;
+  const trim = Math.max(0, clip.trimStart ?? 0);
+  const end = clip.trimEnd ?? trim + clip.durationSec * (clip.playbackRate || 1);
+  return Math.min(previewSourceTimeUs(clips, index, globalTimeSec) / 1e6, Math.max(trim, end - 0.001));
+}
+
 /**
  * 源时间（微秒）换回时间轴秒数，是 previewSourceTimeUs 的反函数。
  * @param clips 当前播放列表

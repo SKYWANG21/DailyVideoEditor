@@ -1,7 +1,10 @@
 import type { Clip } from './clip'
+import type { ComposeTransition } from '@/types/transition'
 
 // 轨道接口
 export interface Track {
+  /** 独立于片段时长的接缝转场，随轨道快照保存。 */
+  transitions?: ComposeTransition[]
   id: string
   type: TrackType
   name: string

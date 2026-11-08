@@ -103,6 +103,9 @@
           </VideoComposeTextTemplateCatalog>
         </template>
 
+        <template v-else-if="catId === 'transition'">
+          <VideoComposeTransitionCatalog :readonly="readonly" @apply="emit('apply-transition', $event)" />
+        </template>
         <template v-else>
           <div class="grid gap-2" :style="cardGridStyle">
             <slot name="sfx-actions">
@@ -145,15 +148,17 @@ import VideoComposeAssetCard from "./VideoComposeAssetCard.vue";
 import VideoComposeClipCatalog from "./VideoComposeClipCatalog.vue";
 import VideoComposeTextTemplateCatalog from "./VideoComposeTextTemplateCatalog.vue";
 import VideoComposeUnderlineTabs from "../shared/VideoComposeUnderlineTabs.vue";
+import VideoComposeTransitionCatalog from "./VideoComposeTransitionCatalog.vue";
 import type { TextTemplateItem } from "../shared/textTemplateCatalog";
 
-/** 左栏分类。不含图片、转场 */
+/** 左栏素材和转场目录。 */
 const cats = [
   { id: "video", name: "视频" },
   { id: "audio", name: "音频" },
   { id: "subtitle", name: "字幕" },
   { id: "fancy", name: "花字" },
   { id: "sfx", name: "音效" },
+  { id: "transition", name: "转场" },
 ] as const;
 
 type AssetCatId = (typeof cats)[number]["id"];
@@ -190,6 +195,8 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
+  /** 双击转场卡片应用到目标接缝。 */
+  "apply-transition": [effectId: string];
   "upload-clip": [];
   "open-upload-bgm": [];
   "upload-sfx": [];

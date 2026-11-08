@@ -23,6 +23,7 @@
           @preview-clip="onCatalogPreview"
           @remove-catalog-clip="onRemoveCatalogVariant"
           @toggle-like="onToggleCatalogLike"
+          @apply-transition="timelineRef?.applyTransition($event)"
         >
           <template v-for="name in forwardedActionSlots" :key="name" #[name]>
             <slot :name="name" />
@@ -40,6 +41,7 @@
           ref="playerRef"
           class="h-full min-h-0 w-full min-w-0"
           :video-clips="derivedMainClips"
+          :transition-track="mainTrack"
           :override-clips="previewOverrideClips"
           :catalog-preview-active="!!previewCatalogVariant"
           :catalog-preview-label="previewCatalogLabel"
@@ -154,6 +156,7 @@
         @drop-subtitle-asset="onTimelineDropSubtitleAsset"
         @drop-text-template="onTimelineDropTextTemplate"
         @inspect-track="onInspectTrack"
+        @transition-applied="clearCatalogPreview"
       >
         <template v-for="name in forwardedTimelineSlots" :key="name" #[name]="slotProps">
           <slot :name="name" v-bind="slotProps || {}" />
@@ -417,6 +420,7 @@ const {
   onTimelineScaleUpdate,
   frameAspect,
   canvasSize,
+  mainTrack,
   visibleClipId,
   visibleVideoFrame,
   inspectorVideoFrame,

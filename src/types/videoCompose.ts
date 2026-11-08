@@ -3,6 +3,7 @@ import { generateId } from "@/clip-track";
 import type { BeautyParams, ComposeConfig, PreviewAudioClip, SubtitleItem, SubtitleStyleConfig, VideoClipItem } from "@/types/composeMedia";
 import { createDefaultComposeConfig, createDefaultSubtitleStyle, readBeautyParams } from "@/types/composeMedia";
 import { clampGain } from "@/editor/volumeDb";
+import type { ComposeTransition } from "./transition";
 
 /** 媒体业务类型（本地声明，不请求签名接口） */
 export type MediaBizType =
@@ -282,6 +283,8 @@ export function normalizeSubtitleClipStyle(
 
 /** 对齐 vue-clip-track Track，clips 收窄为 ComposeClip */
 export interface ComposeTrack {
+  /** 主轨视频接缝的转场配置；旧工程缺省为空。 */
+  transitions?: ComposeTransition[];
   /** 轨道唯一 id */
   id: string;
   /** 轨道类型 */

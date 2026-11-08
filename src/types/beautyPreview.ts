@@ -10,6 +10,14 @@ export interface PreviewVideoSize {
 
 /** 贯穿快照、Worker 和画面提交的请求标识 */
 export interface PreviewFrameIdentity {
+  /** 双侧合成的时间轴采样点。 */
+  timelineTimeSec?: number;
+  /** 当前合成转场，普通帧为空。 */
+  transitionId?: string;
+  /** 转场另一侧的片段标识。 */
+  secondaryClipId?: string;
+  /** 转场另一侧的源时间。 */
+  secondarySourceTimeUs?: number;
   /** 播放控制代次；暂停、跳转和参数变化后旧代次失效 */
   generation: number;
   /** 播放器内递增的请求序号 */

@@ -124,6 +124,33 @@ createApp(App).mount("#app");
 
 可用 `createDefaultVideoComposeEditorModel({ bizType, bizId })` 创建空工程。
 
+### 主视频轨转场
+
+左侧「转场」提供基础淡化。卡片可拖至主轨接缝，也可选中相邻视频后双击应用；接缝双竖线手柄可修改时长或删除转场。
+转场默认 1 秒，以切点居中，不改变片段位置或工程总时长。仅混合视频画面，原声仍在切点切换；两侧各自的美颜和画面变换会先处理再淡化。
+
+配置保存在 `modelValue.tracks[].transitions`，随撤销重做、`reload()` 和 `exportComposePayload()` 一起读写：
+
+```ts
+transitions: [{
+  id: "transition-1",
+  clipAId: "video-a",
+  clipBId: "video-b",
+  effectId: "crossfade",
+  durationSec: 1,
+  params: { curve: "linear" },
+}]
+```
+
+旧工程缺省为空；关联视频不再相邻时清理转场，缩短片段时自动限制转场时长。实际成片服务由宿主消费该字段，本库不执行服务端渲染。
+
+绘制驱动 `TransitionEngine` 与算法通过 `TransitionRegistry` 解耦。内置目录位于 `src/transitions/catalog.ts`；新增算法实现
+`TransitionAlgorithm` 并在目录注册描述及 `load()`，素材面板与手柄菜单从该目录读取，不必修改引擎分发。
+外部可使用导出的引擎、注册表和类型独立集成；引擎返回的 Canvas 为复用缓冲，需要保存跨帧结果时调用 `renderBitmap()`。
+
+开发验证：`pnpm test`、`pnpm typecheck`。真实浏览器验证先启动 `pnpm exec vite --host 127.0.0.1 --port 5175 --strictPort`，再运行
+`node tests/browser-transitions.mjs`；默认使用本机 Edge，可通过 `TRANSITION_TEST_BROWSER` 指定 Chromium 可执行文件。
+
 ---
 
 ## 组件 Ref 方法（`VideoComposeEditorExpose`）
