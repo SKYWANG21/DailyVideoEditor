@@ -152,7 +152,8 @@ function onDrop(event: DragEvent, seam: TransitionSeam): void {
   margin-left: -12px;
   display: grid;
   place-items: center;
-  pointer-events: auto;
+  /* 接缝按钮以外的区域透传给底层片段裁剪手柄。 */
+  pointer-events: none;
 }
 .transition-handles__badge {
   width: 18px;
@@ -166,6 +167,7 @@ function onDrop(event: DragEvent, seam: TransitionSeam): void {
   color: var(--compose-surface);
   box-shadow: var(--compose-shadow-card);
   cursor: pointer;
+  pointer-events: auto;
 }
 .transition-handles__badge.is-active,
 .is-drag-over .transition-handles__badge {

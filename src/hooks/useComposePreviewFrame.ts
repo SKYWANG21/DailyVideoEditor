@@ -202,11 +202,12 @@ export function useComposePreviewFrame(options: UseComposePreviewFrameOptions) {
     source: HTMLVideoElement,
     identity: PreviewFrameIdentity,
     signal: AbortSignal,
+    positioned = false,
   ): Promise<OffscreenCanvas> {
     const clip = clips.value[index];
     if (!clip) throw new Error("转场关联片段不存在");
     const sourceTimeUs = previewSourceTimeUs(clips.value, index, sampleTime.value);
-    await seekPreviewVideo(source, previewSeekTimeSec(clips.value, index, sampleTime.value), signal);
+    if (!positioned) await seekPreviewVideo(source, previewSeekTimeSec(clips.value, index, sampleTime.value), signal);
     signal.throwIfAborted();
     const prepared =
       (await ensureProcessor()?.process(source, readBeautyParams(clip.beauty), { ...identity, clipId: clip.id, sourceTimeUs }, signal)) ??
@@ -216,7 +217,7 @@ export function useComposePreviewFrame(options: UseComposePreviewFrameOptions) {
     return makeLayer(prepared, size.width, size.height, clip.id, source.videoWidth, source.videoHeight);
   }
 
-  /** 两侧串行共享美颜资源；算法异常降级为当前自然片段。 */
+  /** 两侧并行定位后串行共享美颜资源，算法异常降级为当前自然片段。 */
   async function renderTransition(
     sample: TransitionSample,
     identity: PreviewFrameIdentity,
@@ -227,8 +228,16 @@ export function useComposePreviewFrame(options: UseComposePreviewFrameOptions) {
     const active = video.value;
     const standby = options.standbyVideo.value;
     if (!active || !standby || a < 0 || b < 0) throw new Error("转场双侧画面尚未就绪");
-    const outgoing = await renderSide(a, currentIdx.value === a ? active : standby, identity, signal);
-    const incoming = await renderSide(b, currentIdx.value === b ? active : standby, identity, signal);
+    const sourceA = currentIdx.value === a ? active : standby;
+    const sourceB = currentIdx.value === b ? active : standby;
+    const time = sampleTime.value;
+    await Promise.all([
+      seekPreviewVideo(sourceA, previewSeekTimeSec(clips.value, a, time), signal),
+      seekPreviewVideo(sourceB, previewSeekTimeSec(clips.value, b, time), signal),
+    ]);
+    signal.throwIfAborted();
+    const outgoing = await renderSide(a, sourceA, identity, signal, true);
+    const incoming = await renderSide(b, sourceB, identity, signal, true);
     try {
       const result = await engine.render({
         effectId: sample.transition.effectId,

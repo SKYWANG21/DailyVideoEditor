@@ -92,6 +92,9 @@ try {
   });
   await command("Runtime.enable");
   await command("Page.enable");
+  // 每次验证使用当前 Vite 模块，避免复用旧预构建版本造成两个 Vue 运行时。
+  await command("Network.enable");
+  await command("Network.setCacheDisabled", { cacheDisabled: true });
   await command("Emulation.setDeviceMetricsOverride", { width: 1440, height: 960, deviceScaleFactor: 1, mobile: false });
   await command("Page.navigate", { url: origin });
   await waitFor("Boolean(document.querySelector('.compose-shell'))", 45000);
@@ -143,15 +146,47 @@ try {
         if (Array.isArray(vnode.children)) for (const child of vnode.children) { const match = visit(child); if (match) return match; } return null; };
       return visit(instance?.subTree);
     };
-    window.transitionTest = { model, editor, app, find, urls, readonly };
+    window.transitionTest = { model, editor, app, find, urls, readonly, record, initialModel: JSON.parse(JSON.stringify(model.value)) };
   })()`);
   await waitFor("document.querySelectorAll('.transition-handles__badge').length === 1");
   await evaluate(`(() => {
     const test = window.transitionTest, root = test.app._instance;
     test.timeline = test.find(root, 'VideoComposeTimeline').exposed;
     test.player = test.find(root, 'VideoComposePlayer').exposed;
-    test.timeline.selectClipById('a'); test.timeline.applyTransition('crossfade');
   })()`);
+  const resizePoint = await evaluate(`(() => {
+    const badge = document.querySelector('.transition-handles__badge'), badgeRect = badge.getBoundingClientRect();
+    const cutX = badgeRect.left + badgeRect.width / 2;
+    const handles = [...document.querySelectorAll('.clip__handle')].filter((el) => {
+      const rect = el.getBoundingClientRect(); return Math.abs(rect.left + rect.width / 2 - cutX) < 8;
+    });
+    return { badgeHit: document.elementFromPoint(cutX, badgeRect.top + badgeRect.height / 2)?.closest('.transition-handles__badge') === badge,
+      edges: handles.map((el) => { const rect = el.getBoundingClientRect(), x = rect.left + rect.width / 2, y = rect.top + 4;
+        return { x, y, hit: document.elementFromPoint(x, y) === el, right: el.classList.contains('clip__handle--right') }; }) };
+  })()`);
+  assert.equal(resizePoint.badgeHit, true);
+  assert.equal(resizePoint.edges.length, 2);
+  assert.ok(
+    resizePoint.edges.every((edge) => edge.hit),
+    JSON.stringify(resizePoint),
+  );
+  const trimPoint = resizePoint.edges.find((edge) => edge.right);
+  await command("Input.dispatchMouseEvent", { type: "mouseMoved", x: trimPoint.x, y: trimPoint.y });
+  await command("Input.dispatchMouseEvent", {
+    type: "mousePressed",
+    x: trimPoint.x,
+    y: trimPoint.y,
+    button: "left",
+    buttons: 1,
+    clickCount: 1,
+  });
+  await command("Input.dispatchMouseEvent", { type: "mouseMoved", x: trimPoint.x - 16, y: trimPoint.y, buttons: 1 });
+  await command("Input.dispatchMouseEvent", { type: "mouseReleased", x: trimPoint.x - 16, y: trimPoint.y, button: "left", clickCount: 1 });
+  await waitFor("window.transitionTest.model.value.tracks[0].clips.find((clip) => clip.id === 'a').endTime < 2");
+  await evaluate("window.transitionTest.editor.value.reload(window.transitionTest.initialModel)");
+  await waitFor("document.querySelectorAll('.transition-handles__badge').length === 1");
+  console.log("PASS 接缝按钮可点击、两侧裁剪可命中且能真实拖动");
+  await evaluate("window.transitionTest.timeline.selectClipById('a'); window.transitionTest.timeline.applyTransition('crossfade')");
   await waitFor("window.transitionTest.model.value.tracks[0].transitions?.length === 1");
   assert.equal(await evaluate("window.transitionTest.model.value.tracks[0].transitions[0].durationSec"), 1);
   console.log("PASS 主轨接缝、添加与 modelValue 持久化");
@@ -161,10 +196,10 @@ try {
     const p = c.getContext('2d').getImageData(c.width/2, c.height/2, 1, 1).data; return p[0] > 90 && p[2] > 90 && p[1] < 20; })()`);
   console.log("PASS 真实视频暂停定位转场中点");
 
-  await evaluate(`(async () => { await window.transitionTest.player.seek(1.55); await window.transitionTest.player.play(); })()`);
+  await evaluate(`(async () => { await window.transitionTest.player.seek(1.1); await window.transitionTest.player.play(); })()`);
   await waitFor("window.transitionTest.timeline.getCurrentTime() > 2.65", 25000);
   await evaluate("window.transitionTest.player.pause()");
-  console.log("PASS 连续播放跨切点并退出转场");
+  console.log("PASS 窗口外连续播放进入转场、跨切点并退出");
   await evaluate(`(async () => {
     const test = window.transitionTest;
     test.player.seek(1.6); test.player.seek(2.4); await test.player.seek(2);
@@ -206,7 +241,7 @@ try {
   await evaluate(`(() => {
     const transfer = new DataTransfer();
     document.querySelector('.transition-card').dispatchEvent(new DragEvent('dragstart', { dataTransfer: transfer, bubbles: true }));
-    const target = document.querySelector('.transition-handles__target');
+    const target = document.querySelector('.transition-handles__badge');
     target.dispatchEvent(new DragEvent('dragover', { dataTransfer: transfer, bubbles: true, cancelable: true }));
     target.dispatchEvent(new DragEvent('drop', { dataTransfer: transfer, bubbles: true, cancelable: true }));
   })()`);
@@ -286,6 +321,37 @@ try {
     "future-effect",
   );
   console.log("PASS 未知算法保留配置并提示普通画面降级");
+
+  await evaluate(`(async () => {
+    const test = window.transitionTest, { watch } = await import('/node_modules/.vite/deps/vue.js');
+    const green = await test.record('#00ff00'); test.urls.push(green);
+    const model = JSON.parse(JSON.stringify(test.initialModel)), track = model.tracks[0];
+    track.clips[1].endTime = 3; track.clips[1].trimEnd = 1;
+    track.clips.push({ ...track.clips[0], id: 'c', name: '绿色', sourceUrl: green, startTime: 3, endTime: 5 });
+    track.transitions = [
+      { id: 'ab', clipAId: 'a', clipBId: 'b', effectId: 'crossfade', durationSec: 1, params: {} },
+      { id: 'bc', clipAId: 'b', clipBId: 'c', effectId: 'crossfade', durationSec: 1, params: {} },
+    ];
+    await test.editor.value.reload(model);
+    await test.player.seek(2.49);
+    test.consecutiveFrames = [];
+    const player = test.find(test.app._instance, 'VideoComposePlayer');
+    test.stopConsecutiveWatch = watch(() => player.setupState.globalTime, (time) => {
+      if (time < 2.6 || time > 2.9) return;
+      const canvas = document.querySelector('canvas.pointer-events-none.absolute.inset-0');
+      test.consecutiveFrames.push({ time, pixel: [...canvas.getContext('2d').getImageData(canvas.width / 2, canvas.height / 2, 1, 1).data] });
+    }, { flush: 'sync' });
+    await test.player.play();
+  })()`);
+  await waitFor("window.transitionTest.timeline.getCurrentTime() > 3.6", 25000);
+  await evaluate("window.transitionTest.player.pause(); window.transitionTest.stopConsecutiveWatch()");
+  const consecutiveFrames = await evaluate("window.transitionTest.consecutiveFrames");
+  assert.ok(consecutiveFrames.length > 0, "必须采集到相接窗口之后的转场帧");
+  assert.ok(
+    consecutiveFrames.every(({ pixel }) => pixel[0] < 20 && pixel[1] > 15 && pixel[2] > 100),
+    JSON.stringify(consecutiveFrames),
+  );
+  console.log("PASS 相接转场自动换源，B→C 帧只含蓝绿且不混入 A 的红色");
   assert.deepEqual(errors, []);
   console.log("浏览器集成验证全部通过");
 } finally {

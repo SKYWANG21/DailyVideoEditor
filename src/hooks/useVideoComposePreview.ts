@@ -9,7 +9,7 @@ import { clampGain } from "@/editor/volumeDb";
 import { previewClipStartSec, previewSourceTimeUs, previewSeekTimeSec } from "@/hooks/previewSourceTime";
 import { readBeautyParams } from "@/types/composeMedia";
 import { seekPreviewVideo } from "@/hooks/previewVideoFrame";
-import { resolveTransitionAtTime, resolveTransitionSeams } from "@/transitions/timing";
+import { normalizeTrackTransitions, resolveTransitionAtTime, resolveTransitionSeams } from "@/transitions/timing";
 import { createTransitionRegistry } from "@/transitions/catalog";
 import type { TransitionSample } from "@/types/transition";
 
@@ -74,7 +74,10 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
   const standbyVideoEl = computed(() => (activeSlot.value === 0 ? videoB.value : videoA.value));
   let navigation: AbortController | null = null;
   let preparation: AbortController | null = null;
+  let preparationTask: Promise<boolean> | null = null;
+  let preparingVideo: HTMLVideoElement | null = null;
   let preparingIdx = -1;
+  let preparingTime = 0;
   let standbyReadyIdx = -1;
   let standbyTime = 0;
   let paceTimer = 0;
@@ -133,6 +136,30 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
   function transitionAt(time: number): TransitionSample | null {
     const track = options.transitionTrack.value;
     return track ? resolveTransitionAtTime(track.clips, track.transitions ?? [], time) : null;
+  }
+
+  /** 当前片段的出场窗口；预热以窗口起点而不是硬切点计时。 */
+  function outgoingTransition(): TransitionSample | null {
+    const track = options.transitionTrack.value;
+    if (!track) return null;
+    const seam = resolveTransitionSeams(track.clips, normalizeTrackTransitions(track.clips, track.transitions)).find(
+      (item) => item.transition && item.clipA.id === clips.value[currentIdx.value]?.id,
+    );
+    return seam?.transition ? transitionAt(seam.cut - seam.transition.durationSec / 2) : null;
+  }
+
+  /** 只预热待命槽，不暂停或重新定位正在播放的一侧。 */
+  function prepareUpcoming(time: number): void {
+    if (transitionAt(sampleTime.value)) return;
+    const upcoming = outgoingTransition();
+    if (upcoming) {
+      if (upcoming.start - time > PREPARE_AHEAD_SEC) return;
+      void transitionRegistry.resolve(upcoming.transition.effectId).catch(() => undefined);
+      const index = clips.value.findIndex((clip) => clip.id === upcoming.clipB.id);
+      if (index >= 0) void prepareStandby(index, upcoming.start);
+    } else if (currentIdx.value + 1 < clips.value.length && clipEnd(currentIdx.value) - time <= PREPARE_AHEAD_SEC) {
+      void prepareStandby(currentIdx.value + 1);
+    }
   }
 
   /** 全局倍速与片段倍速相乘 */
@@ -221,27 +248,69 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
     await seekPreviewVideo(video, previewSeekTimeSec(clips.value, index, time), signal);
   }
 
-  /** 待命层复用 video 解码器；不再预取独立 MP4 解码会话 */
-  async function prepareStandby(index: number, time = clipStart(index)): Promise<boolean> {
+  /** 同一源采样复用已完成或进行中的准备，入口不取消预热任务。 */
+  function prepareStandby(index: number, time = clipStart(index)): Promise<boolean> {
     const video = standbyVideoEl.value;
-    if (!video || !clips.value[index]) return false;
-    if (standbyReadyIdx === index && Math.abs(standbyTime - time) < 0.000001) return true;
-    if (preparingIdx === index) return false;
+    if (!video || !clips.value[index]) return Promise.resolve(false);
+    const sourceTime = previewSeekTimeSec(clips.value, index, time);
+    if (standbyReadyIdx === index && Math.abs(standbyTime - sourceTime) < 0.000001 && !video.seeking && video.readyState >= 2)
+      return Promise.resolve(true);
+    if (preparationTask && preparingVideo === video && preparingIdx === index && Math.abs(preparingTime - sourceTime) < 0.000001)
+      return preparationTask;
     preparation?.abort();
     const controller = new AbortController();
     preparation = controller;
+    preparingVideo = video;
     preparingIdx = index;
+    preparingTime = sourceTime;
     standbyReadyIdx = -1;
+    preparationTask = (async (): Promise<boolean> => {
+      try {
+        await loadVideo(video, index, time, controller.signal);
+        if (controller.signal.aborted || video !== standbyVideoEl.value || disposed) return false;
+        standbyReadyIdx = index;
+        standbyTime = sourceTime;
+        return true;
+      } catch {
+        return false;
+      } finally {
+        if (preparation === controller) {
+          preparingIdx = -1;
+          preparingVideo = null;
+          preparationTask = null;
+        }
+      }
+    })();
+    return preparationTask;
+  }
+
+  /** 自然播放进入转场时保留活动槽，只等待另一侧预热，不执行完整跳转。 */
+  async function enterTransition(time: number): Promise<void> {
+    const sample = transitionAt(time);
+    if (!sample || findClipIndex(time) !== currentIdx.value) {
+      await seek(time);
+      return;
+    }
+    navigation?.abort();
+    const controller = new AbortController();
+    navigation = controller;
+    playbackWaiting.value = true;
+    mediaReady.value = false;
+    holdMedia();
+    invalidateFrames();
+    const otherId = clips.value[currentIdx.value]?.id === sample.clipA.id ? sample.clipB.id : sample.clipA.id;
+    const otherIndex = clips.value.findIndex((clip) => clip.id === otherId);
     try {
-      await loadVideo(video, index, time, controller.signal);
-      if (controller.signal.aborted || video !== standbyVideoEl.value || disposed) return false;
-      standbyReadyIdx = index;
-      standbyTime = time;
-      return true;
-    } catch {
-      return false;
-    } finally {
-      if (preparation === controller) preparingIdx = -1;
+      const ready = await prepareStandby(otherIndex, time);
+      if (controller.signal.aborted || disposed) return;
+      if (!ready) throw new Error("转场关联视频尚未就绪");
+      sampleTime.value = time;
+      mediaReady.value = true;
+      syncVolumes();
+      requestSample(time);
+      if (isPlaying.value) startLoop();
+    } catch (error: unknown) {
+      if (!controller.signal.aborted && !disposed) onFrameFailed(error instanceof Error ? error.message : "转场准备失败");
     }
   }
 
@@ -268,7 +337,13 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
   /** 为当前目标暂停媒体；快照钩子负责 seek、处理和最终提交 */
   function requestSample(time: number): void {
     if (!mediaReady.value) return;
-    if (!transitionAt(time) && !(beautyReady.value && readBeautyParams(clips.value[currentIdx.value]?.beauty).enabled)) {
+    const nextTransition = transitionAt(time);
+    // 相接窗口会直接从一项转场进入另一项，必须重新准备新的另一侧视频。
+    if (nextTransition && nextTransition.transition.id !== transitionAt(sampleTime.value)?.transition.id) {
+      void enterTransition(time);
+      return;
+    }
+    if (!nextTransition && !(beautyReady.value && readBeautyParams(clips.value[currentIdx.value]?.beauty).enabled)) {
       void seek(time);
       return;
     }
@@ -336,11 +411,13 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
     })();
   }
 
-  /** 定位和换片段统一串行作废旧请求；画布不会因换源提前清空 */
+  /** 控制操作作废旧请求，双侧媒体并行定位完成后再交接解码槽。 */
   async function seek(timeSec: number): Promise<void> {
     navigation?.abort();
     preparation?.abort();
     preparingIdx = -1;
+    preparingVideo = null;
+    preparationTask = null;
     invalidateFrames();
     const controller = new AbortController();
     navigation = controller;
@@ -369,8 +446,21 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
       const same = index === currentIdx.value && active && resolved && mediaElementUsesUrl(active, resolved);
       const target = same ? active : standbyVideoEl.value || active;
       if (!target) return;
-      const preloaded = target === standbyVideoEl.value && standbyReadyIdx === index && Math.abs(standbyTime - time) < 0.000001;
-      if (!preloaded) await loadVideo(target, index, time, controller.signal);
+      const preloaded =
+        target === standbyVideoEl.value &&
+        standbyReadyIdx === index &&
+        Math.abs(standbyTime - previewSeekTimeSec(clips.value, index, time)) < 0.000001;
+      const transition = transitionAt(time);
+      const tasks: Promise<void>[] = [];
+      if (!preloaded) tasks.push(loadVideo(target, index, time, controller.signal));
+      if (transition) {
+        const otherId = clip.id === transition.clipA.id ? transition.clipB.id : transition.clipA.id;
+        const otherIndex = clips.value.findIndex((item) => item.id === otherId);
+        const other = target === active ? standbyVideoEl.value : active;
+        if (!other || otherIndex < 0) throw new Error("转场关联视频尚未就绪");
+        tasks.push(loadVideo(other, otherIndex, time, controller.signal));
+      }
+      await Promise.all(tasks);
       if (controller.signal.aborted || disposed) return;
       if (target !== active) {
         active?.pause();
@@ -378,16 +468,6 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
         activeSlot.value = activeSlot.value === 0 ? 1 : 0;
       }
       currentIdx.value = index;
-      // 转场期间另一槽保留 A/B 的另一侧，禁止下一段预加载覆盖它。
-      const transition = transitionAt(time);
-      if (transition) {
-        const otherId = clip.id === transition.clipA.id ? transition.clipB.id : transition.clipA.id;
-        const otherIndex = clips.value.findIndex((item) => item.id === otherId);
-        const standby = standbyVideoEl.value;
-        if (!standby || otherIndex < 0) throw new Error("转场关联视频尚未就绪");
-        await loadVideo(standby, otherIndex, time, controller.signal);
-        if (controller.signal.aborted || disposed) return;
-      }
       standbyReadyIdx = -1;
       mediaReady.value = true;
       syncVolumes();
@@ -397,9 +477,12 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
       if (controller.signal.aborted || disposed) return;
       if (isPlaying.value) startLoop();
       syncBgm();
-      if (!transition && index + 1 < clips.value.length) void prepareStandby(index + 1);
+      if (!transition) prepareUpcoming(time);
     } catch (error: unknown) {
-      if (!controller.signal.aborted && !disposed) onFrameFailed(error instanceof Error ? error.message : "视频画面读取失败");
+      if (!controller.signal.aborted && !disposed) {
+        controller.abort();
+        onFrameFailed(error instanceof Error ? error.message : "视频画面读取失败");
+      }
     }
   }
 
@@ -446,24 +529,18 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
       const video = activeVideoEl.value;
       if (video && !video.seeking) globalTime.value = mediaTime(video);
       if (transitionAt(globalTime.value)) {
-        void seek(globalTime.value);
+        void enterTransition(globalTime.value);
         return;
       }
       const index = currentIdx.value;
       const remain = clipEnd(index) - globalTime.value;
       const next = index + 1;
-      if (next < clips.value.length && remain <= PREPARE_AHEAD_SEC) void prepareStandby(next);
       const seamless = next < clips.value.length && clipStart(next) <= clipEnd(index) + 0.000001;
-      const track = options.transitionTrack.value;
-      const upcoming = track
-        ? resolveTransitionSeams(track.clips, track.transitions).find((seam) => seam.transition && seam.clipA.id === clips.value[index]?.id)
-        : undefined;
-      if (upcoming?.transition && upcoming.cut - upcoming.transition.durationSec / 2 - globalTime.value <= PREPARE_AHEAD_SEC) {
-        void transitionRegistry.resolve(upcoming.transition.effectId).catch(() => undefined);
-      }
+      const upcoming = outgoingTransition();
       if (remain <= 0.001 || video?.ended || (seamless && !upcoming && remain <= SWAP_AHEAD_SEC && standbyReadyIdx === next))
         advancePastClip(index);
     }
+    if (mediaReady.value && !playbackWaiting.value) prepareUpcoming(globalTime.value);
     syncBgm();
     if (isPlaying.value) rafId = requestAnimationFrame(loop);
   }
