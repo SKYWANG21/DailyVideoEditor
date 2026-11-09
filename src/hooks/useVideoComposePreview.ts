@@ -10,12 +10,11 @@ import type {
   PreviewRenderRequest,
 } from "@/types/previewPlayback";
 import { createPreviewAudioMixer, type PreviewAudioMixerSyncState } from "./previewAudioMixer";
-import { useComposeMediaResolver } from "@/editor/composeRuntime";
+import { useComposeMediaResolver, useComposeTransitionRegistry } from "@/editor/composeRuntime";
 import { primePreviewAudioContext } from "./previewMediaGain";
 import { clampGain } from "@/editor/volumeDb";
 import { previewClipStartSec } from "./previewSourceTime";
 import { normalizeTrackTransitions, resolveTransitionAtTime, resolveTransitionSeams } from "@/transitions/timing";
-import { createTransitionRegistry } from "@/transitions/catalog";
 import { readVideoFrameTransform } from "@/editor/shared/videoFrame";
 import { PreviewVideoDecoder } from "./previewVideoDecoder";
 import { PREVIEW_FPS, PREVIEW_RESUME_FRAMES, PreviewFrameScheduler } from "./previewFrameScheduler";
@@ -57,7 +56,7 @@ interface UseVideoComposePreviewOptions {
 export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
   const mediaResolver = useComposeMediaResolver();
   const audioMixer = createPreviewAudioMixer(mediaResolver, fail);
-  const registry = createTransitionRegistry();
+  const registry = useComposeTransitionRegistry();
   const scheduler = new PreviewFrameScheduler();
   const clock = options.clock ?? ref(createPreviewPlaybackClock());
   /** 播放状态直接读写当前会话，不通过时间轴事件回写。 */

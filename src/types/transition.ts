@@ -72,8 +72,38 @@ export interface TransitionRenderContext {
 
 /** 可独立加载的具体绘制算法。 */
 export interface TransitionAlgorithm {
-  /** 在当前帧上下文中绘制；输出缓冲由引擎持有。 */
+  /** 在当前帧上下文中绘制；实例可供多个引擎共用，异步实现须支持重入且不保留调用方的帧或上下文。 */
   render(context: TransitionRenderContext, params: Readonly<Record<string, unknown>>): void | Promise<void>;
+}
+
+/** 转场像素计算的执行后端，不写入工程数据。 */
+export type TransitionBackend = "canvas" | "wasm";
+
+/** 创建后固定内置后端与效果列表，避免同一效果的加载缓存混用。 */
+export interface TransitionRegistryOptions {
+  /** 默认使用原有 Canvas 实现。 */
+  backend?: TransitionBackend;
+  /** 按传入顺序追加的宿主效果；重复 ID 报错，具体实现由各自的 load 决定。 */
+  effects?: readonly TransitionEffectDefinition[];
+}
+
+/** 无宿主导入的转场 WASM ABI；图像均为紧密排列、非预乘的 sRGB RGBA8。 */
+export interface WasmTransitionExports {
+  /** 输入、输出和参数共用的 wasm32 线性内存。 */
+  memory: WebAssembly.Memory;
+  /** 静态数据与栈之后的首个可用字节，由宿主保留为帧缓冲。 */
+  __heap_base: WebAssembly.Global;
+  /** 进度已经缓动；参数为 UTF-8 JSON；返回 0 表示成功。 */
+  render(
+    a: number,
+    b: number,
+    output: number,
+    width: number,
+    height: number,
+    progress: number,
+    params: number,
+    paramsLength: number,
+  ): number;
 }
 
 /** 轻量效果目录；UI 展示无需提前加载绘制算法。 */

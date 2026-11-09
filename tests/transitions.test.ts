@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
-import { createTransitionRegistry } from "../src/transitions/catalog";
+import { createTransitionRegistry, crossfadeDefinition } from "../src/transitions/catalog";
 import { TransitionRegistry } from "../src/transitions/registry";
 import { TransitionEngine, transitionEasing } from "../src/transitions/engine";
 import { crossfadeAlgorithm } from "../src/transitions/algorithms/crossfade";
@@ -15,7 +15,7 @@ import { previewSourceTimeUs, previewSeekTimeSec } from "../src/hooks/previewSou
 import { useTracksStore } from "../src/clip-track/stores/tracks";
 import { useHistoryStore } from "../src/clip-track/stores/history";
 import type { Track, MediaClip } from "../src/clip-track/types";
-import type { ComposeTransition, TransitionClipRef } from "../src/types/transition";
+import type { ComposeTransition, TransitionClipRef, TransitionEffectDefinition } from "../src/types/transition";
 
 /** 可复用的相邻主轨测试片段。 */
 const clips: TransitionClipRef[] = [
@@ -82,6 +82,48 @@ describe("接缝时间与工程兼容", () => {
     expect(previewSourceTimeUs(source, 0, 2)).toBe(7e6);
     expect(previewSourceTimeUs(source, 0, 6)).toBe(13e6);
     expect(previewSeekTimeSec(source, 0, 6)).toBe(12.999);
+  });
+});
+
+describe("宿主转场注册", () => {
+  it("按顺序追加只读效果列表，WASM 内置后端不替换宿主实现，查询目录不加载算法", async () => {
+    const load = vi.fn(async () => crossfadeAlgorithm);
+    const effects: readonly TransitionEffectDefinition[] = Object.freeze([
+      { ...crossfadeDefinition, id: "host-a", load },
+      { ...crossfadeDefinition, id: "host-b", load },
+    ]);
+    const registry = createTransitionRegistry({ backend: "wasm", effects });
+    expect(registry.list().map((effect) => effect.id)).toEqual(["crossfade", "host-a", "host-b"]);
+    expect(effects.map((effect) => effect.id)).toEqual(["host-a", "host-b"]);
+    expect(load).not.toHaveBeenCalled();
+    const first = registry.resolve("host-a");
+    expect(registry.resolve("host-a")).toBe(first);
+    await expect(first).resolves.toBe(crossfadeAlgorithm);
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+
+  it("宿主 ID 不得覆盖内置效果或另一宿主效果", () => {
+    expect(() => createTransitionRegistry({ effects: [crossfadeDefinition] })).toThrow("转场已注册：crossfade");
+    const custom = { ...crossfadeDefinition, id: "host-a" };
+    expect(() => createTransitionRegistry({ effects: [custom, custom] })).toThrow("转场已注册：host-a");
+  });
+
+  it("编辑器实例不共享注册结果和算法加载缓存", async () => {
+    const load = vi.fn(async () => ({ render: vi.fn() }));
+    const effects = [{ ...crossfadeDefinition, id: "host-a", load }];
+    const first = createTransitionRegistry({ effects });
+    const second = createTransitionRegistry({ effects });
+    const firstAlgorithm = await first.resolve("host-a");
+    expect(await first.resolve("host-a")).toBe(firstAlgorithm);
+    expect(await second.resolve("host-a")).not.toBe(firstAlgorithm);
+    expect(load).toHaveBeenCalledTimes(2);
+    first.register({ ...crossfadeDefinition, id: "first-only" });
+    expect(second.get("first-only")).toBeUndefined();
+    expect(
+      createTransitionRegistry()
+        .list()
+        .map((effect) => effect.id),
+    ).toEqual(["crossfade"]);
   });
 });
 

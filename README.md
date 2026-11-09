@@ -150,6 +150,94 @@ transitions: [
 `TransitionAlgorithm` 并在目录注册描述及 `load()`，素材面板与手柄菜单从该目录读取，不必修改引擎分发。
 外部可使用导出的引擎、注册表和类型独立集成；引擎返回的 Canvas 为复用缓冲，需要保存跨帧结果时调用 `renderBitmap()`。
 
+Canvas 为默认后端。宿主可通过 `<VideoComposeEditor v-model="model" transition-backend="wasm" />` 使用内置淡化 WASM；
+独立使用时调用 `new TransitionEngine(createTransitionRegistry({ backend: "wasm" }))`。后端在挂载/创建注册表时固定，切换时需重建；
+`effectId`、参数与工程数据不变。预热和渲染共用编辑器注册表，WASM 首次使用时加载，失败沿用现有错误处理（预览提示并回退普通画面）。
+
+宿主可通过 `transitionEffects` 追加自定义转场。素材栏、缩略图、接缝菜单、时间轴命令、预热与播放器共用编辑器注册表，
+保留内置效果并按传入顺序追加；重复 ID（包括内置 ID）报错。后端与效果列表均在挂载时固定，变更时需重新挂载编辑器。
+
+```vue
+<VideoComposeEditor v-model="model" :transition-effects="hostTransitions" />
+```
+
+Canvas 算法示例（使用包根导出的类型）：
+
+```ts
+import type { TransitionAlgorithm, TransitionEffectDefinition } from "daily-video-editor";
+
+const hostTransitions: readonly TransitionEffectDefinition[] = [
+  {
+    id: "host-wipe",
+    name: "向右擦除",
+    description: "入场画面从左向右覆盖离场画面",
+    defaultParams: {},
+    /** 当前效果无需专属参数。 */
+    normalizeParams(): Record<string, unknown> {
+      return {};
+    },
+    /** 首次生成缩略图或播放时加载；实例内的 render 应支持重入。 */
+    async load(): Promise<TransitionAlgorithm> {
+      return {
+        /** 输入已完成画面变换，进度已缓动，绘制状态由引擎隔离。 */
+        render({ ctx, outgoing, incoming, width, height, progress }): void {
+          ctx.drawImage(outgoing, 0, 0, width, height);
+          ctx.beginPath();
+          ctx.rect(0, 0, width * progress, height);
+          ctx.clip();
+          ctx.drawImage(incoming, 0, 0, width, height);
+        },
+      };
+    },
+  },
+];
+```
+
+宿主 WASM 算法使用相同定义，将 `load` 替换为适配器调用，并使用独立 ID：
+
+```ts
+import { loadWasmTransitionAlgorithm } from "daily-video-editor";
+
+const hostWasmTransition: TransitionEffectDefinition = {
+  ...hostTransitions[0],
+  id: "host-wasm-fade",
+  name: "宿主淡化",
+  description: "使用宿主提供的 WASM 混合两帧",
+  load: () => loadWasmTransitionAlgorithm("/custom-transitions/fade.wasm"),
+};
+```
+
+`transitionBackend` 仅选择内置效果的实现；宿主效果始终使用自身的 `load()`。独立使用引擎时可调用
+`new TransitionEngine(createTransitionRegistry({ effects: hostTransitions }))`，也可继续手动 `registry.register()`。
+注册和 `list()` 查询不加载算法；素材卡片生成缩略图属于首次实际使用，会触发 `load()`。同一注册表缓存同一效果的加载结果，
+宿主异步算法须支持多个引擎调用同一实例，不得在渲染结束后保留调用方的画面或上下文；独立引擎仍依赖浏览器 Canvas API。
+工程仅保存效果 ID、时长和可序列化参数，重载时宿主须再次提供对应定义；缺失算法保留工程配置，并沿用普通画面降级提示。
+
+适配器 `loadWasmTransitionAlgorithm(url)` 可在自定义效果的 `load()` 中使用。模块不得依赖宿主导入，并须导出：
+
+- `memory`：wasm32 线性内存。
+- `__heap_base`：栈和静态数据之后的首个可用地址。该地址之后的空间由适配器保留，内核不得另行分配或增长内存。
+- `render(a, b, output, width, height, progress, params, paramsLength): i32`：成功返回 0；其他返回值视为失败。
+
+地址、尺寸和参数长度均为 `i32`，`progress` 为已经缓动的 `f64`。图像是自左上至右下、每行 `width * 4` 字节的
+**非预乘 sRGB RGBA8**；参数为 UTF-8 JSON。适配器负责 Canvas 像素读写和缓冲复用，内核负责预乘颜色混合与反预乘输出。
+内置淡化采用 Q16 权重与整数舍入；它与 Canvas 的量化方式可能略有差异，不承诺逐字节相同。
+后端直接调用时，从 `__heap_base` 起为 A、B、输出各保留 `width * height * 4` 字节，再放参数；
+调用前通过 `memory.grow()` 按 65536 字节一页补足内存，之后复用缓冲。
+
+内置源码为 `src/transitions/wasm/crossfade.c`，仓库包含对应 `.wasm`，使用现有产物不需要安装编译器。
+重新编译需支持 wasm32 的 LLVM Clang（Emscripten SDK 自带），在 PowerShell 执行：
+
+```powershell
+$env:WASM_CLANG = "D:\CODE\emsdk\upstream\bin\clang.exe"
+pnpm run build:transitions-wasm
+```
+
+库构建将 WASM 随浏览器代码打包，并额外输出 `dist/algorithm/transitions/crossfade.wasm`；包子路径
+`daily-video-editor/transitions/crossfade.wasm` 指向该独立产物。后端可在无浏览器的 WASM 运行时执行相同 ABI，
+将 FFmpeg 解码的 RGBA 帧传入内核，再把输出交给 FFmpeg 编码；本库未实现 FFmpeg 桥接。
+严格对照还需统一源帧、缓动、色彩转换、美颜、变换与输出尺寸。
+
 开发验证：`pnpm test`、`pnpm typecheck`。真实浏览器验证先启动 `pnpm exec vite --host 127.0.0.1 --port 5175 --strictPort`，再运行
 `node tests/browser-transitions.mjs`；默认使用本机 Edge，可通过 `TRANSITION_TEST_BROWSER` 指定 Chromium 可执行文件。
 

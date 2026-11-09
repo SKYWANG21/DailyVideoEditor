@@ -2,7 +2,7 @@ import { ref, type Ref } from "vue";
 import { ElMessage } from "element-plus";
 import type { Track } from "@/clip-track";
 import type { ComposeTransition, TransitionSeam } from "@/types/transition";
-import { createTransitionRegistry } from "@/transitions/catalog";
+import { useComposeTransitionRegistry } from "@/editor/composeRuntime";
 import { MIN_TRANSITION_DURATION, resolveTransitionSeams, resolveTransitionTarget } from "@/transitions/timing";
 
 /** 通过时间轴公开命令写入，复用现有历史。 */
@@ -25,7 +25,7 @@ export function useTimelineTransitions(
   applied: () => void,
 ) {
   const selectedSeamKey = ref<string | null>(null);
-  const registry = createTransitionRegistry();
+  const registry = useComposeTransitionRegistry();
 
   /** 命令执行时重新检查接缝，浮层打开期间的旧布局不能直接写回。 */
   function apply(effectId: string, key?: string, durationSec?: number): void {

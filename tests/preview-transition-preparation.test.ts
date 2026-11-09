@@ -22,7 +22,10 @@ vi.mock("../src/hooks/previewVideoDecoder", () => ({
     protectedIndices = (_clips: unknown, indices: number[]) => indices;
   },
 }));
-vi.mock("../src/editor/composeRuntime", () => ({ useComposeMediaResolver: () => ({}) }));
+vi.mock("../src/editor/composeRuntime", async () => {
+  const { createTransitionRegistry } = await import("../src/transitions/catalog");
+  return { useComposeMediaResolver: () => ({}), useComposeTransitionRegistry: () => createTransitionRegistry() };
+});
 vi.mock("../src/editor/shared/videoFrame", () => ({ readVideoFrameTransform: () => null }));
 vi.mock("../src/hooks/previewMediaGain", () => ({ primePreviewAudioContext: vi.fn() }));
 vi.mock("../src/hooks/previewAudioMixer", () => ({ createPreviewAudioMixer: () => mocks.audio }));

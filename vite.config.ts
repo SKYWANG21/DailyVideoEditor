@@ -18,6 +18,8 @@ function copyAlgorithmAssets(): Plugin {
       mkdirSync(dest, { recursive: true });
       cpSync(resolve(rootDir, "public/algorithm/face_landmarker.task"), resolve(dest, "face_landmarker.task"));
       cpSync(resolve(rootDir, "public/algorithm/mediapipe"), resolve(dest, "mediapipe"), { recursive: true });
+      mkdirSync(resolve(dest, "transitions"), { recursive: true });
+      cpSync(resolve(rootDir, "src/transitions/wasm/crossfade.wasm"), resolve(dest, "transitions/crossfade.wasm"));
     },
   };
 }

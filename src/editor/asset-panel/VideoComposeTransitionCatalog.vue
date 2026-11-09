@@ -24,14 +24,14 @@
 
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, type ComponentPublicInstance } from "vue";
-import { createTransitionRegistry } from "@/transitions/catalog";
+import { useComposeTransitionRegistry } from "@/editor/composeRuntime";
 import { TransitionEngine } from "@/transitions/engine";
 import { TRANSITION_DRAG_MIME } from "@/transitions/timing";
 
 /** 卡片使用真实引擎演示，不另写 CSS 转场。 */
 defineProps<{ readonly?: boolean }>();
 const emit = defineEmits<{ apply: [effectId: string] }>();
-const registry = createTransitionRegistry();
+const registry = useComposeTransitionRegistry();
 const engine = new TransitionEngine(registry);
 const effects = registry.list();
 const canvases = new Map<string, HTMLCanvasElement>();

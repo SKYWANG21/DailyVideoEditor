@@ -199,7 +199,9 @@ import type { TextTemplateItem } from "./shared/textTemplateCatalog";
 import { useComposeEditorSession } from "./session/useComposeEditorSession";
 import type { ComposeCatalogUploadPayload, ComposeUploadAdapter } from "./session/createComposeEditorState";
 import { installComposeElementPlus } from "./installComposeElementPlus";
-import { COMPOSE_ALGORITHM_BASE } from "./composeRuntime";
+import { COMPOSE_ALGORITHM_BASE, COMPOSE_TRANSITION_REGISTRY } from "./composeRuntime";
+import { createTransitionRegistry } from "@/transitions/catalog";
+import type { TransitionBackend, TransitionEffectDefinition } from "@/types/transition";
 import { COMPOSE_MEDIA_RESOLVER, createComposeMediaResolver } from "@/service/resolveComposeMediaUrl";
 import type { TrackTypeConfig } from "@/clip-track";
 import type { BgmItem, ComposeClip, ComposeSegmentClipAssets, ComposeSubtitleAsset, VideoComposeEditorModel } from "@/types/videoCompose";
@@ -234,6 +236,10 @@ const props = withDefaults(
     resolveMediaUrl?: (url: string) => Promise<string>;
     /** 美颜 WASM / 模型根路径，默认 /algorithm/ */
     algorithmBaseUrl?: string;
+    /** 转场后端，挂载时确定；切换时需重新挂载编辑器。 */
+    transitionBackend?: TransitionBackend;
+    /** 追加宿主转场，挂载时注册；列表变更时需重新挂载编辑器。 */
+    transitionEffects?: readonly TransitionEffectDefinition[];
     /**
      * 各轨道类型数量上限；未传则使用 clip-track 组件默认。
      * 某类型未出现在配置中视为不限制。
@@ -243,6 +249,7 @@ const props = withDefaults(
   {
     readonly: false,
     algorithmBaseUrl: "/algorithm/",
+    transitionBackend: "canvas",
   },
 );
 
@@ -260,6 +267,7 @@ const algorithmBase = computed(() => {
   return base.endsWith("/") ? base : `${base}/`;
 });
 provide(COMPOSE_ALGORITHM_BASE, algorithmBase);
+provide(COMPOSE_TRANSITION_REGISTRY, createTransitionRegistry({ backend: props.transitionBackend, effects: props.transitionEffects }));
 onBeforeUnmount(() => mediaResolver.revokeAll());
 
 const emit = defineEmits<{

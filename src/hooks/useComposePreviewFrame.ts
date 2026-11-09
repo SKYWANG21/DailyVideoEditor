@@ -3,9 +3,8 @@ import { readBeautyParams } from "@/types/composeMedia";
 import type { PreviewVideoSize } from "@/types/beautyPreview";
 import type { ComposeTrack, VideoClipItem, VideoFrameTransform } from "@/types/videoCompose";
 import type { DecodedPreviewFrame, PreparedPreviewFrame, PreviewFrameRenderer, PreviewRenderRequest } from "@/types/previewPlayback";
-import { COMPOSE_ALGORITHM_BASE } from "@/editor/composeRuntime";
+import { COMPOSE_ALGORITHM_BASE, useComposeTransitionRegistry } from "@/editor/composeRuntime";
 import { readVideoFrameTransform } from "@/editor/shared/videoFrame";
-import { createTransitionRegistry } from "@/transitions/catalog";
 import { TransitionEngine } from "@/transitions/engine";
 import { ComposeFrameProcessor } from "./composeFrameProcessor";
 import { drawPreviewCanvasFrame, previewCanvasSize } from "./previewCanvasFrame";
@@ -34,7 +33,7 @@ export function useComposePreviewFrame(options: UseComposePreviewFrameOptions) {
     COMPOSE_ALGORITHM_BASE,
     computed(() => "/algorithm/"),
   );
-  const registry = createTransitionRegistry();
+  const registry = useComposeTransitionRegistry();
   const engine = new TransitionEngine(registry);
   const videoSize = ref<PreviewVideoSize | null>(null);
   const frameReady = ref(false);

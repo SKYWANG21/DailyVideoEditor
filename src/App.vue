@@ -11,6 +11,7 @@
         :audio-assets="audioAssets"
         :sfx-assets="sfxAssets"
         :text-templates="textTemplates"
+        transition-backend="wasm"
         :on-request-upload-clip="() => (uploadClipOpen = true)"
         @remove-catalog-clip="onRemoveVideoAsset"
         @toggle-like="onToggleVideoLike"
@@ -31,11 +32,7 @@ import { VideoComposeEditor } from "@/editor";
 import type { ComposeCatalogUploadPayload } from "@/editor/session/createComposeEditorState";
 import VideoClipUploadModal, { type UploadedComposeClip } from "@/editor/modals/VideoClipUploadModal.vue";
 import { createTextTemplateItem, type TextTemplateItem } from "@/editor/shared/textTemplateCatalog";
-import {
-  COMPOSE_CLIP_PLACEHOLDER_DURATION_SEC,
-  isComposeClipDurationProbeable,
-  probeAudioDuration,
-} from "@/hooks/useResolveComposeClips";
+import { COMPOSE_CLIP_PLACEHOLDER_DURATION_SEC, isComposeClipDurationProbeable, probeAudioDuration } from "@/hooks/useResolveComposeClips";
 import {
   createDefaultVideoComposeEditorModel,
   type BgmItem,

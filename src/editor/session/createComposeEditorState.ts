@@ -1,5 +1,6 @@
 import { computed, reactive, ref, type ComputedRef, type Ref } from "vue";
 import type { PreviewPlaybackClock } from "@/types/previewPlayback";
+import type { TransitionBackend, TransitionEffectDefinition } from "@/types/transition";
 import { createPreviewPlaybackClock } from "@/hooks/previewPlaybackClock";
 import type { MediaClip, TextClip, TrackTypeConfig } from "@/clip-track";
 import type {
@@ -76,6 +77,10 @@ export interface ComposeEditorProps {
    * 默认 /algorithm/。
    */
   algorithmBaseUrl?: string;
+  /** 转场后端，挂载时确定；默认 Canvas，切换时需重新挂载。 */
+  transitionBackend?: TransitionBackend;
+  /** 追加宿主转场，挂载时注册；列表变更时需重新挂载。 */
+  transitionEffects?: readonly TransitionEffectDefinition[];
   /**
    * 各轨道类型数量上限；未传则使用 clip-track 组件默认。
    * 某类型未出现在配置中视为不限制。

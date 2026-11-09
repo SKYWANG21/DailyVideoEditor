@@ -83,7 +83,7 @@ import { computed, ref } from "vue";
 import { ElInputNumber, ElPopover } from "element-plus";
 import type { Track } from "@/clip-track";
 import type { TransitionSeam } from "@/types/transition";
-import { createTransitionRegistry } from "@/transitions/catalog";
+import { useComposeTransitionRegistry } from "@/editor/composeRuntime";
 import { MIN_TRANSITION_DURATION, resolveTransitionSeams, TRANSITION_DRAG_MIME } from "@/transitions/timing";
 
 /** 轨道内容内的接缝覆盖层，随滚动与倍率自然移动。 */
@@ -93,7 +93,7 @@ const emit = defineEmits<{
   apply: [effectId: string, key: string, duration?: number];
   remove: [seam: TransitionSeam];
 }>();
-const registry = createTransitionRegistry();
+const registry = useComposeTransitionRegistry();
 const effects = registry.list();
 /** 只读或锁定时保留展示，禁止编辑。 */
 const disabled = computed(() => props.readonly || props.track.locked);

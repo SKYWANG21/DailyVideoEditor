@@ -129,6 +129,31 @@ try {
   assert.deepEqual(pixels.same, [255, 0, 0, 255]);
   console.log("PASS 真实 Canvas 淡化像素与亮度");
 
+  const wasmPixels = await evaluate(`(async () => {
+    const { createTransitionRegistry } = await import('/src/transitions/catalog.ts');
+    const { TransitionEngine } = await import('/src/transitions/engine.ts');
+    const canvasEngine = new TransitionEngine(createTransitionRegistry());
+    const wasmEngine = new TransitionEngine(createTransitionRegistry({ backend: 'wasm' }));
+    const a = new OffscreenCanvas(1, 1), b = new OffscreenCanvas(1, 1);
+    let maxError = 0;
+    for (const alphaA of [0, 64, 128, 255]) for (const alphaB of [0, 64, 128, 255]) {
+      a.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray([200, 80, 30, alphaA]), 1, 1), 0, 0);
+      b.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray([20, 100, 220, alphaB]), 1, 1), 0, 0);
+      for (const progress of [0, .25, .5, .75, 1]) {
+        const request = { effectId: 'crossfade', outgoing: a, incoming: b, width: 1, height: 1, progress, params: {} };
+        const c = [...(await canvasEngine.render(request)).getContext('2d').getImageData(0, 0, 1, 1).data];
+        const w = [...(await wasmEngine.render(request)).getContext('2d').getImageData(0, 0, 1, 1).data];
+        maxError = Math.max(maxError, Math.abs(c[3] - w[3]));
+        for (let channel = 0; channel < 3; channel++) {
+          maxError = Math.max(maxError, Math.abs(c[channel] * c[3] / 255 - w[channel] * w[3] / 255));
+        }
+      }
+    }
+    return { maxError };
+  })()`);
+  assert.ok(wasmPixels.maxError <= 2, JSON.stringify(wasmPixels));
+  console.log("PASS 真实 WASM 与 Canvas 的 80 组透明像素对照", wasmPixels);
+
   await evaluate(`(async () => {
     const { createApp, h, ref } = await import('/node_modules/.vite/deps/vue.js');
     const { default: Editor } = await import('/src/editor/VideoComposeEditor.vue');
@@ -162,7 +187,26 @@ try {
       name: '主视频轨', visible: true, locked: false, order: 0, nativeFrameWidth: 320, nativeFrameHeight: 180, clips }] });
     document.querySelector('#app').__vue_app__?.unmount();
     const editor = ref(null), readonly = ref(false);
-    const app = createApp({ setup: () => () => h(Editor, { ref: editor, readonly: readonly.value, modelValue: model.value, 'onUpdate:modelValue': (value) => model.value = value }) });
+    const { crossfadeDefinition } = await import('/src/transitions/catalog.ts');
+    const { loadWasmTransitionAlgorithm } = await import('/src/transitions/wasmAdapter.ts');
+    const hostLoads = { canvas: 0, wasm: 0 };
+    const hostTransitions = [
+      { ...crossfadeDefinition, id: 'host-wipe', name: '宿主擦除', defaultParams: { curve: 'ease-in' },
+        load: async () => {
+          hostLoads.canvas++;
+          return { render({ ctx, outgoing, incoming, width, height, progress }) {
+            ctx.drawImage(outgoing, 0, 0, width, height);
+            ctx.beginPath(); ctx.rect(0, 0, width * progress, height); ctx.clip();
+            ctx.drawImage(incoming, 0, 0, width, height);
+          } };
+        } },
+      { ...crossfadeDefinition, id: 'host-wasm', name: '宿主 WASM 淡化',
+        load: async () => {
+          hostLoads.wasm++;
+          return loadWasmTransitionAlgorithm('/src/transitions/wasm/crossfade.wasm');
+        } },
+    ];
+    const app = createApp({ setup: () => () => h(Editor, { ref: editor, readonly: readonly.value, transitionBackend: 'wasm', transitionEffects: hostTransitions, modelValue: model.value, 'onUpdate:modelValue': (value) => model.value = value }) });
     app.mount('#app');
     const find = (instance, name) => {
       if (instance?.type?.__name === name) return instance;
@@ -170,7 +214,7 @@ try {
         if (Array.isArray(vnode.children)) for (const child of vnode.children) { const match = visit(child); if (match) return match; } return null; };
       return visit(instance?.subTree);
     };
-    window.transitionTest = { model, editor, app, find, urls, readonly, record, initialModel: JSON.parse(JSON.stringify(model.value)) };
+    window.transitionTest = { model, editor, app, find, urls, readonly, record, hostLoads, initialModel: JSON.parse(JSON.stringify(model.value)) };
   })()`);
   await waitFor("document.querySelectorAll('.transition-handles__badge').length === 1");
   await evaluate(`(() => {
@@ -342,6 +386,83 @@ try {
   await delay(500);
   assert.equal(await evaluate("window.transitionTest.model.value.tracks[0].transitions.length"), 1);
   console.log("PASS 转场 Tab、双击、拖放及重复应用去重");
+
+  // 宿主算法通过公开属性接入，素材预览、命令、菜单和播放器必须命中同一注册表。
+  assert.deepEqual(await evaluate("[...document.querySelectorAll('.transition-card span')].map((span) => span.textContent)"), [
+    "淡化",
+    "宿主擦除",
+    "宿主 WASM 淡化",
+  ]);
+  await waitFor("window.transitionTest.hostLoads.canvas === 1 && window.transitionTest.hostLoads.wasm === 1");
+  await evaluate(`(() => {
+    const test = window.transitionTest;
+    test.beforeHostModel = JSON.parse(JSON.stringify(test.model.value));
+    const card = [...document.querySelectorAll('.transition-card')].find((button) => button.textContent.trim() === '宿主擦除');
+    card.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+  })()`);
+  await waitFor("window.transitionTest.model.value.tracks[0].transitions[0].effectId === 'host-wipe'");
+  assert.deepEqual(await evaluate("JSON.parse(JSON.stringify(window.transitionTest.model.value.tracks[0].transitions[0].params))"), {
+    curve: "ease-in",
+  });
+  await evaluate("window.transitionTest.player.seek(2)");
+  await waitFor(`(() => {
+    const canvas = document.querySelector('canvas.pointer-events-none.absolute.inset-0'), ctx = canvas.getContext('2d');
+    const left = ctx.getImageData(canvas.width * .125, canvas.height / 2, 1, 1).data;
+    const right = ctx.getImageData(canvas.width * .75, canvas.height / 2, 1, 1).data;
+    return left[2] > 240 && left[0] < 10 && right[0] > 240 && right[2] < 10;
+  })()`);
+  assert.equal(
+    await evaluate(`(() => {
+    const card = [...document.querySelectorAll('.transition-card')].find((button) => button.textContent.trim() === '宿主擦除');
+    const ctx = card.querySelector('canvas').getContext('2d');
+    const left = ctx.getImageData(10, 10, 1, 1).data, right = ctx.getImageData(130, 10, 1, 1).data;
+    return left[3] === 255 && right[3] === 255 && left.some((value, index) => value !== right[index]);
+  })()`),
+    true,
+  );
+  console.log("PASS 宿主 Canvas 卡片、缩略图、默认参数与播放器擦除效果");
+
+  await evaluate("document.querySelector('.transition-handles__badge').click()");
+  await waitFor(
+    "[...document.querySelectorAll('.transition-menu__effect')].some((button) => button.textContent.trim() === '宿主 WASM 淡化')",
+  );
+  await evaluate(`(() => {
+    const buttons = [...document.querySelectorAll('.transition-menu__effect')];
+    buttons.find((button) => button.textContent.trim() === '宿主 WASM 淡化').click();
+    buttons.find((button) => button.textContent.trim() === '应用').click();
+  })()`);
+  await waitFor("window.transitionTest.model.value.tracks[0].transitions[0].effectId === 'host-wasm'");
+  await evaluate("window.transitionTest.player.seek(2)");
+  await waitFor(`(() => {
+    const canvas = document.querySelector('canvas.pointer-events-none.absolute.inset-0');
+    const pixel = canvas.getContext('2d').getImageData(canvas.width / 2, canvas.height / 2, 1, 1).data;
+    return pixel[0] > 90 && pixel[2] > 90 && pixel[1] < 20;
+  })()`);
+  const hostPayload = await evaluate("window.transitionTest.editor.value.exportComposePayload()");
+  assert.equal(hostPayload.tracks[0].transitions[0].effectId, "host-wasm");
+  assert.equal(Object.hasOwn(hostPayload, "transitionEffects"), false);
+  await evaluate("window.transitionTest.find(window.transitionTest.app._instance, 'VideoComposeTimeline').setupState.videoTrackRef.undo()");
+  await waitFor("window.transitionTest.model.value.tracks[0].transitions[0].effectId === 'host-wipe'");
+  await evaluate("window.transitionTest.find(window.transitionTest.app._instance, 'VideoComposeTimeline').setupState.videoTrackRef.redo()");
+  await waitFor("window.transitionTest.model.value.tracks[0].transitions[0].effectId === 'host-wasm'");
+  await evaluate("window.transitionTest.editor.value.reload(JSON.parse(JSON.stringify(window.transitionTest.model.value)))");
+  await evaluate("window.transitionTest.player.seek(2)");
+  assert.equal(await evaluate("window.transitionTest.editor.value.exportComposePayload().tracks[0].transitions[0].effectId"), "host-wasm");
+  assert.deepEqual(await evaluate("window.transitionTest.hostLoads"), { canvas: 1, wasm: 1 });
+  console.log("PASS 宿主 WASM 菜单应用、播放、导出、撤销重做、重载与共享加载缓存");
+
+  await evaluate(`(() => {
+    const card = [...document.querySelectorAll('.transition-card')].find((button) => button.textContent.trim() === '宿主擦除');
+    const transfer = new DataTransfer();
+    card.dispatchEvent(new DragEvent('dragstart', { dataTransfer: transfer, bubbles: true }));
+    const target = document.querySelector('.transition-handles__badge');
+    target.dispatchEvent(new DragEvent('dragover', { dataTransfer: transfer, bubbles: true, cancelable: true }));
+    target.dispatchEvent(new DragEvent('drop', { dataTransfer: transfer, bubbles: true, cancelable: true }));
+  })()`);
+  await waitFor("window.transitionTest.model.value.tracks[0].transitions[0].effectId === 'host-wipe'");
+  await evaluate("window.transitionTest.editor.value.reload(window.transitionTest.beforeHostModel)");
+  await evaluate("window.transitionTest.player.seek(2)");
+  console.log("PASS 宿主转场拖放接缝与工程恢复");
 
   await evaluate(`(() => {
     const test = window.transitionTest;
