@@ -12,7 +12,7 @@
         class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-[4px] bg-black"
         :style="stageStyle"
       >
-        <!-- 双 video 只解码与播放原声；普通和美颜画面始终显示在同一块 Canvas -->
+        <!-- 双 video 始终静音并连续解码；原声由独立音频池跟随展示时钟 -->
         <div
           class="absolute inset-0 overflow-hidden"
         >
@@ -22,7 +22,6 @@
             playsinline
             crossorigin="anonymous"
             class="pointer-events-none absolute inset-0 h-full w-full opacity-0"
-            @loadedmetadata="onDirectVideoMetadata"
           />
           <video
             ref="videoBRef"
@@ -30,7 +29,6 @@
             playsinline
             crossorigin="anonymous"
             class="pointer-events-none absolute inset-0 h-full w-full opacity-0"
-            @loadedmetadata="onDirectVideoMetadata"
           />
           <canvas
             ref="previewCanvasRef"
@@ -220,7 +218,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, toRef, onBeforeUnmount, onMounted, type CSSProperties } from "vue";
+import { ref, shallowRef, computed, watch, nextTick, toRef, onBeforeUnmount, onMounted, type CSSProperties } from "vue";
 import { Pause, Play, SkipBack, SkipForward, Video, Volume2, VolumeX } from "@lucide/vue";
 import type {
   ComposeConfig,
@@ -233,6 +231,8 @@ import type {
   VideoFrameTransform,
 } from "@/types/videoCompose";
 import type { PreviewVideoSize } from "@/types/beautyPreview";
+import type { PreviewFrameRenderer, PreviewPlaybackClock } from "@/types/previewPlayback";
+import { createPreviewPlaybackClock } from "@/hooks/previewPlaybackClock";
 import { useVideoComposePreview } from "@/hooks/useVideoComposePreview";
 import { useComposePreviewFrame } from "@/hooks/useComposePreviewFrame";
 import {
@@ -249,6 +249,8 @@ import { containFrameStage, frameBoxStyle } from "../shared/videoFrame";
 import type { RectConfig } from "@/clip-track";
 
 const props = defineProps<{
+  /** 工程共享展示时钟；单独使用播放器时由协调器创建。 */
+  playbackClock?: PreviewPlaybackClock;
   /** 主视频轨及转场；素材库临时预览自动停用。 */
   transitionTrack?: ComposeTrack;
   /** 视频片段列表（时间轴派生） */
@@ -335,7 +337,7 @@ const videoBRef = ref<HTMLVideoElement | null>(null);
 const previewCanvasRef = ref<HTMLCanvasElement | null>(null);
 /** GPUPixel 独占的内部 WebGL 画布 */
 const gpuCanvasRef = ref<HTMLCanvasElement | null>(null);
-/** 算法预热期间保持普通 video 播放时钟 */
+/** 仅记录美颜资源是否就绪，不切换播放时钟。 */
 const beautyReady = ref(false);
 const playerContainerRef = ref<HTMLElement | null>(null);
 /** 画幅画布。字幕和贴图相对它的边缘定位 */
@@ -390,20 +392,28 @@ const composeConfigRef = toRef(props, "composeConfig");
 const previewMuted = ref(false);
 /** 素材库预览不得混入工程时间线的接缝。 */
 const transitionTrackRef = computed(() => props.catalogPreviewActive ? undefined : props.transitionTrack);
+/** 工程逐片变换从轨道读取；只有无轨道播放器才使用外部变换，避免展示换片触发全局定位。 */
+const fallbackVideoFrame = computed<VideoFrameTransform | null>(() =>
+  props.catalogPreviewActive || props.transitionTrack ? null : (props.videoFrame ?? null),
+);
+/** 处理器绑定不随帧改变，所有逐帧工作通过函数调用而不是响应式回环。 */
+const frameRendererRef = shallowRef<PreviewFrameRenderer | null>(null);
+/** 素材预览的时间和播放意图不污染工程游标。 */
+const localClock = createPreviewPlaybackClock();
+const activeClock = computed(() => (props.catalogPreviewActive ? localClock : (props.playbackClock ?? localClock)));
 
 const {
   currentIdx: playingIdx,
   globalTime,
+  presentedFrameVersion,
   isPlaying,
   inGap,
-  activeVideoEl,
-  standbyVideoEl,
   mediaReady,
   playbackError,
-  sampleTime,
-  renderGeneration,
-  onFramePresented,
-  onFrameFailed,
+  playbackState,
+  playbackWaiting,
+  presentedSourceSize,
+  previewStats,
   pause,
   play,
   toggle,
@@ -414,6 +424,7 @@ const {
   init,
   refreshBgm,
 } = useVideoComposePreview({
+  clock: activeClock,
   transitionTrack: transitionTrackRef,
   videoA: videoARef,
   videoB: videoBRef,
@@ -422,7 +433,8 @@ const {
   audioClips: audioClipsRef,
   config: composeConfigRef,
   previewMuted,
-  beautyReady,
+  renderer: frameRendererRef,
+  renderConfig: computed(() => [canvasSizeRef.value, fallbackVideoFrame.value]),
 });
 
 /** 播放条两侧的次按钮 */
@@ -440,59 +452,28 @@ function fmtClock(sec: number): string {
   return hours > 0 ? `${hours}:${mm}:${ss}` : `${minutes}:${ss}`;
 }
 
-const { videoSize, previewError: frameError } = useComposePreviewFrame({
+const { renderer, videoSize, previewError: frameError } = useComposePreviewFrame({
   canvas: previewCanvasRef,
   gpuCanvas: gpuCanvasRef,
-  video: activeVideoEl,
-  standbyVideo: standbyVideoEl,
   transitionTrack: transitionTrackRef,
   canvasSize: canvasSizeRef,
-  frame: computed(() => props.catalogPreviewActive ? null : props.videoFrame),
-  mediaReady,
+  frame: fallbackVideoFrame,
   clips: effectiveClips,
-  currentIdx: playingIdx,
-  sampleTime,
-  renderGeneration,
-  isPlaying,
-  inGap,
-  onFramePresented,
-  onFrameFailed,
   beautyReady,
 });
+frameRendererRef.value = renderer;
 
 /** 加载、取帧和算法降级错误统一显示 */
 const previewError = computed<string>(() => playbackError.value || frameError.value);
 
-/** 活动 video 的像素尺寸。美颜关闭时贴图按它对齐 */
-const directVideoSize = ref<PreviewVideoSize | null>(null);
-
-/** 读取 video 的原始像素尺寸。还没有元数据时返回空 */
-function readDirectVideoSize(el: HTMLMediaElement | null): PreviewVideoSize | null {
-  if (!(el instanceof HTMLVideoElement) || el.videoWidth <= 0 || el.videoHeight <= 0) return null;
-  return { width: el.videoWidth, height: el.videoHeight };
-}
-
-/** 活动层元数据就绪后记下原始像素，并交给画幅适配 */
-function onDirectVideoMetadata(event: Event): void {
-  const target = event.currentTarget;
-  if (!(target instanceof HTMLVideoElement) || target !== activeVideoEl.value) return;
-  directVideoSize.value = readDirectVideoSize(target);
-  const clipId = effectiveClips.value[playingIdx.value]?.id;
-  const size = directVideoSize.value;
-  if (!clipId || !size) return;
-  emit("update:source-size", { clipId, width: size.width, height: size.height });
-}
-
-/** 切到另一层时同步已加载尺寸，包含待命槽提前完成元数据加载的情况。 */
-watch([activeVideoEl, playingIdx], ([el]) => {
-  const size = readDirectVideoSize(el);
-  directVideoSize.value = size;
+/** 后台解码可以领先，素材尺寸事件只能随已经展示的片段更新。 */
+watch([presentedSourceSize, playingIdx], ([size]) => {
   const clipId = effectiveClips.value[playingIdx.value]?.id;
   if (clipId && size) emit("update:source-size", { clipId, ...size });
 });
 
 /** 已提交画面的像素尺寸，首帧前回退活动 video 元数据 */
-const overlayVideoSize = computed<PreviewVideoSize | null>(() => videoSize.value || directVideoSize.value);
+const overlayVideoSize = computed<PreviewVideoSize | null>(() => videoSize.value || presentedSourceSize.value);
 
 /** 添加贴图时用画布像素，使默认框钉在画幅上 */
 function getVideoSize(): { width: number; height: number } | null {
@@ -781,7 +762,8 @@ onBeforeUnmount(() => {
 });
 
 watch(playingIdx, (i) => emit("update:playing-idx", i), { immediate: true });
-watch(globalTime, (t) => emit("global-time-update", t));
+/** 兼容独立播放器的事件订阅，同一时间重新提交也发送通知。 */
+watch([globalTime, presentedFrameVersion], ([t]) => emit("global-time-update", t));
 watch(isAdjusting, (v) => emit("update:is-adjusting", v));
 watch(videoReady, (v) => emit("update:video-ready", v), { immediate: true });
 

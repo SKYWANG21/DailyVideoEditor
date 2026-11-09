@@ -5,8 +5,6 @@ import type { TextTemplateItem } from "../shared/textTemplateCatalog";
  * 各 composable 在 setup 里同步赋值，事件触发时才调用，因此播放标志和 nextTick / rAF 时序与拆分前一致。
  */
 export interface ComposeEditorPorts {
-  /** 同步时间轴播放按钮，不把事件回灌给预览 */
-  syncTimelinePlaybackUi: (playing: boolean) => void;
   /** 从时间轴命令读主轨 / 音轨，喂给预览 */
   syncDerivedClipsFromTimeline: () => void;
   /** 用当前轨道和选中态刷新右栏，并挡住下一拍的反向写回 */
@@ -31,7 +29,6 @@ export function createComposeEditorPorts(): ComposeEditorPorts {
     };
   };
   return {
-    syncTimelinePlaybackUi: unwired("syncTimelinePlaybackUi"),
     syncDerivedClipsFromTimeline: unwired("syncDerivedClipsFromTimeline"),
     syncSidebarFromTracks: unwired("syncSidebarFromTracks"),
     afterExitCatalogPreview: unwired("afterExitCatalogPreview"),

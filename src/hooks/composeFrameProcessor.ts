@@ -8,54 +8,7 @@ import {
 } from "@/types/beautyPreview";
 import type { GpuPixelPreview } from "@/utils/beauty/gpuPixelPreview";
 import BeautyPreviewWorker from "../workers/beautyPreview.worker.ts?worker&inline";
-import { VIDEO_FRAME_TIMEOUT_MS } from "./previewVideoFrame";
-
-/** 快照超时或取消后，迟到的图像仍必须释放。 */
-export function capturePreviewBitmap(source: HTMLVideoElement, signal: AbortSignal): Promise<ImageBitmap> {
-  return new Promise((resolve, reject) => {
-    let finished = false;
-    /** 释放监听与超时。 */
-    const cleanup = (): void => {
-      clearTimeout(timer);
-      signal.removeEventListener("abort", abort);
-    };
-    /** 当前快照不能再提交。 */
-    const abort = (): void => {
-      if (finished) return;
-      finished = true;
-      cleanup();
-      reject(new DOMException("预览请求已取消", "AbortError"));
-    };
-    const timer = window.setTimeout(() => {
-      if (finished) return;
-      finished = true;
-      cleanup();
-      reject(new Error("视频快照超时（8 秒）"));
-    }, VIDEO_FRAME_TIMEOUT_MS);
-    signal.addEventListener("abort", abort, { once: true });
-    if (signal.aborted) {
-      abort();
-      return;
-    }
-    void createImageBitmap(source).then(
-      (bitmap) => {
-        if (finished) {
-          bitmap.close();
-          return;
-        }
-        finished = true;
-        cleanup();
-        resolve(bitmap);
-      },
-      (error: unknown) => {
-        if (finished) return;
-        finished = true;
-        cleanup();
-        reject(error);
-      },
-    );
-  });
-}
+import { capturePreviewBitmap, VIDEO_FRAME_TIMEOUT_MS } from "./previewVideoFrame";
 
 /** Worker 消息的响应槽，不允许把不同请求结果互换。 */
 interface PendingResponse {
@@ -122,7 +75,7 @@ export class ComposeFrameProcessor {
 
   /** 美颜输出立即复制到独立画布，处理 B 时不会覆盖 A。 */
   async process(
-    source: HTMLVideoElement,
+    source: ImageBitmap,
     beauty: BeautyParams,
     identity: PreviewFrameIdentity,
     signal: AbortSignal,

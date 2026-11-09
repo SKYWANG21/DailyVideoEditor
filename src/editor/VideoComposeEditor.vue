@@ -39,6 +39,7 @@
         />
         <VideoComposePlayer
           ref="playerRef"
+          :playback-clock="playbackClock"
           class="h-full min-h-0 w-full min-w-0"
           :video-clips="derivedMainClips"
           :transition-track="mainTrack"
@@ -63,7 +64,6 @@
           @update:playing-idx="playingIdx = $event"
           @toggle-playback="onPreviewTogglePlayback"
           @seek-playback="onPreviewSeek"
-          @global-time-update="onPlayerGlobalTimeUpdate"
           @update:is-adjusting="onIsAdjustingUpdate"
           @update:subtitle-position="onSubtitlePositionChange"
           @update:video-ready="videoReady = $event"
@@ -138,6 +138,7 @@
 
       <VideoComposeTimeline
         ref="timelineRef"
+        :playback-clock="playbackClock"
         class="h-full min-h-0 w-full min-w-0"
         :tracks="tracks"
         :readonly="readonly"
@@ -146,11 +147,7 @@
         @update:tracks="onTracksUpdate"
         @update:scale="onTimelineScaleUpdate"
         @selection-changed="onSelectionChanged"
-        @playback-play="onTimelinePlay"
-        @playback-pause="onTimelinePause"
-        @playback-seek="onTimelineSeek"
-        @time-update="onTimelineTimeUpdate"
-        @playback-ratechange="onTimelineRateChange"
+        @playback-command="onTimelineCommand"
         @drop-catalog-clip="onTimelineDropCatalogClip"
         @drop-audio-asset="onTimelineDropAudioAsset"
         @drop-subtitle-asset="onTimelineDropSubtitleAsset"
@@ -329,6 +326,7 @@ const {
   derivedMainClips,
   derivedAudioClips,
   playingIdx,
+  playbackClock,
   videoReady,
   previewDurationSec,
   tracks,
@@ -356,12 +354,7 @@ const {
   adjustPreviewSubtitles,
   onPreviewTogglePlayback,
   onPreviewSeek,
-  onPlayerGlobalTimeUpdate,
-  onTimelinePlay,
-  onTimelinePause,
-  onTimelineSeek,
-  onTimelineTimeUpdate,
-  onTimelineRateChange,
+  onTimelineCommand,
   onVideoVolumeChange,
   onBeautyChange,
   onBgmVolumeChange,

@@ -56,7 +56,7 @@
         <span class="tools-bar__time-separator">/</span>
         <span class="tools-bar__time-duration">{{ formattedDuration }}</span>
       </div>
-      <select v-model="playbackRate" class="tools-bar__select" @change="handlePlaybackRateChange">
+      <select v-model="playbackRate" class="tools-bar__select">
         <option v-for="rate in playbackRates" :key="rate" :value="rate">
           {{ rate }}x
         </option>
@@ -153,8 +153,6 @@ const props = withDefaults(defineProps<Props>(), {
 // Emits
 const emit = defineEmits<{
   operation: [operation: string]
-  'playback:play': []
-  'playback:pause': []
 }>()
 
 // Stores
@@ -176,7 +174,8 @@ const minScale = computed(() => scaleStore.minScale)
 const maxScale = computed(() => scaleStore.maxScale)
 
 // Local state
-const playbackRate = ref(playbackStore.playbackRate)
+/** 倍速显示读取权威状态，修改仅提交控制请求。 */
+const playbackRate = computed({ get: () => playbackStore.playbackRate, set: (rate: number) => playbackStore.setPlaybackRate(rate) });
 const playbackRates = computed(() => config.playbackRates || [0.5, 1, 2, 4])
 const scale = ref(scaleStore.scale)
 watch(
@@ -314,17 +313,10 @@ function handleOperation(operation: string) {
 // 切换播放/暂停
 function togglePlay() {
   if (playbackStore.isPlaying) {
-    playbackStore.pause()
-    emit('playback:pause')
+    playbackStore.pause();
   } else {
-    playbackStore.play()
-    emit('playback:play')
+    playbackStore.play();
   }
-}
-
-// 处理播放速率变化
-function handlePlaybackRateChange() {
-  playbackStore.setPlaybackRate(playbackRate.value)
 }
 
 // 切换吸附

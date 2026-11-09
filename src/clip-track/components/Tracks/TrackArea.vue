@@ -70,7 +70,6 @@ const emit = defineEmits<{
   trackContextMenu: [track: Track, time: number, event: MouseEvent];
   addTransition: [beforeClipId: string, afterClipId: string];
   dropMedia: [mediaData: any, trackId: string, startTime: number];
-  seek: [time: number];
   "clip:dblclick": [clip: Clip, time: number];
 }>();
 
@@ -173,7 +172,6 @@ function handleMouseDown(event: MouseEvent) {
     const x = event.clientX - rect.left + trackAreaRef.value.scrollLeft;
     const time = normalizeTime(x / actualPixelsPerSecond.value);
     playbackStore.seekTo(time);
-    emit("seek", time);
   }
 }
 
@@ -187,7 +185,6 @@ function handleClipClick(clip: Clip, _event: MouseEvent) {
 function handleClipDblClick(clip: Clip, time: number) {
   if (clip.type !== "subtitle") {
     playbackStore.seekTo(time);
-    emit("seek", time);
   }
   emit("clip:dblclick", clip, time);
 }

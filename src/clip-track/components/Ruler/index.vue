@@ -56,7 +56,6 @@ const props = withDefaults(defineProps<Props>(), {
 // Emits
 const emit = defineEmits<{
   scroll: [left: number]
-  seek: [time: number]
 }>()
 
 // Stores
@@ -72,6 +71,7 @@ const rulerWrapperRef = ref<HTMLElement>()
 const isDraggingCursor = ref(false)
 const cursorLineHeight = ref(0)
 let resizeObserver: ResizeObserver | null = null
+let cancelCursorDrag: (() => void) | null = null
 
 // 提供给外部组件判断是否在拖拽
 defineExpose({
@@ -167,100 +167,97 @@ function handleRulerClick(event: MouseEvent) {
 
   // 直接跳转到点击位置，不进行吸附
   playbackStore.seekTo(seekTime)
-  emit('seek', seekTime)
 }
 
-// 开始拖拽游标
-// 开始拖拽游标
-function handleCursorDragStart() {
-  isDraggingCursor.value = true
-  playbackStore.pause()
-  document.body.style.userSelect = 'none' // 防止拖拽时选中文字
+/** 拖动目标与已展示时间分离，松手后恢复开始时的播放意图。 */
+function handleCursorDragStart(event: MouseEvent): void {
+  if (event.button !== 0 || isDraggingCursor.value) return;
+  isDraggingCursor.value = true;
+  playbackStore.beginScrub();
+  document.body.style.userSelect = "none"; // 防止拖拽时选中文字
 
-  let rafId: number | null = null
-  let currentMouseX = 0
-  let autoScrollSpeed = 0
+  let rafId: number | null = null;
+  let currentMouseX = event.clientX;
+  let targetTime = playbackStore.currentTime;
+  let autoScrollSpeed = 0;
 
   // 自动滚动循环
-  const autoScrollLoop = () => {
-    if (!isDraggingCursor.value) return
+  const autoScrollLoop = (): void => {
+    if (!isDraggingCursor.value) return;
 
     if (autoScrollSpeed !== 0 && rulerWrapperRef.value) {
-      rulerWrapperRef.value.scrollLeft += autoScrollSpeed
-      emit('scroll', rulerWrapperRef.value.scrollLeft) // 手动触发滚动事件以同步轨道区域
-      updateTime()
+      rulerWrapperRef.value.scrollLeft += autoScrollSpeed;
+      emit("scroll", rulerWrapperRef.value.scrollLeft); // 手动触发滚动事件以同步轨道区域
+      updateTime();
     }
 
-    rafId = requestAnimationFrame(autoScrollLoop)
-  }
+    rafId = requestAnimationFrame(autoScrollLoop);
+  };
 
   // 更新时间
-  const updateTime = () => {
-    const rect = rulerRef.value?.getBoundingClientRect()
-    if (!rect || !rulerWrapperRef.value) return
+  const updateTime = (): void => {
+    const rect = rulerRef.value?.getBoundingClientRect();
+    if (!rect || !rulerWrapperRef.value) return;
 
     // 计算鼠标相对于时间线内容区的位置（考虑滚动）
-    const x = currentMouseX - rect.left - props.trackControlWidth + rulerWrapperRef.value.scrollLeft
-    let newTime = x / actualPixelsPerSecond.value
+    const x = currentMouseX - rect.left - props.trackControlWidth + rulerWrapperRef.value.scrollLeft;
+    let newTime = x / actualPixelsPerSecond.value;
 
     // 限制在有效范围内
-    newTime = Math.max(0, newTime)
+    newTime = Math.max(0, newTime);
 
-    playbackStore.seekTo(newTime)
-  }
+    if (Math.abs(newTime - targetTime) < 1e-6) return;
+    playbackStore.seekTo(newTime);
+    targetTime = playbackStore.seekTime;
+  };
 
-  const handleMouseMove = (e: MouseEvent) => {
-    currentMouseX = e.clientX
+  const handleMouseMove = (e: MouseEvent): void => {
+    currentMouseX = e.clientX;
 
     // 计算自动滚动速度
-    const rect = rulerWrapperRef.value?.getBoundingClientRect()
+    const rect = rulerWrapperRef.value?.getBoundingClientRect();
     if (rect) {
-      const threshold = 50 // 边缘阈值
-      const maxSpeed = 15 // 最大滚动速度
+      const threshold = 50; // 边缘阈值
+      const maxSpeed = 15; // 最大滚动速度
 
       if (e.clientX < rect.left + threshold) {
         // 向左滚动
-        const ratio = 1 - (e.clientX - rect.left) / threshold
-        autoScrollSpeed = -maxSpeed * Math.max(0, ratio)
+        const ratio = 1 - (e.clientX - rect.left) / threshold;
+        autoScrollSpeed = -maxSpeed * Math.max(0, ratio);
       } else if (e.clientX > rect.right - threshold) {
         // 向右滚动
-        const ratio = 1 - (rect.right - e.clientX) / threshold
-        autoScrollSpeed = maxSpeed * Math.max(0, ratio)
+        const ratio = 1 - (rect.right - e.clientX) / threshold;
+        autoScrollSpeed = maxSpeed * Math.max(0, ratio);
       } else {
-        autoScrollSpeed = 0
+        autoScrollSpeed = 0;
       }
     }
 
     // 如果没有自动滚动，立即更新时间
     if (autoScrollSpeed === 0) {
-      updateTime()
+      updateTime();
     }
-  }
+  };
 
-  const handleMouseUp = () => {
-    isDraggingCursor.value = false
-    document.body.style.userSelect = '' // 恢复文字选中
-    if (rafId) {
-      cancelAnimationFrame(rafId)
-      rafId = null
-    }
-    document.removeEventListener('mousemove', handleMouseMove)
-    document.removeEventListener('mouseup', handleMouseUp)
+  const handleMouseUp = (): void => {
+    cancelCursorDrag?.();
+    playbackStore.endScrub(targetTime);
+    cancelCursorDrag = null;
+  };
 
-    // 拖拽结束时触发 seek 事件
-    emit('seek', playbackStore.currentTime)
-  }
-
-  // 初始化鼠标位置
-  // 注意：这里没有 event 参数，所以无法立即获取 mouseX，
-  // 但 mousemove 会很快触发。或者我们可以让 handleCursorDragStart 接收 event
-  // 不过为了保持简单，我们等待第一次 mousemove
-
-  document.addEventListener('mousemove', handleMouseMove)
-  document.addEventListener('mouseup', handleMouseUp)
+  document.addEventListener("mousemove", handleMouseMove);
+  document.addEventListener("mouseup", handleMouseUp);
+  /** 卸载时只清理手势，不在销毁过程中恢复播放。 */
+  cancelCursorDrag = () => {
+    isDraggingCursor.value = false;
+    document.body.style.userSelect = "";
+    if (rafId !== null) cancelAnimationFrame(rafId);
+    document.removeEventListener("mousemove", handleMouseMove);
+    document.removeEventListener("mouseup", handleMouseUp);
+  };
 
   // 启动循环
-  rafId = requestAnimationFrame(autoScrollLoop)
+  rafId = requestAnimationFrame(autoScrollLoop);
 }
 
 // 处理滚动
@@ -311,6 +308,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  cancelCursorDrag?.()
   window.removeEventListener('resize', updateCursorLineHeight)
   if (resizeObserver) {
     resizeObserver.disconnect()

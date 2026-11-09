@@ -1,6 +1,54 @@
 /** 视频加载、定位及快照等待的统一超时 */
 export const VIDEO_FRAME_TIMEOUT_MS = 8000;
 
+/** 在调用时冻结像素；取消后的迟到位图仍关闭，输入借用不被转移。 */
+export function capturePreviewBitmap(source: HTMLVideoElement | ImageBitmap, signal: AbortSignal, maxEdge = 1920): Promise<ImageBitmap> {
+  return new Promise((resolve, reject) => {
+    let finished = false;
+    const dimensions = source as { videoWidth?: number; videoHeight?: number; width?: number; height?: number };
+    const width = dimensions.videoWidth ?? dimensions.width ?? 1;
+    const height = dimensions.videoHeight ?? dimensions.height ?? 1;
+    const scale = Math.min(1, maxEdge / Math.max(width, height, 1));
+    /** 所有完成路径清理等待，不能关闭调用方持有的输入。 */
+    const cleanup = (): void => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", abort);
+    };
+    const abort = (): void => {
+      if (finished) return;
+      finished = true;
+      cleanup();
+      reject(new DOMException("预览请求已取消", "AbortError"));
+    };
+    const timer = window.setTimeout(() => {
+      if (finished) return;
+      finished = true;
+      cleanup();
+      reject(new Error("视频快照超时（8 秒）"));
+    }, VIDEO_FRAME_TIMEOUT_MS);
+    signal.addEventListener("abort", abort, { once: true });
+    if (signal.aborted) return abort();
+    const options =
+      scale < 1
+        ? { resizeWidth: Math.max(1, Math.round(width * scale)), resizeHeight: Math.max(1, Math.round(height * scale)) }
+        : undefined;
+    void createImageBitmap(source, options).then(
+      (bitmap) => {
+        if (finished) return bitmap.close();
+        finished = true;
+        cleanup();
+        resolve(bitmap);
+      },
+      (error: unknown) => {
+        if (finished) return;
+        finished = true;
+        cleanup();
+        reject(error);
+      },
+    );
+  });
+}
+
 /** 等待真实媒体状态；超时、媒体错误和取消都不能冒充成功 */
 export function waitForPreviewMedia(video: HTMLMediaElement, ready: () => boolean, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {

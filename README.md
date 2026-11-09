@@ -132,14 +132,16 @@ createApp(App).mount("#app");
 配置保存在 `modelValue.tracks[].transitions`，随撤销重做、`reload()` 和 `exportComposePayload()` 一起读写：
 
 ```ts
-transitions: [{
-  id: "transition-1",
-  clipAId: "video-a",
-  clipBId: "video-b",
-  effectId: "crossfade",
-  durationSec: 1,
-  params: { curve: "linear" },
-}]
+transitions: [
+  {
+    id: "transition-1",
+    clipAId: "video-a",
+    clipBId: "video-b",
+    effectId: "crossfade",
+    durationSec: 1,
+    params: { curve: "linear" },
+  },
+];
 ```
 
 旧工程缺省为空；关联视频不再相邻时清理转场，缩短片段时自动限制转场时长。实际成片服务由宿主消费该字段，本库不执行服务端渲染。

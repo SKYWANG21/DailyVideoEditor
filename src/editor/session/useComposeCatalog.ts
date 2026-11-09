@@ -173,27 +173,25 @@ export function useComposeCatalog(
       ElMessage.warning("该版本暂无可用视频");
       return;
     }
-    state.clock.playSeq += 1;
+    const seq = ++state.clock.playSeq;
     state.clock.playInFlight = false;
-    state.clock.playerDrivingTimeline = false;
     state.playerRef.value?.pause();
-    ports.syncTimelinePlaybackUi(false);
     state.previewClipDuration.value = 0;
     state.previewCatalogVariant.value = variant;
     probeCatalogPreviewDuration(variant.url);
-    void nextTick(() => {
-      void state.playerRef.value?.seek?.(0);
-      void state.playerRef.value?.play?.();
+    void nextTick(async (): Promise<void> => {
+      if (seq !== state.clock.playSeq || state.previewCatalogVariant.value?.id !== variant.id) return;
+      await state.playerRef.value?.seek(0);
+      if (seq === state.clock.playSeq && state.previewCatalogVariant.value?.id === variant.id) await state.playerRef.value?.play();
     });
   }
 
   /** 清除素材库预览态（不 resync；由后续时间轴 seek/play 接管） */
   function exitCatalogPreviewIfNeeded(): boolean {
     if (!state.previewCatalogVariant.value) return false;
+    state.playerRef.value?.pause();
     state.previewCatalogVariant.value = null;
     state.previewClipDuration.value = 0;
-    state.clock.playerDrivingTimeline = false;
-    state.clock.playInFlight = false;
     return true;
   }
 
@@ -212,9 +210,7 @@ export function useComposeCatalog(
     if (!exitCatalogPreviewIfNeeded()) return;
     state.clock.playSeq += 1;
     state.clock.playInFlight = false;
-    state.clock.playerDrivingTimeline = false;
     state.playerRef.value?.pause?.();
-    ports.syncTimelinePlaybackUi(false);
     const timeSec = state.timelineRef.value?.getCurrentTime?.() ?? state.globalTime.value;
     void nextTick(() => {
       void state.playerRef.value?.resync?.(timeSec);

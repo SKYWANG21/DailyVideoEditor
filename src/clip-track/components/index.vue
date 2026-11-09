@@ -12,8 +12,6 @@
       :show-scale-control="showScaleControl"
       :locale="mergedLocale"
       @operation="handleOperation"
-      @playback:play="() => emit('playback:play')"
-      @playback:pause="() => emit('playback:pause')"
     >
       <!-- 操作区域插槽 -->
       <template #operations-prepend>
@@ -57,7 +55,6 @@
       :scroll-left="scrollLeft"
       :track-control-width="currentTrackControlWidth"
       @scroll="handleRulerScroll"
-      @seek="handleSeekFromChild"
     />
 
     <!-- 时间线后置插槽 -->
@@ -78,7 +75,6 @@
         @add-transition="handleAddTransition"
         @drop-media="handleDropMedia"
         @update:track-control-width="handleTrackControlWidthUpdate"
-        @seek="handleSeekFromChild"
         @clip:dblclick="(clip, time) => emit('clip:dblclick', clip, time)"
       >
         <!-- 轨道控制区自定义 -->
@@ -136,6 +132,7 @@
 import { ref, onMounted, onUnmounted, provide, computed, watch, nextTick, useSlots, type Slots } from "vue";
 import { useTracksStore } from "../stores/tracks";
 import { usePlaybackStore } from "../stores/playback";
+import type { PreviewPlaybackClock, TimelinePlaybackCommand } from "@/types/previewPlayback";
 import { useHistoryStore } from "../stores/history";
 import { useScaleStore } from "../stores/scale";
 import { useDragStore } from "../stores/drag";
@@ -321,6 +318,8 @@ function mergeClipConfigs(userConfigs?: ClipTypeConfig): ClipTypeConfig {
 
 /** 时间轴组件入参 */
 export interface Props {
+  /** 可选的只读预览时钟；提供后时间轴只发送控制请求。 */
+  playbackClock?: Readonly<PreviewPlaybackClock>;
   operationButtons?: OperationButton[];
   scaleConfigButtons?: ScaleConfigButton[];
   trackTypes?: TrackTypeConfig;
@@ -461,6 +460,7 @@ const emit = defineEmits<{
   "selection:changed": [selectedClipIds: string[], previousIds: string[]];
 
   // 播放状态事件
+  "playback:command": [command: TimelinePlaybackCommand];
   "playback:play": [];
   "playback:pause": [];
   "playback:seek": [time: number];
@@ -503,6 +503,34 @@ const playbackStore = usePlaybackStore(pinia);
 const historyStore = useHistoryStore(pinia);
 const scaleStore = useScaleStore(pinia);
 const dragStore = useDragStore(pinia);
+
+/** 所有交互与公开 API 经 store 发一次命令，旧事件仅作兼容通知。 */
+function dispatchPlaybackCommand(command: TimelinePlaybackCommand): void {
+  emit("playback:command", command);
+  switch (command.type) {
+    case "play":
+      emit("playback:play");
+      break;
+    case "pause":
+      emit("playback:pause");
+      break;
+    case "seek":
+      emit("playback:seek", command.time);
+      break;
+    case "rate":
+      emit("playback:ratechange", command.rate);
+      break;
+    case "scrub-start":
+      emit("playback:pause");
+      break;
+    case "scrub-end":
+      emit("playback:seek", command.time);
+      break;
+  }
+}
+
+/** 时钟对象切换时只更换读取源，不将状态变化解释成用户跳转。 */
+watch(() => props.playbackClock, (clock) => playbackStore.connect(clock, dispatchPlaybackCommand), { immediate: true, flush: "sync" });
 
 // 监听跨轨拖拽配置变化
 watch(
@@ -559,12 +587,6 @@ const keyboardCallbacks = {
   },
   onPaste: (clips: any[], trackId: string, time: number) => {
     emit("clipPaste", clips, trackId, time);
-  },
-  onPlay: () => {
-    emit("playback:play");
-  },
-  onPause: () => {
-    emit("playback:pause");
   },
   onUndo: () => {
     emit("history:changed", getHistoryState());
@@ -938,11 +960,6 @@ function handleAddTransition(beforeClipId: string, afterClipId: string) {
 // 处理拖放媒体
 function handleDropMedia(mediaData: any, trackId: string, startTime: number) {
   emit("dropMedia", mediaData, trackId, startTime);
-}
-
-// 处理子组件的 seek 事件（来自 Ruler 或 Tracks）
-function handleSeekFromChild(time: number) {
-  emit("playback:seek", time);
 }
 
 // 通用菜单项定义（使用 locale）
@@ -1434,20 +1451,18 @@ function getSelectedClipIds() {
 
 // ============ 播放控制 API ============
 
-// 播放
-function play() {
+/** 公开播放 API 与工具栏使用同一命令出口。 */
+function play(): void {
   playbackStore.play();
-  emit("playback:play");
 }
 
-// 暂停
-function pause() {
+/** 公开暂停 API 不回写时间轴游标。 */
+function pause(): void {
   playbackStore.pause();
-  emit("playback:pause");
 }
 
-// 切换播放/暂停
-function togglePlay() {
+/** 切换播放意图，最终状态由绑定的时钟反馈。 */
+function togglePlay(): void {
   if (playbackStore.isPlaying) {
     pause();
   } else {
@@ -1455,21 +1470,24 @@ function togglePlay() {
   }
 }
 
-// 跳转到指定时间
-function seekTo(time: number) {
+/** 公开定位 API 只请求目标，不提前修改受控时间轴显示。 */
+function seekTo(time: number): void {
   playbackStore.seekTo(time);
-  emit("playback:seek", time);
 }
 
-// 获取当前时间
-function getCurrentTime() {
+/** 分割、裁剪和粘贴位置使用已展示时间。 */
+function getCurrentTime(): number {
   return playbackStore.currentTime;
 }
 
-// 设置播放速率
-function setPlaybackRate(rate: number) {
+/** 连续步进使用尚未完成的目标，编辑操作仍读取 getCurrentTime。 */
+function getRequestedTime(): number {
+  return playbackStore.seekTime;
+}
+
+/** 公开倍速 API 交给当前播放协调器。 */
+function setPlaybackRate(rate: number): void {
   playbackStore.setPlaybackRate(rate);
-  emit("playback:ratechange", rate);
 }
 
 // 获取播放速率
@@ -1612,6 +1630,7 @@ defineExpose({
   togglePlay,
   seekTo,
   getCurrentTime,
+  getRequestedTime,
   setPlaybackRate,
   getPlaybackRate,
   isPlaying,

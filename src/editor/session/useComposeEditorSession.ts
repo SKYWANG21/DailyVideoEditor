@@ -106,6 +106,7 @@ export function useComposeEditorSession(props: ComposeEditorProps, emit: Compose
     derivedMainClips: state.derivedMainClips,
     derivedAudioClips: state.derivedAudioClips,
     playingIdx: state.playingIdx,
+    playbackClock: state.playbackClock,
     globalTime: state.globalTime,
     isAdjusting: state.isAdjusting,
     videoReady: state.videoReady,

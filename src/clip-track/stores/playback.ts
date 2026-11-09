@@ -1,148 +1,131 @@
-import { defineStore, getActivePinia } from 'pinia'
-import { ref, computed } from 'vue'
-import { useTracksStore } from './tracks'
+import { defineStore, getActivePinia } from "pinia";
+import { ref, computed, shallowRef, watch } from "vue";
+import type { PreviewPlaybackClock, TimelinePlaybackCommand } from "@/types/previewPlayback";
+import { createPreviewPlaybackClock } from "@/hooks/previewPlaybackClock";
+import { useTracksStore } from "./tracks";
 
-export const usePlaybackStore = defineStore('playback', () => {
-  const pinia = getActivePinia()
-  if (!pinia) throw new Error('playback store 需要 Pinia 实例')
+/** 受控时间轴只读展示时钟；独立时间轴保留本地播放状态。 */
+export const usePlaybackStore = defineStore("playback", () => {
+  const pinia = getActivePinia();
+  if (!pinia) throw new Error("playback store 需要 Pinia 实例");
+  const localClock = createPreviewPlaybackClock();
+  const source = shallowRef<Readonly<PreviewPlaybackClock>>();
+  const onCommand = shallowRef<(command: TimelinePlaybackCommand) => void>();
+  const duration = ref(0);
+  const requestedTime = ref<number | null>(null);
+  let scrubWasPlaying = false;
 
-  // 状态
-  const isPlaying = ref(false)
-  const currentTime = ref(0) // 当前播放时间（秒）
-  const playbackRate = ref(1) // 播放速率
-  const duration = ref(0) // 手动设置的总时长（秒）
+  /** 全部显示及编辑位置读取同一个已展示时间，不维护游标副本。 */
+  const currentTime = computed(() => (source.value ?? localClock).presentedTime);
+  const isPlaying = computed(() => (source.value ?? localClock).isPlaying);
+  const playbackRate = computed(() => (source.value ?? localClock).playbackRate);
+  const seekTime = computed(() => requestedTime.value ?? currentTime.value);
+  const effectiveDuration = computed(() => Math.max(useTracksStore(pinia).totalDuration, duration.value));
+  const formattedCurrentTime = computed(() => formatTime(currentTime.value));
+  const formattedDuration = computed(() => formatTime(effectiveDuration.value));
 
-  // 动画循环状态
-  let animationFrameId: number | null = null
-  let lastTime = 0
+  /** 目标帧提交或定位失败后结束草稿，数值相同的重定位也能完成。 */
+  watch(
+    () => [source.value?.revision, source.value?.state] as const,
+    ([revision, state], previous) => {
+      if (revision !== previous[0] || state === "error") requestedTime.value = null;
+    },
+    { flush: "sync" },
+  );
 
-  // 实际使用的时长：优先使用轨道总时长，其次使用手动设置的时长
-  const effectiveDuration = computed(() => {
-    const tracksStore = useTracksStore(pinia)
-    const tracksDuration = tracksStore.totalDuration
-    // 使用轨道时长和手动设置时长中的较大值
-    return Math.max(tracksDuration, duration.value)
-  })
+  /** 绑定只读展示源和统一命令出口，绑定过程不会触发播放命令。 */
+  function connect(clock: Readonly<PreviewPlaybackClock> | undefined, dispatch: (command: TimelinePlaybackCommand) => void): void {
+    source.value = clock;
+    onCommand.value = dispatch;
+    requestedTime.value = null;
+  }
 
-  // 计算属性：格式化时间 HH:MM:SS:FF
-  const formattedCurrentTime = computed(() => formatTime(currentTime.value))
-  const formattedDuration = computed(() => formatTime(effectiveDuration.value))
-
-  // 方法：格式化时间
+  /** 格式化工程帧时间。 */
   function formatTime(seconds: number, fps = 30): string {
-    const totalFrames = Math.floor(seconds * fps)
-    const hours = Math.floor(totalFrames / (fps * 3600))
-    const minutes = Math.floor((totalFrames % (fps * 3600)) / (fps * 60))
-    const secs = Math.floor((totalFrames % (fps * 60)) / fps)
-    const frames = totalFrames % fps
-
-    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}:${String(frames).padStart(2, '0')}`
+    const totalFrames = Math.floor(seconds * fps);
+    const hours = Math.floor(totalFrames / (fps * 3600));
+    const minutes = Math.floor((totalFrames % (fps * 3600)) / (fps * 60));
+    const secs = Math.floor((totalFrames % (fps * 60)) / fps);
+    const frames = totalFrames % fps;
+    return [hours, minutes, secs, frames].map((value) => String(value).padStart(2, "0")).join(":");
   }
 
-  // 动画循环
-  function loop(timestamp: number) {
-    if (!isPlaying.value) return
-
-    if (lastTime > 0) {
-      const deltaTime = (timestamp - lastTime) / 1000
-      const newTime = currentTime.value + deltaTime * playbackRate.value
-      const maxDuration = effectiveDuration.value
-
-      if (newTime >= maxDuration) {
-        currentTime.value = maxDuration
-        pause()
-        return
-      }
-
-      currentTime.value = newTime
-    }
-
-    lastTime = timestamp
-    animationFrameId = requestAnimationFrame(loop)
+  /** 播放按钮只发意图，受控模式等待协调器更新状态。 */
+  function play(): void {
+    if (!source.value) localClock.isPlaying = true;
+    onCommand.value?.({ type: "play" });
   }
 
-  // 开始循环
-  function startLoop() {
-    lastTime = 0
-    animationFrameId = requestAnimationFrame(loop)
+  /** 暂停不回写游标，也不启动时间轴自己的计时循环。 */
+  function pause(): void {
+    if (!source.value) localClock.isPlaying = false;
+    onCommand.value?.({ type: "pause" });
   }
 
-  // 停止循环
-  function stopLoop() {
-    if (animationFrameId !== null) {
-      cancelAnimationFrame(animationFrameId)
-      animationFrameId = null
-    }
-    lastTime = 0
+  /** 切换以权威播放意图为准。 */
+  function togglePlay(): void {
+    if (isPlaying.value) pause();
+    else play();
   }
 
-  // 方法：播放
-  function play() {
-    if (isPlaying.value) return
-    // 预览器才是主时钟；这里只亮播放态，避免墙钟 RAF 把光标推偏
-    isPlaying.value = true
+  /** 跳转草稿供连续键盘操作累加；受控模式不提前推动主游标。 */
+  function seekTo(time: number): void {
+    const maxTime = effectiveDuration.value > 0 ? effectiveDuration.value : Infinity;
+    const target = Math.max(0, Math.min(Number.isFinite(time) ? time : 0, maxTime));
+    if (source.value) requestedTime.value = target;
+    else localClock.presentedTime = target;
+    onCommand.value?.({ type: "seek", time: target });
   }
 
-  // 方法：暂停
-  function pause() {
-    if (!isPlaying.value) return
-    isPlaying.value = false
-    stopLoop()
+  /** 倍速请求交给协调器，显示值不抢先改变。 */
+  function setPlaybackRate(rate: number): void {
+    const target = Number.isFinite(rate) && rate > 0 ? rate : 1;
+    if (!source.value) localClock.playbackRate = target;
+    onCommand.value?.({ type: "rate", rate: target });
   }
 
-  // 方法：切换播放/暂停
-  function togglePlay() {
-    if (isPlaying.value) {
-      pause()
-    } else {
-      play()
-    }
+  /** 时长只参与标尺范围，不推进播放时间。 */
+  function setDuration(value: number): void {
+    duration.value = value;
   }
 
-  // 方法：跳转到指定时间
-  function seekTo(time: number) {
-    // 当 effectiveDuration 为 0 时，允许跳转到任意非负时间（用于重置后或空轨道状态）
-    const maxTime = effectiveDuration.value > 0 ? effectiveDuration.value : Infinity
-    currentTime.value = Math.max(0, Math.min(time, maxTime))
+  /** 连续步进从未完成的目标累加，避免慢帧时按键丢失。 */
+  function adjustTime(delta: number): void {
+    seekTo(seekTime.value + delta);
   }
 
-  // 方法：设置播放速率
-  function setPlaybackRate(rate: number) {
-    playbackRate.value = rate
+  /** 拖动开始记录播放意图，协调器负责真正暂停。 */
+  function beginScrub(): void {
+    scrubWasPlaying = isPlaying.value;
+    if (!source.value) localClock.isPlaying = false;
+    onCommand.value?.({ type: "scrub-start" });
   }
 
-  // 方法：设置总时长
-  function setDuration(dur: number) {
-    duration.value = dur
+  /** 松手提交最终目标，恢复动作由协调器在目标画面展示后执行。 */
+  function endScrub(time: number): void {
+    if (!source.value) localClock.isPlaying = scrubWasPlaying;
+    onCommand.value?.({ type: "scrub-end", time, resume: scrubWasPlaying });
   }
 
-  // 方法：微调时间（用于快捷键）
-  function adjustTime(delta: number) {
-    const maxTime = effectiveDuration.value
-    currentTime.value = Math.max(0, Math.min(currentTime.value + delta, maxTime))
-  }
-
-  // 方法：重置
-  function reset() {
-    pause()
-    currentTime.value = 0
-    playbackRate.value = 1
-    duration.value = 0
+  /** 数据重置不通过播放命令修改外部时钟，工程清空由会话协调。 */
+  function reset(): void {
+    localClock.isPlaying = false;
+    localClock.presentedTime = 0;
+    localClock.playbackRate = 1;
+    duration.value = 0;
+    requestedTime.value = null;
   }
 
   return {
-    // 状态
     isPlaying,
     currentTime,
     playbackRate,
     duration,
     effectiveDuration,
-
-    // 计算属性
+    seekTime,
     formattedCurrentTime,
     formattedDuration,
-
-    // 方法
+    connect,
     formatTime,
     play,
     pause,
@@ -151,7 +134,8 @@ export const usePlaybackStore = defineStore('playback', () => {
     setPlaybackRate,
     setDuration,
     adjustTime,
-    reset
-  }
-})
-
+    beginScrub,
+    endScrub,
+    reset,
+  };
+});

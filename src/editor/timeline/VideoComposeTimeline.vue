@@ -11,6 +11,7 @@
   >
     <VideoTrack
       ref="videoTrackRef"
+      :playback-clock="playbackClock"
       :operation-buttons="operationButtons"
       :scale-config-buttons="['snap']"
       :show-tools-bar="!readonly"
@@ -41,11 +42,7 @@
       @clip-split="scheduleDataChanged"
       @clip-paste="scheduleDataChanged"
       @history:changed="scheduleDataChanged"
-      @playback:timeupdate="onTimeUpdate"
-      @playback:play="onPlaybackPlay"
-      @playback:pause="onPlaybackPause"
-      @playback:seek="onPlaybackSeek"
-      @playback:ratechange="onPlaybackRateChange"
+      @playback:command="emit('playback-command', $event)"
       @scale:changed="onScaleChanged"
       @scroll="onTrackScroll"
       @viewport:resize="onViewportResize"
@@ -201,6 +198,7 @@ import { normalizeFrameAspect } from "../shared/videoFrame";
 import ComposeTransitionHandles from "./ComposeTransitionHandles.vue";
 import { useTimelineTransitions } from "./useTimelineTransitions";
 import { normalizeTrackTransitions } from "@/transitions/timing";
+import type { PreviewPlaybackClock, TimelinePlaybackCommand } from "@/types/previewPlayback";
 import { clampPlaybackRate } from "../shared/playbackRate";
 import type { MediaClip, SubtitleClip, TextClip, Clip, ClipTypeConfig, TrackTypeConfig } from "@/clip-track";
 
@@ -232,6 +230,7 @@ interface VideoTrackExpose {
   getSelectedClips: () => Clip[];
   getSelectedClipIds: () => string[];
   getCurrentTime: () => number;
+  getRequestedTime: () => number;
   play: () => void;
   pause: () => void;
   togglePlay: () => void;
@@ -262,6 +261,8 @@ type TrackWithMute = Track & {
 
 /** 时间轴外壳入参。导出后声明文件才能引用，避免生成 d.ts 时 Props 无法命名 */
 export interface VideoComposeTimelineProps {
+  /** 时间轴只读工程已展示时间，跳转通过命令交给播放器。 */
+  playbackClock?: Readonly<PreviewPlaybackClock>;
   /** 多轨列表（对齐 ComposeTrack） */
   tracks: ComposeTrack[];
   /** 只读：隐藏工具栏操作与菜单 */
@@ -285,15 +286,8 @@ const emit = defineEmits<{
   "transition-applied": [];
   "update:tracks": [value: ComposeTrack[]];
   "selection-changed": [selectedClipIds: string[]];
-  "time-update": [timeSec: number];
-  /** 时间线工具栏播放 */
-  "playback-play": [];
-  /** 时间线工具栏暂停 */
-  "playback-pause": [];
-  /** 时间线 seek / 拖尺 */
-  "playback-seek": [timeSec: number];
-  /** 时间线全局倍速变更 */
-  "playback-ratechange": [rate: number];
+  /** 用户播放、定位及拖动意图，与展示时间读取分离。 */
+  "playback-command": [command: TimelinePlaybackCommand];
   /** 侧栏素材库版本拖入主轨 */
   "drop-catalog-clip": [payload: { variant: ComposeSegmentClipAssets; startTime: number }];
   /** 音频或音效拖入音频轨 */
@@ -339,8 +333,6 @@ let subtitleEditCommitting = false;
 
 /** 避免 data:changed → emit → props 回灌造成循环 */
 let suppressEmit = false;
-/** 外部 seekTo 回写游标时抑制向上转发，避免与 Player 死循环 */
-let suppressSeekEmit = false;
 /** 是否已完成首次主轨 bootstrap */
 let bootstrapped = false;
 
@@ -840,28 +832,6 @@ function onWindowPointerUp(): void {
   }, POINTER_SYNC_DEBOUNCE_MS);
 }
 
-function onTimeUpdate(time: number): void {
-  if (suppressSeekEmit) return;
-  emit("time-update", time);
-}
-
-function onPlaybackPlay(): void {
-  emit("playback-play");
-}
-
-function onPlaybackPause(): void {
-  emit("playback-pause");
-}
-
-function onPlaybackSeek(time: number): void {
-  if (suppressSeekEmit) return;
-  emit("playback-seek", time);
-}
-
-function onPlaybackRateChange(rate: number): void {
-  emit("playback-ratechange", rate);
-}
-
 /** 库倍率变更；挂载 reset 期间不向上抛，避免空轨覆盖工程 JSON */
 function onScaleChanged(scale: number): void {
   if (!bootstrapped) return;
@@ -1007,19 +977,9 @@ function resetTimelineKeepingScale(): void {
   applyProjectScale();
 }
 
-/** 由 Player 时钟回写时间线游标（不反向触发 seek Player） */
+/** 公开跳转 API 只发用户命令，播放进度同步不调用此方法。 */
 function seekTo(timeSec: number): void {
-  const api = videoTrackRef.value;
-  if (!api?.seekTo) return;
-  suppressSeekEmit = true;
-  try {
-    api.seekTo(timeSec);
-  } finally {
-    // 下一帧再放开，避免同 tick 内 timeupdate/seek 回灌
-    requestAnimationFrame(() => {
-      suppressSeekEmit = false;
-    });
-  }
+  videoTrackRef.value?.seekTo(timeSec);
 }
 
 /** 长按方向键：延迟后再加速 */
@@ -1057,13 +1017,13 @@ function clearPlayheadHold(): void {
 }
 
 /**
- * 键盘移动光标：调库 seekTo 且不设 suppressSeekEmit，以便 playback:seek 驱动预览。
+ * 键盘移动光标：请求目标帧，已展示时间由预览提交后更新。
  * 用整数帧对齐，避免 ±1/fps 浮点漂移。
  */
 function seekPlayheadFromKeyboard(deltaFrames: number): void {
   const api = videoTrackRef.value;
   if (!api?.seekTo) return;
-  const current = api.getCurrentTime?.() ?? 0;
+  const current = api.getRequestedTime?.() ?? api.getCurrentTime?.() ?? 0;
   const duration = api.getDuration?.() ?? 0;
   const fps = DEFAULT_COMPOSE_TIMELINE_FPS;
   const frame = Math.round(current * fps) + deltaFrames;

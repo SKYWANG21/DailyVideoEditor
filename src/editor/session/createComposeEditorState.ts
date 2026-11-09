@@ -1,4 +1,6 @@
 import { computed, reactive, ref, type ComputedRef, type Ref } from "vue";
+import type { PreviewPlaybackClock } from "@/types/previewPlayback";
+import { createPreviewPlaybackClock } from "@/hooks/previewPlaybackClock";
 import type { MediaClip, TextClip, TrackTypeConfig } from "@/clip-track";
 import type {
   BeautyParams,
@@ -133,20 +135,12 @@ export interface ComposeEditorEmit {
   (event: "selection-changed", clips: ComposeClip[]): void;
 }
 
-/** 预览和时间轴对钟用的可变标志。必须留在同一次会话里，不能做成模块级变量 */
+/** 会话控制请求的代次与编辑同步标志，不持有推进时间的逻辑。 */
 export interface ComposeClock {
-  /** 播放中由 Player 驱动时间线游标；暂停时允许时间线 scrub 驱动 Player */
-  playerDrivingTimeline: boolean;
   /** 递增以作废进行中的异步 play（连点暂停/播放） */
   playSeq: number;
-  /** seek+play 尚未完成，避免 timeupdate 把刚点的播放立刻暂停 */
+  /** 异步播放请求尚未完成，暂停和新跳转可使其失效。 */
   playInFlight: boolean;
-  /** 避免 timeline seek ↔ player seek 回环 */
-  suppressTimelineSeekToPlayer: boolean;
-  /** 程序化同步时间轴播放 UI，避免反向触发 playback-play */
-  suppressTimelinePlaybackEmit: boolean;
-  /** 时间轴工具栏是否处于「播放中」展示态（与 Player 对齐） */
-  timelineUiPlaying: boolean;
   /** 从 tracks 同步到侧栏时置位，避免回写循环 */
   syncingFromTracks: boolean;
 }
@@ -164,7 +158,9 @@ export interface ComposeEditorState {
   derivedAudioClips: Ref<PreviewAudioClip[]>;
   /** 播放器当前片段索引 */
   playingIdx: Ref<number>;
-  globalTime: Ref<number>;
+  /** 工程预览的唯一展示时钟；素材库预览不写入。 */
+  playbackClock: PreviewPlaybackClock;
+  globalTime: ComputedRef<number>;
   isAdjusting: Ref<boolean>;
   videoReady: Ref<boolean>;
   /** 播放条总时长，跟时间轴 getDuration */
@@ -254,7 +250,8 @@ export function createComposeEditorState(props: ComposeEditorProps): ComposeEdit
   const selectedClipIds = ref<string[]>([]);
   const derivedMainClips = ref<VideoClipItem[]>([]);
   const playingIdx = ref(0);
-  const globalTime = ref(0);
+  const playbackClock = createPreviewPlaybackClock();
+  const globalTime = computed(() => playbackClock.presentedTime);
   const videoReady = ref(false);
   const playerRef = ref<InstanceType<typeof VideoComposePlayer> | null>(null);
   const subtitleStyle = reactive<SubtitleStyleConfig>(getDefaultSubtitleStyleSnapshot());
@@ -338,17 +335,14 @@ export function createComposeEditorState(props: ComposeEditorProps): ComposeEdit
     sidebarRef: ref(null),
     timelineRef: ref(null),
     clock: {
-      playerDrivingTimeline: false,
       playSeq: 0,
       playInFlight: false,
-      suppressTimelineSeekToPlayer: false,
-      suppressTimelinePlaybackEmit: false,
-      timelineUiPlaying: false,
       syncingFromTracks: false,
     },
     derivedMainClips,
     derivedAudioClips: ref<PreviewAudioClip[]>([]),
     playingIdx,
+    playbackClock,
     globalTime,
     isAdjusting: ref(false),
     videoReady,
