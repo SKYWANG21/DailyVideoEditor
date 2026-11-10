@@ -54,6 +54,14 @@ export interface TransitionSample extends TransitionSeam {
   progress: number;
 }
 
+/** 两侧已经绘制完成的像素版本；仅在输入内容或处理配置变化时更新。 */
+export interface TransitionInputKeys {
+  /** 离场输入的稳定像素标识，不能仅使用可变 Canvas 的对象身份。 */
+  outgoing: string;
+  /** 入场输入的稳定像素标识。 */
+  incoming: string;
+}
+
 /** 算法只能绘制输入，不负责解码、计时或关闭调用方的帧。 */
 export interface TransitionRenderContext {
   /** 引擎隔离状态后的输出上下文。 */
@@ -68,12 +76,16 @@ export interface TransitionRenderContext {
   height: number;
   /** 限制并缓动后的进度。 */
   progress: number;
+  /** 可选像素版本，用于 WASM Worker 复用未变化的输入。 */
+  inputKeys?: TransitionInputKeys;
 }
 
 /** 可独立加载的具体绘制算法。 */
 export interface TransitionAlgorithm {
   /** 在当前帧上下文中绘制；实例可供多个引擎共用，异步实现须支持重入且不保留调用方的帧或上下文。 */
   render(context: TransitionRenderContext, params: Readonly<Record<string, unknown>>): void | Promise<void>;
+  /** 释放算法独占资源；注册表销毁时调用，调用后不得继续绘制。 */
+  dispose?(): void;
 }
 
 /** 全部内置转场的执行后端，不写入工程数据；宿主效果使用各自的加载器。 */
@@ -138,4 +150,6 @@ export interface TransitionRenderRequest {
   progress: number;
   /** 已持久化的效果参数。 */
   params: Record<string, unknown>;
+  /** 两侧输入的像素版本；省略时每帧重新读取，保证可变 Canvas 正确更新。 */
+  inputKeys?: TransitionInputKeys;
 }

@@ -173,6 +173,16 @@ Canvas 为默认后端。宿主可通过 `<VideoComposeEditor v-model="model" tr
 `effectId`、参数与工程数据不变。每种效果使用自己的独立 WASM 内核，首次渲染或生成缩略图时按需加载。
 预热和渲染共用编辑器注册表，WASM 首次使用时加载，失败沿用现有错误处理（预览提示并回退普通画面）。
 
+WASM 的实例化、Canvas 像素读回、RGBA 复制和内核计算均在 Worker 内执行，主线程只创建可转移的输入快照并显示完成位图。
+同一注册表的内置效果共用一个 Worker，各内核保持独立内存；宿主直接使用 `loadWasmTransitionAlgorithm()` 时由该算法持有线程。
+Worker 随库构建内联，无需部署额外脚本；处理失败或超时会拒绝当前请求，不会在主线程重新执行 WASM。
+编辑器卸载自动释放注册表与线程，并取消未完成的内核下载；独立使用的宿主应在结束时调用 `registry.dispose()`，或对直接加载的算法调用 `algorithm.dispose?.()`。
+
+播放器使用源 PTS、配置代次、变换、美颜和尺寸组成输入版本，Worker 只对变化的一侧重新读回与复制。
+独立引擎可传 `inputKeys: { outgoing, incoming }` 复用输入；像素内容改变时必须更新对应键。省略时始终读取两侧，
+避免把复用同一 Canvas 对象误判为像素未变化。素材卡片复用测试帧并限制为最多 30fps。
+该缓存减少像素读回；输入位图快照的创建与传输、输出显示仍有成本。
+
 宿主可通过 `transitionEffects` 追加自定义转场。素材栏、缩略图、接缝菜单、时间轴命令、预热与播放器共用编辑器注册表，
 保留内置效果并按传入顺序追加；重复 ID（包括内置 ID）报错。后端与效果列表均在挂载时固定，变更时需重新挂载编辑器。
 
@@ -248,12 +258,16 @@ Canvas 的纹理过滤、抗锯齿和中间缓冲量化会与 WASM 存在少量�
 
 内置源码位于 `src/transitions/wasm/`：`crossfade.c` 实现淡化，`effects.c` 按编译参数生成其余 9 个独立内核。
 仓库包含全部 `.wasm`，使用现有产物不需要安装编译器。
+内核保持原分辨率和八次模糊采样；变焦按 64 列分块复用采样坐标，水平百叶按行计算蒙版，倾斜百叶只检查相交条带，
+完全覆盖区域与不透明视频使用快速路径。固定栈坐标表不增加宿主 ABI 或整帧工作缓冲。
 重新编译需支持 wasm32 的 LLVM Clang（Emscripten SDK 自带），在 PowerShell 执行：
 
 ```powershell
 $env:WASM_CLANG = "D:\CODE\emsdk\upstream\bin\clang.exe"
 pnpm run build:transitions-wasm
 ```
+
+默认构建启用 WebAssembly SIMD。若后端运行时不支持 SIMD，设置 `$env:WASM_SIMD = "0"` 后重新编译，再让前后端使用同批产物。
 
 构建脚本一次生成全部 10 个内核。库构建将 WASM 随浏览器代码打包，并额外输出 `dist/algorithm/transitions/<effectId>.wasm`；包子路径
 `daily-video-editor/transitions/<effectId>.wasm` 指向对应独立产物，例如 `zoom-in.wasm`、`blinds-diagonal.wasm`、`shake.wasm`。

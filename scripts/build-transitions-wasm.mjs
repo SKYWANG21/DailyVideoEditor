@@ -3,6 +3,8 @@ import { fileURLToPath } from "node:url";
 
 // 使用支持 wasm32 的 LLVM Clang（Emscripten SDK 自带）；不链接浏览器胶水或 WASI。
 const root = new URL("../", import.meta.url);
+// 默认启用 SIMD；不支持 SIMD 的后端运行时可设置 WASM_SIMD=0 重新编译。
+const simd = process.env.WASM_SIMD === "0" ? [] : ["-msimd128"];
 const effects = ["zoom-in", "fade-black", "zoom-out", "blinds", "blinds-diagonal", "wipe-right", "wipe-left", "split-open", "shake"];
 const kernels = [
   { id: "crossfade", source: "crossfade.c", defines: [] },
@@ -14,6 +16,7 @@ for (const kernel of kernels) {
     [
       "--target=wasm32",
       "-O3",
+      ...simd,
       "-ffreestanding",
       "-fno-builtin",
       "-nostdlib",

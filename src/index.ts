@@ -5,6 +5,7 @@ export type {
   TransitionAlgorithm,
   TransitionBackend,
   TransitionEffectDefinition,
+  TransitionInputKeys,
   TransitionRegistryOptions,
   TransitionRenderContext,
   TransitionRenderRequest,

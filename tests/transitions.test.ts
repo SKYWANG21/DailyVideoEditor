@@ -176,6 +176,37 @@ describe("Canvas 内置转场目录", () => {
 
 describe("算法注册与驱动", () => {
   afterEach(() => vi.unstubAllGlobals());
+  it("注册表释放已加载算法，销毁后的加载结果也释放且不会继续使用", async () => {
+    const dispose = vi.fn();
+    const registry = createTransitionRegistry({
+      effects: [{ ...crossfadeDefinition, id: "disposable", load: async () => ({ render: vi.fn(), dispose }) }],
+    });
+    await registry.resolve("disposable");
+    registry.dispose();
+    registry.dispose();
+    await Promise.resolve();
+    expect(dispose).toHaveBeenCalledOnce();
+    await expect(registry.resolve("disposable")).rejects.toThrow("已释放");
+    let release!: (algorithm: { render: () => void; dispose: () => void }) => void;
+    const pendingRegistry = createTransitionRegistry({
+      effects: [
+        {
+          ...crossfadeDefinition,
+          id: "late",
+          load: () =>
+            new Promise((resolve) => {
+              release = resolve;
+            }),
+        },
+      ],
+    });
+    const pending = pendingRegistry.resolve("late");
+    await Promise.resolve();
+    pendingRegistry.dispose();
+    release({ render: vi.fn(), dispose });
+    await expect(pending).rejects.toThrow("已释放");
+    expect(dispose).toHaveBeenCalledTimes(2);
+  });
   it("加载去重，失败可重试，新算法不修改引擎分发", async () => {
     const registry = new TransitionRegistry();
     const render = vi.fn();

@@ -142,6 +142,10 @@ export function useComposePreviewFrame(options: UseComposePreviewFrameOptions) {
           height: a.height,
           progress: sample.progress,
           params: sample.transition.params,
+          inputKeys: {
+            outgoing: JSON.stringify([sample.clipA.id, layers.get(sample.clipA.id)!.key]),
+            incoming: JSON.stringify([sample.clipB.id, layers.get(sample.clipB.id)!.key]),
+          },
         });
       } catch (error: unknown) {
         signal.throwIfAborted();

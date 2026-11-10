@@ -38,6 +38,8 @@ const canvases = new Map<string, HTMLCanvasElement>();
 let raf = 0;
 let revision = 0;
 let disposed = false;
+/** 主题不变时复用测试帧；仅进度变化无需重新读回输入像素。 */
+let previewFrames: { key: string; outgoing: OffscreenCanvas; incoming: OffscreenCanvas } | undefined;
 /** 保存当前缩略图节点。 */
 function setCanvas(id: string, element: Element | ComponentPublicInstance | null): void {
   if (element instanceof HTMLCanvasElement) canvases.set(id, element);
@@ -48,22 +50,41 @@ async function paint(id: string, progress: number, token: number): Promise<void>
   const target = canvases.get(id);
   if (!target) return;
   const style = getComputedStyle(target);
-  const a = new OffscreenCanvas(144, 96);
-  const b = new OffscreenCanvas(144, 96);
-  for (const [canvas, color, label] of [
-    [a, style.getPropertyValue("--compose-accent"), "A"],
-    [b, style.getPropertyValue("--compose-fg-2"), "B"],
-  ] as const) {
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    ctx.fillStyle = color;
-    ctx.fillRect(0, 0, 144, 96);
-    ctx.fillStyle = style.getPropertyValue("--compose-surface");
-    ctx.font = "600 24px sans-serif";
-    ctx.fillText(label, 60, 58);
+  const colors = [
+    style.getPropertyValue("--compose-accent"),
+    style.getPropertyValue("--compose-fg-2"),
+    style.getPropertyValue("--compose-surface"),
+  ];
+  const key = JSON.stringify(["transition-card", ...colors]);
+  if (!previewFrames || previewFrames.key !== key) {
+    const outgoing = new OffscreenCanvas(144, 96),
+      incoming = new OffscreenCanvas(144, 96);
+    for (const [canvas, color, label] of [
+      [outgoing, colors[0], "A"],
+      [incoming, colors[1], "B"],
+    ] as const) {
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.fillStyle = color;
+      ctx.fillRect(0, 0, 144, 96);
+      ctx.fillStyle = colors[2];
+      ctx.font = "600 24px sans-serif";
+      ctx.fillText(label, 60, 58);
+    }
+    previewFrames = { key, outgoing, incoming };
   }
+  const { outgoing: a, incoming: b } = previewFrames;
   try {
-    const result = await engine.render({ effectId: id, outgoing: a, incoming: b, width: 144, height: 96, progress, params: {} });
+    const result = await engine.render({
+      effectId: id,
+      outgoing: a,
+      incoming: b,
+      width: 144,
+      height: 96,
+      progress,
+      params: {},
+      inputKeys: { outgoing: `${key}:a`, incoming: `${key}:b` },
+    });
     if (!disposed && token === revision) target.getContext("2d")?.drawImage(result, 0, 0);
   } catch {
     if (!disposed && token === revision) target.getContext("2d")?.drawImage(a, 0, 0);
@@ -75,8 +96,13 @@ function startPreview(id: string): void {
   const token = revision;
   if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
   const start = performance.now();
+  let lastPaint = -Infinity;
   const tick = async (): Promise<void> => {
-    await paint(id, ((performance.now() - start) % 1600) / 1600, token);
+    const now = performance.now();
+    if (now - lastPaint >= 1000 / 30) {
+      lastPaint = now;
+      await paint(id, ((now - start) % 1600) / 1600, token);
+    }
     if (token === revision && !disposed) raf = requestAnimationFrame(() => void tick());
   };
   void tick();
@@ -98,6 +124,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   disposed = true;
   stopPreview();
+  previewFrames = undefined;
 });
 </script>
 

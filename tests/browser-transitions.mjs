@@ -114,6 +114,43 @@ try {
   await command("Page.navigate", { url: origin });
   await waitFor("Boolean(document.querySelector('.compose-shell'))", 45000);
 
+  const workerProof = await evaluate(`(async () => {
+    const { createTransitionRegistry } = await import('/src/transitions/catalog.ts');
+    const { TransitionEngine } = await import('/src/transitions/engine.ts');
+    const NativeWorker = window.Worker;
+    let created = 0, terminated = 0;
+    window.Worker = class extends NativeWorker {
+      constructor(url, options) { super(url, options); this.tracked = options?.name === 'video-transitions'; if (this.tracked) created++; }
+      terminate() { if (this.tracked) { terminated++; this.tracked = false; } super.terminate(); }
+    };
+    const registry = createTransitionRegistry({ backend: 'wasm' }), engine = new TransitionEngine(registry);
+    const read = OffscreenCanvasRenderingContext2D.prototype.getImageData, instantiate = WebAssembly.instantiate;
+    const a = new OffscreenCanvas(1280, 720), b = new OffscreenCanvas(1280, 720);
+    a.getContext('2d').fillStyle = '#ff0000'; a.getContext('2d').fillRect(0, 0, 1280, 720);
+    b.getContext('2d').fillStyle = '#0000ff'; b.getContext('2d').fillRect(0, 0, 1280, 720);
+    let ticks = 0, timer;
+    try {
+      OffscreenCanvasRenderingContext2D.prototype.getImageData = () => { throw new Error('主线程禁止读回像素'); };
+      WebAssembly.instantiate = () => { throw new Error('主线程禁止实例化 WASM'); };
+      await Promise.all([registry.resolve('crossfade'), registry.resolve('zoom-in')]);
+      timer = setInterval(() => ticks++, 5);
+      for (let i = 0; i < 3; i++) await engine.render({ effectId: 'zoom-in', outgoing: a, incoming: b,
+        width: 1280, height: 720, progress: .3 + i * .1, params: {}, inputKeys: { outgoing: 'proof-a', incoming: 'proof-b' } });
+    } finally {
+      clearInterval(timer);
+      OffscreenCanvasRenderingContext2D.prototype.getImageData = read;
+      WebAssembly.instantiate = instantiate;
+      registry.dispose(); await Promise.resolve();
+      window.Worker = NativeWorker;
+    }
+    return { created, terminated, ticks, borrowedInputsValid: a.width === 1280 && b.width === 1280 };
+  })()`);
+  assert.equal(workerProof.created, 1);
+  assert.equal(workerProof.terminated, 1);
+  assert.ok(workerProof.ticks >= 5, JSON.stringify(workerProof));
+  assert.equal(workerProof.borrowedInputsValid, true);
+  console.log("PASS WASM 实例化与像素读回不在主线程、共用单 Worker、计算期间 UI 定时器持续运行", workerProof);
+
   const pixels = await evaluate(`(async () => {
     const { createTransitionRegistry } = await import('/src/transitions/catalog.ts');
     const { TransitionEngine } = await import('/src/transitions/engine.ts');

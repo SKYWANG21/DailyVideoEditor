@@ -1,6 +1,6 @@
 import type { TransitionEffectDefinition, TransitionRegistryOptions } from "@/types/transition";
 import { TransitionRegistry } from "./registry";
-import { loadWasmTransitionAlgorithm } from "./wasmAdapter";
+import { WasmTransitionWorkerClient } from "./wasmAdapter";
 
 /** 内置目录只保存描述，具体算法首次使用时加载。 */
 export const crossfadeDefinition: TransitionEffectDefinition = {
@@ -84,20 +84,19 @@ const canvasDefinitions: readonly TransitionEffectDefinition[] = [
 
 /** 固定内置后端并追加宿主效果；算法按需加载，实例之间不共享可变注册状态。 */
 export function createTransitionRegistry(options: TransitionRegistryOptions = {}): TransitionRegistry {
-  const registry = new TransitionRegistry();
+  const wasm = options.backend === "wasm" ? new WasmTransitionWorkerClient() : undefined;
+  const registry = new TransitionRegistry(() => wasm?.dispose());
   registry.register(
     options.backend === "wasm"
       ? {
           ...crossfadeDefinition,
-          load: () => loadWasmTransitionAlgorithm(new URL("./wasm/crossfade.wasm", import.meta.url)),
+          load: () => wasm!.load(new URL("./wasm/crossfade.wasm", import.meta.url)),
         }
       : crossfadeDefinition,
   );
   for (const effect of canvasDefinitions) {
     registry.register(
-      options.backend === "wasm"
-        ? { ...effect, load: () => loadWasmTransitionAlgorithm(new URL(`./wasm/${effect.id}.wasm`, import.meta.url)) }
-        : effect,
+      options.backend === "wasm" ? { ...effect, load: () => wasm!.load(new URL(`./wasm/${effect.id}.wasm`, import.meta.url)) } : effect,
     );
   }
   for (const effect of options.effects ?? []) registry.register(effect);

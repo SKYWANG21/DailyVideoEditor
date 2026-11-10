@@ -1,56 +1,161 @@
-import type { TransitionAlgorithm, WasmTransitionExports } from "@/types/transition";
+import type { TransitionAlgorithm, TransitionRenderContext } from "@/types/transition";
+import type { TransitionWorkerCommand, TransitionWorkerEvent } from "@/types/transitionWorker";
+import TransitionWorker from "../workers/transition.worker.ts?worker&inline";
 
-/** 加载独立 WASM 像素内核，包装成现有 Canvas 引擎可调用的算法。 */
-export async function loadWasmTransitionAlgorithm(url: string | URL): Promise<TransitionAlgorithm> {
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`转场 WASM 加载失败：HTTP ${response.status}`);
-  const { instance } = await WebAssembly.instantiate(await response.arrayBuffer(), {});
-  const exports = instance.exports;
-  if (
-    !(exports.memory instanceof WebAssembly.Memory) ||
-    !(exports.__heap_base instanceof WebAssembly.Global) ||
-    typeof exports.__heap_base.value !== "number" ||
-    typeof exports.render !== "function"
-  ) {
-    throw new Error("转场 WASM 缺少 memory、__heap_base 或 render 导出");
+/** 每个请求独占的响应槽，超时或线程故障时统一释放等待。 */
+interface PendingResponse {
+  resolve(event: TransitionWorkerEvent): void;
+  reject(error: Error): void;
+}
+
+/** 同一注册表的内置内核共用线程，各内核拥有独立线性内存与输入版本。 */
+export class WasmTransitionWorkerClient {
+  private worker: Worker | null = null;
+  private sequence = 0;
+  private nextKernel = 0;
+  private kernels = new Set<number>();
+  private pending = new Map<number, PendingResponse>();
+  private controller = new AbortController();
+  private disposed = false;
+
+  /** 下载模块并交给 Worker 实例化；失败时允许注册表再次加载。 */
+  async load(url: string | URL): Promise<TransitionAlgorithm> {
+    if (this.disposed) throw new DOMException("转场算法已释放", "AbortError");
+    const kernelId = ++this.nextKernel;
+    this.kernels.add(kernelId);
+    try {
+      const response = await fetch(url, { signal: this.controller.signal });
+      if (!response.ok) throw new Error(`转场 WASM 加载失败：HTTP ${response.status}`);
+      const buffer = await response.arrayBuffer();
+      if (this.disposed) throw new DOMException("转场算法已释放", "AbortError");
+      await this.send({ type: "load", kernelId, buffer }, [buffer]);
+    } catch (error: unknown) {
+      this.release(kernelId);
+      throw error;
+    }
+    const loadedWorker = this.worker;
+    let disposed = false;
+    return {
+      /** 借用调用方画面，只转移自己创建的快照，输出消费后立即关闭。 */
+      render: async (context, params): Promise<void> => {
+        if (disposed) throw new DOMException("转场算法已释放", "AbortError");
+        if (this.worker !== loadedWorker) throw new Error("转场 Worker 已失效，请重新创建注册表");
+        const snapshots = await Promise.allSettled([context.outgoing, context.incoming].map(async (source) => createImageBitmap(source)));
+        const bitmaps = snapshots.flatMap((result) => (result.status === "fulfilled" ? [result.value] : []));
+        try {
+          const failure = snapshots.find((result) => result.status === "rejected");
+          if (failure?.status === "rejected") throw failure.reason;
+          if (disposed) throw new DOMException("转场算法已释放", "AbortError");
+          await this.render(kernelId, context, params, bitmaps[0], bitmaps[1]);
+        } finally {
+          for (const bitmap of bitmaps) bitmap.close();
+        }
+      },
+      /** 一个内核释放不影响同注册表的其他算法，最后一个释放后终止线程。 */
+      dispose: (): void => {
+        if (disposed) return;
+        disposed = true;
+        this.release(kernelId);
+      },
+    };
   }
-  const kernel = exports as unknown as WasmTransitionExports;
-  const base = kernel.__heap_base.value as number;
-  const encoder = new TextEncoder();
-  let scratch: OffscreenCanvas | undefined;
-  let input: OffscreenCanvasRenderingContext2D | null = null;
 
-  return {
-    /** 复用读回画布与线性内存；透明度混合由内核处理，适配器不重复缓动。 */
-    render({ ctx, outgoing, incoming, width, height, progress }, params): void {
-      const byteLength = width * height * 4;
-      const parameters = encoder.encode(JSON.stringify(params));
-      const output = base + byteLength * 2;
-      const paramsPointer = output + byteLength;
-      const required = paramsPointer + parameters.byteLength;
-      if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0 || required > 0x7fffffff) {
-        throw new Error("转场 WASM 输入尺寸无效或超出内存范围");
+  /** 注册表销毁时立即取消未完成的下载和计算，防止迟到加载重建线程。 */
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.controller.abort();
+    this.kernels.clear();
+    this.fail(new DOMException("转场算法已释放", "AbortError"));
+  }
+
+  /** 主线程只发送快照与显示完成帧，不读取或遍历 RGBA。 */
+  private async render(
+    kernelId: number,
+    context: TransitionRenderContext,
+    params: Readonly<Record<string, unknown>>,
+    outgoing: ImageBitmap,
+    incoming: ImageBitmap,
+  ): Promise<void> {
+    const { width, height, progress, inputKeys } = context;
+    const event = await this.send({ type: "render", kernelId, outgoing, incoming, width, height, progress, params, inputKeys }, [
+      outgoing,
+      incoming,
+    ]);
+    if (event.type !== "frame") throw new Error("转场 Worker 未返回完成帧");
+    try {
+      context.ctx.drawImage(event.bitmap, 0, 0);
+    } finally {
+      event.bitmap.close();
+    }
+  }
+
+  /** 请求序号隔离不同算法、缩略图与播放器的并发结果。 */
+  private send(command: TransitionWorkerCommand, transfer: Transferable[]): Promise<TransitionWorkerEvent> {
+    return new Promise((resolve, reject) => {
+      const requestId = ++this.sequence;
+      const timer = globalThis.setTimeout(() => this.fail(new Error("转场 Worker 处理超时（8 秒）")), 8000);
+      this.pending.set(requestId, {
+        resolve: (event): void => {
+          clearTimeout(timer);
+          resolve(event);
+        },
+        reject: (error): void => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      });
+      try {
+        this.ensureWorker().postMessage({ ...command, requestId }, transfer);
+      } catch (error: unknown) {
+        this.pending.delete(requestId);
+        clearTimeout(timer);
+        reject(error instanceof Error ? error : new Error("转场 Worker 消息发送失败"));
       }
-      if (required > kernel.memory.buffer.byteLength) {
-        kernel.memory.grow(Math.ceil((required - kernel.memory.buffer.byteLength) / 65536));
+    });
+  }
+
+  /** 首个内核实际加载时才创建线程，Canvas 后端不会创建 Worker。 */
+  private ensureWorker(): Worker {
+    if (this.disposed) throw new DOMException("转场算法已释放", "AbortError");
+    if (this.worker) return this.worker;
+    const worker = new TransitionWorker({ name: "video-transitions" });
+    worker.onmessage = ({ data }: MessageEvent<TransitionWorkerEvent>): void => {
+      const pending = this.pending.get(data.requestId);
+      if (!pending) {
+        if (data.type === "frame") data.bitmap.close();
+        return;
       }
-      // grow 会使旧视图失效，每次渲染从当前 buffer 创建视图。
-      const bytes = new Uint8Array(kernel.memory.buffer);
-      if (!scratch || scratch.width !== width || scratch.height !== height) {
-        scratch = new OffscreenCanvas(width, height);
-        input = scratch.getContext("2d", { willReadFrequently: true });
-      }
-      if (!input) throw new Error("转场 WASM 像素读取画布不可用");
-      for (const [slot, source] of [outgoing, incoming].entries()) {
-        input.clearRect(0, 0, width, height);
-        input.drawImage(source, 0, 0, width, height);
-        bytes.set(input.getImageData(0, 0, width, height).data, base + slot * byteLength);
-      }
-      bytes.set(parameters, paramsPointer);
-      const status = kernel.render(base, base + byteLength, output, width, height, progress, paramsPointer, parameters.byteLength);
-      if (status !== 0) throw new Error(`转场 WASM 渲染失败：${status}`);
-      const pixels = new Uint8ClampedArray(kernel.memory.buffer, output, byteLength);
-      ctx.putImageData(new ImageData(pixels, width, height), 0, 0);
-    },
-  };
+      this.pending.delete(data.requestId);
+      if (data.type === "error") pending.reject(new Error(data.message));
+      else pending.resolve(data);
+    };
+    worker.onerror = (event): void => {
+      event.preventDefault();
+      this.fail(new Error(event.message || "转场 Worker 线程失败"));
+    };
+    worker.onmessageerror = (): void => this.fail(new Error("转场 Worker 消息读取失败"));
+    this.worker = worker;
+    return worker;
+  }
+
+  /** 取消所有等待；故障后新加载任务可重新建立线程。 */
+  private fail(error: Error): void {
+    this.worker?.terminate();
+    this.worker = null;
+    for (const pending of this.pending.values()) pending.reject(error);
+    this.pending.clear();
+  }
+
+  /** 释放内核缓存，空闲且不再被任何算法持有时关闭线程。 */
+  private release(kernelId: number): void {
+    if (!this.kernels.delete(kernelId)) return;
+    this.worker?.postMessage({ type: "release", kernelId });
+    if (!this.kernels.size) this.fail(new DOMException("转场算法已释放", "AbortError"));
+  }
+}
+
+/** 宿主独立算法使用自己的 Worker；使用后通过算法或注册表的 dispose 释放。 */
+export function loadWasmTransitionAlgorithm(url: string | URL): Promise<TransitionAlgorithm> {
+  return new WasmTransitionWorkerClient().load(url);
 }

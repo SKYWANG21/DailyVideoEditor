@@ -2,6 +2,12 @@ import { readFile } from "node:fs/promises";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTransitionRegistry } from "../src/transitions/catalog";
 import type { WasmTransitionExports } from "../src/types/transition";
+import { MockTransitionWorker } from "./helpers/transitionWorker";
+
+vi.mock("../src/workers/transition.worker.ts?worker&inline", async () => {
+  const { MockTransitionWorker } = await import("./helpers/transitionWorker");
+  return { default: MockTransitionWorker };
+});
 
 /** 与各独立产物名称相同的稳定效果标识。 */
 const ids = ["zoom-in", "fade-black", "zoom-out", "blinds", "blinds-diagonal", "wipe-right", "wipe-left", "split-open", "shake"] as const;
@@ -130,6 +136,7 @@ describe("内置 WASM 注册与按需加载", () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it("九种内置效果分别下载对应内核，加载任务去重且不使用 Canvas 实现", async () => {
+    MockTransitionWorker.instances.length = 0;
     const fetch = vi.fn(async (url: string | URL) => {
       const id = new URL(String(url)).pathname.split("/").at(-1)!.replace(".wasm", "") as EffectId;
       return new Response(binaries.get(id));
@@ -146,5 +153,7 @@ describe("内置 WASM 注册与按需加载", () => {
     }
     expect(fetch).toHaveBeenCalledTimes(9);
     expect(fetch.mock.calls.map(([url]) => new URL(String(url)).pathname.split("/").at(-1))).toEqual(ids.map((id) => `${id}.wasm`));
+    expect(MockTransitionWorker.instances).toHaveLength(1);
+    wasm.dispose();
   });
 });

@@ -267,8 +267,12 @@ const algorithmBase = computed(() => {
   return base.endsWith("/") ? base : `${base}/`;
 });
 provide(COMPOSE_ALGORITHM_BASE, algorithmBase);
-provide(COMPOSE_TRANSITION_REGISTRY, createTransitionRegistry({ backend: props.transitionBackend, effects: props.transitionEffects }));
-onBeforeUnmount(() => mediaResolver.revokeAll());
+const transitionRegistry = createTransitionRegistry({ backend: props.transitionBackend, effects: props.transitionEffects });
+provide(COMPOSE_TRANSITION_REGISTRY, transitionRegistry);
+onBeforeUnmount(() => {
+  transitionRegistry.dispose();
+  mediaResolver.revokeAll();
+});
 
 const emit = defineEmits<{
   "update:modelValue": [value: VideoComposeEditorModel];
