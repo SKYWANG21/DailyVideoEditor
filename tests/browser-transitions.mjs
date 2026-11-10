@@ -615,17 +615,10 @@ try {
     input.value = '0.6'; input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true }));
     input.blur();
   })()`);
-  await delay(100);
-  await evaluate(
-    "[...document.querySelectorAll('.transition-menu button')].find((button) => button.textContent.trim() === '应用').click()",
-  );
   await waitFor("window.transitionTest.model.value.tracks[0].transitions[0].durationSec === 0.6");
-  await delay(250);
-  await evaluate("document.querySelector('.transition-handles__badge').click()");
-  await delay(150);
   await evaluate("document.querySelector('.transition-menu__remove').click()");
   await waitFor("window.transitionTest.model.value.tracks[0].transitions.length === 0");
-  console.log("PASS 接缝菜单修改时长与删除");
+  console.log("PASS 接缝菜单自动应用时长与直接删除");
 
   await evaluate("[...document.querySelectorAll('.compose-assets button')].find((button) => button.textContent.trim() === '转场').click()");
   await waitFor("Boolean(document.querySelector('.transition-card'))");
@@ -737,7 +730,6 @@ try {
   await evaluate(`(() => {
     const buttons = [...document.querySelectorAll('.transition-menu__effect')];
     buttons.find((button) => button.textContent.trim() === '宿主 WASM 淡化').click();
-    buttons.find((button) => button.textContent.trim() === '应用').click();
   })()`);
   await waitFor("window.transitionTest.model.value.tracks[0].transitions[0].effectId === 'host-wasm'");
   await evaluate("window.transitionTest.player.seek(2)");

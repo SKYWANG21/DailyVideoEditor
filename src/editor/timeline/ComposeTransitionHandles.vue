@@ -14,7 +14,7 @@
       @drop="onDrop($event, seam)"
     >
       <ElPopover
-        width="50%"
+        width="25vw"
         trigger="click"
         :disabled="disabled"
         :visible="openKey === seam.key"
@@ -37,30 +37,51 @@
             </svg>
           </button>
         </template>
-        <div class="transition-menu" @pointerdown.stop @keydown.esc="openKey = null">
+        <div v-if="openKey === seam.key" class="transition-menu" @pointerdown.stop @keydown.esc="openKey = null">
           <span class="transition-menu__heading">接缝转场</span>
-          <button
-            v-for="effect in effects"
-            :key="effect.id"
-            type="button"
-            class="transition-menu__effect"
-            :class="{ 'is-selected': selectedEffect === effect.id }"
-            @click="selectedEffect = effect.id"
-          >
-            {{ effect.name }}
-          </button>
-          <label class="transition-menu__duration">
-            时长（秒）
-            <ElInputNumber
-              v-model="duration"
-              size="small"
-              :min="MIN_TRANSITION_DURATION"
-              :max="seam.maxDuration"
-              :step="0.1"
-              :precision="3"
-            />
-          </label>
-          <button type="button" class="transition-menu__effect" @click="apply(seam)">应用</button>
+          <div class="transition-menu__effects">
+            <button
+              v-for="effect in effects"
+              :key="effect.id"
+              type="button"
+              class="transition-menu__effect"
+              :class="{ 'is-selected': selectedEffect === effect.id }"
+              :disabled="disabled"
+              :title="effect.name"
+              @click="selectEffect(seam, effect.id)"
+            >
+              {{ effect.name }}
+            </button>
+          </div>
+          <div class="transition-menu__duration">
+            <span>时长（秒）</span>
+            <div class="transition-menu__duration-control">
+              <ElSlider
+                :model-value="duration"
+                :min="MIN_TRANSITION_DURATION"
+                :max="seam.maxDuration"
+                :step="0.1"
+                :show-tooltip="false"
+                :disabled="disabled || seam.maxDuration <= MIN_TRANSITION_DURATION"
+                aria-label="转场时长（秒）"
+                class="transition-menu__slider"
+                @input="onDurationChange(seam, $event)"
+              />
+              <ElInputNumber
+                :model-value="duration"
+                size="small"
+                controls-position="right"
+                :min="MIN_TRANSITION_DURATION"
+                :max="seam.maxDuration"
+                :step="0.1"
+                :precision="3"
+                :disabled="disabled"
+                aria-label="转场时长（秒）"
+                class="transition-menu__duration-input"
+                @change="onDurationChange(seam, $event)"
+              />
+            </div>
+          </div>
           <button
             v-if="seam.transition"
             type="button"
@@ -80,7 +101,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { ElInputNumber, ElPopover } from "element-plus";
+import { ElInputNumber, ElPopover, ElSlider } from "element-plus";
 import type { Track } from "@/clip-track";
 import type { TransitionSeam } from "@/types/transition";
 import { useComposeTransitionRegistry } from "@/editor/composeRuntime";
@@ -109,10 +130,22 @@ function open(seam: TransitionSeam): void {
   selectedEffect.value = registry.get(seam.transition?.effectId ?? "")?.id ?? "crossfade";
   duration.value = Math.min(seam.maxDuration, seam.transition?.durationSec ?? 1);
 }
-/** 单次确认只产生一条历史。 */
+/** 选择效果后立即写入当前接缝，保持弹窗打开供连续调整。 */
+function selectEffect(seam: TransitionSeam, effectId: string): void {
+  selectedEffect.value = effectId;
+  apply(seam);
+}
+/** 滑条与数字框共用时长校验，忽略清空或无效输入。 */
+function onDurationChange(seam: TransitionSeam, value: number | number[] | null | undefined): void {
+  if (typeof value !== "number" || !Number.isFinite(value)) return;
+  duration.value = Math.max(MIN_TRANSITION_DURATION, Math.min(seam.maxDuration, value));
+  apply(seam);
+}
+/** 参数实际变化时自动应用，避免重复选择产生无效历史。 */
 function apply(seam: TransitionSeam): void {
+  if (disabled.value) return;
+  if (seam.transition?.effectId === selectedEffect.value && seam.transition.durationSec === duration.value) return;
   emit("apply", selectedEffect.value, seam.key, duration.value);
-  openKey.value = null;
 }
 /** 未知效果保留标识供用户辨认。 */
 function effectName(seam: TransitionSeam): string {
@@ -181,12 +214,17 @@ function onDrop(event: DragEvent, seam: TransitionSeam): void {
 .transition-menu {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
   font-size: 13px;
 }
 .transition-menu__heading {
   font-size: 12px;
   color: var(--el-text-color-secondary);
+}
+.transition-menu__effects {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 .transition-menu__effect,
 .transition-menu__remove {
@@ -201,6 +239,14 @@ function onDrop(event: DragEvent, seam: TransitionSeam): void {
 .transition-menu__effect.is-selected {
   color: var(--el-color-primary);
 }
+.transition-menu__effect {
+  flex: 0 0 96px;
+  min-width: 0;
+  overflow: hidden;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .transition-menu__remove {
   color: var(--el-color-danger);
 }
@@ -208,5 +254,28 @@ function onDrop(event: DragEvent, seam: TransitionSeam): void {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+.transition-menu__duration-control {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.transition-menu__slider {
+  --el-slider-height: 8px;
+  --el-slider-button-size: 16px;
+  --el-slider-main-bg-color: var(--compose-accent, var(--el-color-primary));
+  --el-slider-runway-bg-color: var(--compose-surface-3, var(--el-border-color-light));
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+}
+.transition-menu__slider :deep(.el-slider__button) {
+  border-color: var(--el-color-white);
+  background: var(--compose-accent, var(--el-color-primary));
+  box-shadow: var(--compose-shadow-1, var(--el-box-shadow-lighter));
+}
+.transition-menu__duration-input {
+  flex: 0 0 108px;
+  width: 108px;
 }
 </style>
