@@ -32,6 +32,20 @@ const transition: ComposeTransition = {
   params: { curve: "linear" },
 };
 
+/** 内置效果的持久化标识与素材目录顺序。 */
+const builtinEffectIds: readonly string[] = [
+  "crossfade",
+  "zoom-in",
+  "fade-black",
+  "zoom-out",
+  "blinds",
+  "blinds-diagonal",
+  "wipe-right",
+  "wipe-left",
+  "split-open",
+  "shake",
+];
+
 describe("接缝时间与工程兼容", () => {
   it("中心窗口是半开区间，播放头、片段和总时长均不变化", () => {
     expect(resolveTransitionAtTime(clips, [transition], 4.49)).toBeNull();
@@ -93,7 +107,7 @@ describe("宿主转场注册", () => {
       { ...crossfadeDefinition, id: "host-b", load },
     ]);
     const registry = createTransitionRegistry({ backend: "wasm", effects });
-    expect(registry.list().map((effect) => effect.id)).toEqual(["crossfade", "host-a", "host-b"]);
+    expect(registry.list().map((effect) => effect.id)).toEqual([...builtinEffectIds, "host-a", "host-b"]);
     expect(effects.map((effect) => effect.id)).toEqual(["host-a", "host-b"]);
     expect(load).not.toHaveBeenCalled();
     const first = registry.resolve("host-a");
@@ -104,6 +118,7 @@ describe("宿主转场注册", () => {
 
   it("宿主 ID 不得覆盖内置效果或另一宿主效果", () => {
     expect(() => createTransitionRegistry({ effects: [crossfadeDefinition] })).toThrow("转场已注册：crossfade");
+    expect(() => createTransitionRegistry({ effects: [{ ...crossfadeDefinition, id: "zoom-in" }] })).toThrow("转场已注册：zoom-in");
     const custom = { ...crossfadeDefinition, id: "host-a" };
     expect(() => createTransitionRegistry({ effects: [custom, custom] })).toThrow("转场已注册：host-a");
   });
@@ -123,7 +138,39 @@ describe("宿主转场注册", () => {
       createTransitionRegistry()
         .list()
         .map((effect) => effect.id),
-    ).toEqual(["crossfade"]);
+    ).toEqual(builtinEffectIds);
+  });
+});
+
+describe("Canvas 内置转场目录", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("全部效果共享曲线约定，只接受现有合法曲线", () => {
+    const registry = createTransitionRegistry();
+    expect(registry.list().map((effect) => effect.id)).toEqual(builtinEffectIds);
+    for (const definition of registry.list()) {
+      expect(definition.defaultParams).toEqual({ curve: "linear" });
+      expect(definition.normalizeParams({ curve: "unknown", unused: 1 })).toEqual({ curve: "linear" });
+      for (const curve of ["linear", "ease", "ease-in", "ease-out", "ease-in-out"]) {
+        expect(definition.normalizeParams({ curve })).toEqual({ curve });
+      }
+    }
+  });
+
+  it("WASM 配置下新增效果仍加载相同 Canvas 算法，目录查询与算法加载均不下载 WASM", async () => {
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    const canvas = createTransitionRegistry();
+    const wasm = createTransitionRegistry({ backend: "wasm" });
+    expect(wasm.list().map((effect) => effect.id)).toEqual(builtinEffectIds);
+    for (const id of builtinEffectIds.slice(1)) {
+      const pending = canvas.resolve(id);
+      expect(canvas.resolve(id)).toBe(pending);
+      const algorithm = await pending;
+      expect(typeof algorithm.render).toBe("function");
+      expect(await wasm.resolve(id)).toBe(algorithm);
+    }
+    expect(fetch).not.toHaveBeenCalled();
   });
 });
 

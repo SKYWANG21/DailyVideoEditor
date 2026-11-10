@@ -15,6 +15,73 @@ export const crossfadeDefinition: TransitionEffectDefinition = {
   load: () => import("./algorithms/crossfade").then((module) => module.crossfadeAlgorithm),
 };
 
+/** 新增效果仅使用 Canvas，沿用淡化的曲线参数约定与按需加载方式。 */
+const canvasDefinitions: readonly TransitionEffectDefinition[] = [
+  {
+    ...crossfadeDefinition,
+    id: "zoom-in",
+    name: "推进",
+    description: "离场画面放大至两倍，入场画面从半倍同步拉近至原比例",
+    load: () => import("./algorithms/zoom").then((module) => module.zoomInAlgorithm),
+  },
+  {
+    ...crossfadeDefinition,
+    id: "fade-black",
+    name: "淡入淡出",
+    description: "前一画面淡出至黑，再淡入下一画面",
+    load: () => import("./algorithms/fadeBlack").then((module) => module.fadeBlackAlgorithm),
+  },
+  {
+    ...crossfadeDefinition,
+    id: "zoom-out",
+    name: "拉远",
+    description: "离场画面缩小至半倍，入场画面从两倍同步拉远至原比例",
+    load: () => import("./algorithms/zoom").then((module) => module.zoomOutAlgorithm),
+  },
+  {
+    ...crossfadeDefinition,
+    id: "blinds",
+    name: "百叶窗",
+    description: "十条水平百叶由上向下展开下一画面",
+    load: () => import("./algorithms/blinds").then((module) => module.blindsAlgorithm),
+  },
+  {
+    ...crossfadeDefinition,
+    id: "blinds-diagonal",
+    name: "倾斜百叶窗",
+    description: "十条倾斜 45° 的百叶展开下一画面",
+    load: () => import("./algorithms/blinds").then((module) => module.diagonalBlindsAlgorithm),
+  },
+  {
+    ...crossfadeDefinition,
+    id: "wipe-right",
+    name: "向右擦除",
+    description: "入场画面从左向右覆盖离场画面",
+    load: () => import("./algorithms/wipe").then((module) => module.wipeRightAlgorithm),
+  },
+  {
+    ...crossfadeDefinition,
+    id: "wipe-left",
+    name: "向左擦除",
+    description: "入场画面从右向左覆盖离场画面",
+    load: () => import("./algorithms/wipe").then((module) => module.wipeLeftAlgorithm),
+  },
+  {
+    ...crossfadeDefinition,
+    id: "split-open",
+    name: "中分展开",
+    description: "入场画面从中央向左右两侧展开",
+    load: () => import("./algorithms/wipe").then((module) => module.splitOpenAlgorithm),
+  },
+  {
+    ...crossfadeDefinition,
+    id: "shake",
+    name: "轻微晃动",
+    description: "平滑叠化中加入轻微位移和旋转",
+    load: () => import("./algorithms/shake").then((module) => module.shakeAlgorithm),
+  },
+];
+
 /** 固定内置后端并追加宿主效果；算法按需加载，实例之间不共享可变注册状态。 */
 export function createTransitionRegistry(options: TransitionRegistryOptions = {}): TransitionRegistry {
   const registry = new TransitionRegistry();
@@ -26,6 +93,7 @@ export function createTransitionRegistry(options: TransitionRegistryOptions = {}
         }
       : crossfadeDefinition,
   );
+  for (const effect of canvasDefinitions) registry.register(effect);
   for (const effect of options.effects ?? []) registry.register(effect);
   return registry;
 }

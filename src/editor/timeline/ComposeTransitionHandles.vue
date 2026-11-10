@@ -14,7 +14,7 @@
       @drop="onDrop($event, seam)"
     >
       <ElPopover
-        :width="200"
+        width="50%"
         trigger="click"
         :disabled="disabled"
         :visible="openKey === seam.key"

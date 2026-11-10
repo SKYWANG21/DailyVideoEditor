@@ -56,7 +56,18 @@ describe("WASM 适配器与注册表", () => {
     expect(await createTransitionRegistry().resolve("crossfade")).toBe(crossfadeAlgorithm);
     expect(fetch).not.toHaveBeenCalled();
     const registry = createTransitionRegistry({ backend: "wasm" });
-    expect(registry.list().map((effect) => effect.id)).toEqual(["crossfade"]);
+    expect(registry.list().map((effect) => effect.id)).toEqual([
+      "crossfade",
+      "zoom-in",
+      "fade-black",
+      "zoom-out",
+      "blinds",
+      "blinds-diagonal",
+      "wipe-right",
+      "wipe-left",
+      "split-open",
+      "shake",
+    ]);
     expect(fetch).not.toHaveBeenCalled();
     await expect(registry.resolve("crossfade")).rejects.toThrow("HTTP 503");
     const pending = registry.resolve("crossfade");

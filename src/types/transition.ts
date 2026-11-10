@@ -76,12 +76,12 @@ export interface TransitionAlgorithm {
   render(context: TransitionRenderContext, params: Readonly<Record<string, unknown>>): void | Promise<void>;
 }
 
-/** 转场像素计算的执行后端，不写入工程数据。 */
+/** 内置淡化的执行后端；其余内置效果固定使用 Canvas，不写入工程数据。 */
 export type TransitionBackend = "canvas" | "wasm";
 
 /** 创建后固定内置后端与效果列表，避免同一效果的加载缓存混用。 */
 export interface TransitionRegistryOptions {
-  /** 默认使用原有 Canvas 实现。 */
+  /** 内置淡化默认使用 Canvas；新增内置效果始终使用 Canvas。 */
   backend?: TransitionBackend;
   /** 按传入顺序追加的宿主效果；重复 ID 报错，具体实现由各自的 load 决定。 */
   effects?: readonly TransitionEffectDefinition[];
