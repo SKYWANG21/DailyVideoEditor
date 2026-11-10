@@ -154,6 +154,88 @@ try {
   assert.ok(wasmPixels.maxError <= 2, JSON.stringify(wasmPixels));
   console.log("PASS 真实 WASM 与 Canvas 的 80 组透明像素对照", wasmPixels);
 
+  const wasmEffects = await evaluate(`(async () => {
+    const { createTransitionRegistry } = await import('/src/transitions/catalog.ts');
+    const { TransitionEngine } = await import('/src/transitions/engine.ts');
+    const canvas = new TransitionEngine(createTransitionRegistry());
+    const wasm = new TransitionEngine(createTransitionRegistry({ backend: 'wasm' }));
+    const ids = ['zoom-in', 'fade-black', 'zoom-out', 'blinds', 'blinds-diagonal', 'wipe-right', 'wipe-left', 'split-open', 'shake'];
+    const metrics = Object.fromEntries(ids.map((id) => [id, { max: 0, mean: 0, interiorMax: 0, frames: 0, worst: '' }]));
+    const violations = [];
+    let tinyFrames = 0;
+    // 浏览器的路径光栅化在一像素边缘内与精确覆盖面积不同，内部像素仍严格对照。
+    const revealBoundary = (id, width, height, progress, x, y) => {
+      if (id === 'wipe-right') return Math.abs(x - width * progress) <= 1;
+      if (id === 'wipe-left') return Math.abs(x - width * (1 - progress)) <= 1;
+      if (id === 'split-open') return Math.abs(Math.abs(x - width / 2) - width * progress / 2) <= 1;
+      if (id !== 'blinds' && id !== 'blinds-diagonal') return false;
+      const diagonal = id === 'blinds-diagonal';
+      const extent = diagonal ? (width + height) / Math.sqrt(2) : height;
+      const position = diagonal ? (-(x - width / 2) + (y - height / 2)) / Math.sqrt(2) + extent / 2 : y;
+      for (let strip = 0; strip < 10; strip++) {
+        const start = strip * extent / 10, end = start + extent * progress / 10;
+        if (Math.abs(position - start) <= 1 || Math.abs(position - end) <= 1) return true;
+      }
+      return false;
+    };
+    const source = (width, height, mode, incoming) => {
+      const result = new OffscreenCanvas(width, height), data = new Uint8ClampedArray(width * height * 4);
+      for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+        const offset = (y * width + x) * 4;
+        const checker = (Math.floor(x / 8) + Math.floor(y / 8)) % 2;
+        data.set(mode === 0 ? (incoming ? [0, 0, 255, 255] : [255, 0, 0, 255]) :
+          [incoming ? 220 - x * 2 : x * 3, checker ? 200 : 30, incoming ? y * 5 : 210 - y * 3,
+            mode === 2 ? [0, 64, 128, 255][(Math.floor(x / 8) + (incoming ? 1 : 0)) % 4] : 255], offset);
+      }
+      result.getContext('2d').putImageData(new ImageData(data, width, height), 0, 0);
+      return result;
+    };
+    for (const [width, height] of [[64, 40], [40, 64], [1, 1], [65, 37]]) for (const mode of [0, 1, 2]) {
+      const a = source(width, height, mode, false), b = source(width, height, mode, true);
+      for (const id of ids) for (const progress of [0, .25, .5, .75, 1]) {
+        const request = { effectId: id, outgoing: a, incoming: b, width, height, progress, params: {} };
+        const c = (await canvas.render(request)).getContext('2d').getImageData(0, 0, width, height).data;
+        const w = (await wasm.render(request)).getContext('2d').getImageData(0, 0, width, height).data;
+        // 单像素的中间帧由独立内核测试校验数学结果，Canvas 取整不适合作为像素基准。
+        if (width === 1 && height === 1 && progress > 0 && progress < 1) { tinyFrames++; continue; }
+        let total = 0, max = 0, maxIndex = 0, interiorMax = 0, interiorTotal = 0, interiorChannels = 0;
+        for (let index = 0; index < c.length; index += 4) {
+          const alphaError = Math.abs(c[index + 3] - w[index + 3]);
+          let pixelTotal = alphaError, pixelMax = alphaError;
+          total += alphaError;
+          if (alphaError > max) { max = alphaError; maxIndex = index; }
+          for (let channel = 0; channel < 3; channel++) {
+            const error = Math.abs(c[index + channel] * c[index + 3] / 255 - w[index + channel] * w[index + 3] / 255);
+            pixelTotal += error; pixelMax = Math.max(pixelMax, error);
+            total += error;
+            if (error > max) { max = error; maxIndex = index; }
+          }
+          if (!revealBoundary(id, width, height, progress, (index / 4) % width + .5, Math.floor(index / 4 / width) + .5)) {
+            interiorMax = Math.max(interiorMax, pixelMax); interiorTotal += pixelTotal; interiorChannels += 4;
+          }
+        }
+        const mean = total / c.length, metric = metrics[id];
+        const interiorMean = interiorChannels ? interiorTotal / interiorChannels : 0;
+        metric.frames++; metric.max = Math.max(metric.max, max); metric.interiorMax = Math.max(metric.interiorMax, interiorMax);
+        if (mean > metric.mean) { metric.mean = mean; metric.worst = width + 'x' + height + ' mode=' + mode + ' p=' + progress; }
+        const transformed = id === 'zoom-in' || id === 'zoom-out' || id === 'shake';
+        const maxLimit = transformed ? 48 : 64;
+        const interiorLimit = transformed ? 48 : 4;
+        const meanLimit = transformed ? 1.5 : .5;
+        if (progress === 0 || progress === 1) {
+          if (max > 1) violations.push({ id, max, mean, width, height, mode, progress, endpoint: true });
+        } else if (max > maxLimit || interiorMax > interiorLimit || interiorMean > meanLimit) {
+          violations.push({ id, max, mean, interiorMax, interiorMean, width, height, mode, progress, pixel: maxIndex / 4,
+            canvas: [...c.slice(maxIndex, maxIndex + 4)], wasm: [...w.slice(maxIndex, maxIndex + 4)] });
+        }
+      }
+    }
+    return { metrics, violations, tinyFrames };
+  })()`);
+  console.log("九种 WASM/Canvas 对照统计（排除路径抗锯齿边缘，单像素中间帧另做内核测试）", wasmEffects.metrics);
+  assert.equal(wasmEffects.violations.length, 0, JSON.stringify(wasmEffects.violations.slice(0, 4)));
+  console.log("PASS 九种 WASM 与 Canvas 的纹理、透明度、画幅及首尾像素对照");
+
   // 同一引擎反复切换算法与画幅，以真实像素验证透明度、边缘和方向。
   const canvasEffects = await evaluate(`(async () => {
     const { createTransitionRegistry } = await import('/src/transitions/catalog.ts');
@@ -694,7 +776,7 @@ try {
   }
   await evaluate(`window.transitionTest.editor.value.reload(${JSON.stringify(beforeBuiltinEffects)})`);
   await waitFor("window.transitionTest.model.value.tracks[0].transitions[0].effectId === 'crossfade'");
-  console.log("PASS 九种新增 Canvas 效果的卡片缩略图、应用、播放、导出和重载（WASM 配置）");
+  console.log("PASS 九种内置 WASM 效果的卡片缩略图、应用、播放、导出和重载");
   await evaluate(`(() => {
     const test = window.transitionTest;
     test.beforeHostModel = JSON.parse(JSON.stringify(test.model.value));

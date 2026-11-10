@@ -1,4 +1,4 @@
-import { cpSync, mkdirSync } from "node:fs";
+import { cpSync, mkdirSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath, URL } from "node:url";
 import { defineConfig, type Plugin } from "vite";
@@ -19,7 +19,10 @@ function copyAlgorithmAssets(): Plugin {
       cpSync(resolve(rootDir, "public/algorithm/face_landmarker.task"), resolve(dest, "face_landmarker.task"));
       cpSync(resolve(rootDir, "public/algorithm/mediapipe"), resolve(dest, "mediapipe"), { recursive: true });
       mkdirSync(resolve(dest, "transitions"), { recursive: true });
-      cpSync(resolve(rootDir, "src/transitions/wasm/crossfade.wasm"), resolve(dest, "transitions/crossfade.wasm"));
+      const transitions = resolve(rootDir, "src/transitions/wasm");
+      for (const file of readdirSync(transitions)) {
+        if (file.endsWith(".wasm")) cpSync(resolve(transitions, file), resolve(dest, "transitions", file));
+      }
     },
   };
 }

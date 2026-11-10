@@ -15,7 +15,7 @@ export const crossfadeDefinition: TransitionEffectDefinition = {
   load: () => import("./algorithms/crossfade").then((module) => module.crossfadeAlgorithm),
 };
 
-/** 新增效果仅使用 Canvas，沿用淡化的曲线参数约定与按需加载方式。 */
+/** 内置效果的 Canvas 定义；创建注册表时可选择同 ID 的独立 WASM 实现。 */
 const canvasDefinitions: readonly TransitionEffectDefinition[] = [
   {
     ...crossfadeDefinition,
@@ -93,7 +93,13 @@ export function createTransitionRegistry(options: TransitionRegistryOptions = {}
         }
       : crossfadeDefinition,
   );
-  for (const effect of canvasDefinitions) registry.register(effect);
+  for (const effect of canvasDefinitions) {
+    registry.register(
+      options.backend === "wasm"
+        ? { ...effect, load: () => loadWasmTransitionAlgorithm(new URL(`./wasm/${effect.id}.wasm`, import.meta.url)) }
+        : effect,
+    );
+  }
   for (const effect of options.effects ?? []) registry.register(effect);
   return registry;
 }

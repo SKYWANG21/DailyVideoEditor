@@ -126,7 +126,7 @@ createApp(App).mount("#app");
 
 ### 主视频轨转场
 
-左侧「转场」提供淡化及以下 9 种 Canvas 效果。卡片可拖至主轨接缝，也可选中相邻视频后双击应用；接缝双竖线手柄可修改时长或删除转场。
+左侧「转场」提供淡化及以下 9 种效果，均支持 Canvas 和 WASM。卡片可拖至主轨接缝，也可选中相邻视频后双击应用；接缝双竖线手柄可修改时长或删除转场。
 转场默认 1 秒，以切点居中，不改变片段位置或工程总时长。仅处理视频画面，原声仍在切点切换；两侧各自的美颜和画面变换会先处理再转场。
 
 | 效果       | `effectId`        | 表现                                                   |
@@ -168,9 +168,9 @@ transitions: [
 `TransitionAlgorithm` 并在目录注册描述及 `load()`，素材面板与手柄菜单从该目录读取，不必修改引擎分发。
 外部可使用导出的引擎、注册表和类型独立集成；引擎返回的 Canvas 为复用缓冲，需要保存跨帧结果时调用 `renderBitmap()`。
 
-Canvas 为默认后端。宿主可通过 `<VideoComposeEditor v-model="model" transition-backend="wasm" />` 使用内置淡化 WASM；
+Canvas 为默认后端。宿主可通过 `<VideoComposeEditor v-model="model" transition-backend="wasm" />` 将全部内置转场切换为 WASM；
 独立使用时调用 `new TransitionEngine(createTransitionRegistry({ backend: "wasm" }))`。后端在挂载/创建注册表时固定，切换时需重建；
-`effectId`、参数与工程数据不变。新增的 9 种效果在两种后端配置下均使用 Canvas，不加载 WASM。
+`effectId`、参数与工程数据不变。每种效果使用自己的独立 WASM 内核，首次渲染或生成缩略图时按需加载。
 预热和渲染共用编辑器注册表，WASM 首次使用时加载，失败沿用现有错误处理（预览提示并回退普通画面）。
 
 宿主可通过 `transitionEffects` 追加自定义转场。素材栏、缩略图、接缝菜单、时间轴命令、预热与播放器共用编辑器注册表，
@@ -226,7 +226,7 @@ const hostWasmTransition: TransitionEffectDefinition = {
 };
 ```
 
-`transitionBackend` 仅选择内置淡化的实现；其余内置效果固定使用 Canvas，宿主效果始终使用自身的 `load()`。独立使用引擎时可调用
+`transitionBackend` 选择全部内置效果的实现，宿主效果始终使用自身的 `load()`。独立使用引擎时可调用
 `new TransitionEngine(createTransitionRegistry({ effects: hostTransitions }))`，也可继续手动 `registry.register()`。
 注册和 `list()` 查询不加载算法；素材卡片生成缩略图属于首次实际使用，会触发 `load()`。同一注册表缓存同一效果的加载结果，
 宿主异步算法须支持多个引擎调用同一实例，不得在渲染结束后保留调用方的画面或上下文；独立引擎仍依赖浏览器 Canvas API。
@@ -241,10 +241,13 @@ const hostWasmTransition: TransitionEffectDefinition = {
 地址、尺寸和参数长度均为 `i32`，`progress` 为已经缓动的 `f64`。图像是自左上至右下、每行 `width * 4` 字节的
 **非预乘 sRGB RGBA8**；参数为 UTF-8 JSON。适配器负责 Canvas 像素读写和缓冲复用，内核负责预乘颜色混合与反预乘输出。
 内置淡化采用 Q16 权重与整数舍入；它与 Canvas 的量化方式可能略有差异，不承诺逐字节相同。
+新增内核采用预乘颜色的双线性采样；倾斜百叶窗计算像素覆盖面积，推进和拉远使用镜像采样、八次放射采样及全画幅叠化。
+Canvas 的纹理过滤、抗锯齿和中间缓冲量化会与 WASM 存在少量差异，两种后端保持相同效果、方向、幅度和进度语义。
 后端直接调用时，从 `__heap_base` 起为 A、B、输出各保留 `width * height * 4` 字节，再放参数；
 调用前通过 `memory.grow()` 按 65536 字节一页补足内存，之后复用缓冲。
 
-内置源码为 `src/transitions/wasm/crossfade.c`，仓库包含对应 `.wasm`，使用现有产物不需要安装编译器。
+内置源码位于 `src/transitions/wasm/`：`crossfade.c` 实现淡化，`effects.c` 按编译参数生成其余 9 个独立内核。
+仓库包含全部 `.wasm`，使用现有产物不需要安装编译器。
 重新编译需支持 wasm32 的 LLVM Clang（Emscripten SDK 自带），在 PowerShell 执行：
 
 ```powershell
@@ -252,8 +255,9 @@ $env:WASM_CLANG = "D:\CODE\emsdk\upstream\bin\clang.exe"
 pnpm run build:transitions-wasm
 ```
 
-库构建将 WASM 随浏览器代码打包，并额外输出 `dist/algorithm/transitions/crossfade.wasm`；包子路径
-`daily-video-editor/transitions/crossfade.wasm` 指向该独立产物。后端可在无浏览器的 WASM 运行时执行相同 ABI，
+构建脚本一次生成全部 10 个内核。库构建将 WASM 随浏览器代码打包，并额外输出 `dist/algorithm/transitions/<effectId>.wasm`；包子路径
+`daily-video-editor/transitions/<effectId>.wasm` 指向对应独立产物，例如 `zoom-in.wasm`、`blinds-diagonal.wasm`、`shake.wasm`。
+后端可在无浏览器的 WASM 运行时执行相同 ABI，
 将 FFmpeg 解码的 RGBA 帧传入内核，再把输出交给 FFmpeg 编码；本库未实现 FFmpeg 桥接。
 严格对照还需统一源帧、缓动、色彩转换、美颜、变换与输出尺寸。
 

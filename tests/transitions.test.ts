@@ -157,7 +157,7 @@ describe("Canvas 内置转场目录", () => {
     }
   });
 
-  it("WASM 配置下新增效果仍加载相同 Canvas 算法，目录查询与算法加载均不下载 WASM", async () => {
+  it("默认 Canvas 不下载 WASM，查询 WASM 目录不加载算法且为各效果提供独立加载器", async () => {
     const fetch = vi.fn();
     vi.stubGlobal("fetch", fetch);
     const canvas = createTransitionRegistry();
@@ -168,7 +168,7 @@ describe("Canvas 内置转场目录", () => {
       expect(canvas.resolve(id)).toBe(pending);
       const algorithm = await pending;
       expect(typeof algorithm.render).toBe("function");
-      expect(await wasm.resolve(id)).toBe(algorithm);
+      expect(wasm.get(id)?.load).not.toBe(canvas.get(id)?.load);
     }
     expect(fetch).not.toHaveBeenCalled();
   });

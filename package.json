@@ -23,7 +23,8 @@
       "import": "./dist/index.js"
     },
     "./style.css": "./dist/style.css",
-    "./transitions/crossfade.wasm": "./dist/algorithm/transitions/crossfade.wasm"
+    "./transitions/crossfade.wasm": "./dist/algorithm/transitions/crossfade.wasm",
+    "./transitions/*.wasm": "./dist/algorithm/transitions/*.wasm"
   },
   "peerDependencies": {
     "vue": "^3.5.0"
