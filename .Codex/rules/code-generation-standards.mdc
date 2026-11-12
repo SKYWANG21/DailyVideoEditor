@@ -7,7 +7,7 @@ alwaysApply: true
 
 每次生成或修改代码时，必须遵守以下四条原则。
 
-## 1. 完善的类型注释
+## 1. 完善的代码注释
 
 ### 前端
 
@@ -32,16 +32,6 @@ interface QueryParams {
 const fetchList = (params: any) => { ... }
 ```
 
-### 后端
-
-- 新增/修改的 public 方法、DTO/VO/Bean 字段、Controller 入参出参需补 JavaDoc（类、字段、方法说明）。
-- 枚举、常量、函数需注释业务含义；复杂业务逻辑要关键节点处加注释说明。
-
-```java
-/** 成员登录账号（6-11 位字母数字） */
-private String username;
-```
-
 ## 2. 最小化修改范围
 
 - 只改实现当前需求所必需的文件；不做无关重构、格式化、重命名或「顺手优化」。
@@ -53,13 +43,13 @@ private String username;
 
 改动前先搜索并优先复用：
 
-| 层级 | 前端                                         | 后端                       |
-| ---- | -------------------------------------------- | -------------------------- |
-| API  | `src/api/`                                   | `controller/` + `service/` |
-| 类型 | `src/types/`                                 | `pojo/dto/` `pojo/vo/`     |
-| 工具 | `src/service/` + `src/utils/` + `src/hooks/` | `common/utils/`            |
-| 组件 | `src/components/`                            | —                          |
-| 样式 | Element Plus `var(--el-*)`、现有 scss        | —                          |
+| 层级 | 前端                                         |
+| ---- | -------------------------------------------- |
+| API  | `src/api/`                                   |
+| 类型 | `src/types/`                                 |
+| 工具 | `src/service/` + `src/utils/` + `src/hooks/` |
+| 组件 | `src/components/`                            |
+| 样式 | Element Plus `var(--el-*)`、现有 scss        |
 
 - 禁止硬编码颜色/间距，优先使用 Element Plus CSS 变量或项目已有 scss 变量。
 - 禁止重复实现已有 HTTP 封装、Token 处理、异常处理、分页、文件上传等逻辑。
@@ -69,14 +59,6 @@ private String username;
 ### 单一职责原则（SRP）
 
 所有新增代码必须遵循单一职责原则（Single Responsibility Principle），每个模块、类、函数、组件只负责一个明确业务职责。
-
-#### 后端规范
-
-- Controller 仅负责请求接收、参数校验、权限校验和响应封装。
-- 禁止在 Controller 中编写业务逻辑。
-- Service 仅负责单一业务领域逻辑。
-- 当 Service 方法承担多个业务职责时，必须拆分为多个 Service 或 Domain Service。
-- 公共逻辑必须抽取为独立组件，禁止复制粘贴代码。
 
 #### 前端规范
 
@@ -94,7 +76,6 @@ private String username;
   - components/
   - hooks/
   - utils/
-  - services/
 
 - 禁止在 Vue 页面中直接编写大量业务逻辑。
 - 禁止在页面中直接调用多个后端接口并进行复杂数据组装，应封装到 Service 或 Hook 中。
@@ -119,8 +100,6 @@ private String username;
 
 禁止生成：
 
-- 巨型 Controller（God Controller）
-- 巨型 Service（God Service）
 - 巨型 Vue 页面（God Component）
 - 超长方法（Long Method）
 - 大量重复代码（Duplicate Code）
@@ -134,4 +113,4 @@ private String username;
 - [ ] 前端代码是否符合 prettier.config.cjs 规范
 - [ ] 是否遵循单一职责原则（SRP）
 - [ ] 是否抽取了可复用组件、Hook、工具类
-- [ ] 是否存在过大的 Controller、Service、Vue 组件
+- [ ] 是否存在过大的 method、Hook、Vue 组件
