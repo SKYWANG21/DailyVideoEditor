@@ -2,10 +2,21 @@
   <div class="flex h-screen min-h-0 flex-col bg-background text-foreground">
     <header class="flex h-14 shrink-0 items-center justify-between border-b border-border px-4">
       <span class="text-sm font-medium">视频合成</span>
-      <button type="button" class="h-9 rounded-md bg-primary px-4 text-sm text-primary-foreground" @click="onCompose">合成</button>
+      <div class="flex items-center gap-2">
+        <button
+          type="button"
+          class="h-9 rounded-md border border-border px-4 text-sm hover:bg-muted disabled:cursor-wait disabled:opacity-60"
+          :disabled="capturingFrame"
+          @click="onCaptureFrame"
+        >
+          {{ capturingFrame ? "截图中…" : "截图" }}
+        </button>
+        <button type="button" class="h-9 rounded-md bg-primary px-4 text-sm text-primary-foreground" @click="onCompose">合成</button>
+      </div>
     </header>
     <div class="min-h-0 flex-1">
       <VideoComposeEditor
+        ref="editorRef"
         v-model="model"
         :video-assets="videoAssets"
         :audio-assets="audioAssets"
@@ -28,7 +39,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import { ElMessage } from "element-plus";
-import { VideoComposeEditor } from "@/editor";
+import { VideoComposeEditor, type VideoComposeEditorExpose } from "@/editor";
 import type { ComposeCatalogUploadPayload } from "@/editor/session/createComposeEditorState";
 import VideoClipUploadModal, { type UploadedComposeClip } from "@/editor/modals/VideoClipUploadModal.vue";
 import { createTextTemplateItem, type TextTemplateItem } from "@/editor/shared/textTemplateCatalog";
@@ -126,6 +137,36 @@ const textTemplates = ref<TextTemplateItem[]>(
 );
 
 const uploadClipOpen = ref(false);
+const editorRef = ref<VideoComposeEditorExpose | null>(null);
+const capturingFrame = ref(false);
+
+/** 使用浏览器下载保存当前预览的 PNG。 */
+async function onCaptureFrame(): Promise<void> {
+  if (capturingFrame.value) return;
+  capturingFrame.value = true;
+  try {
+    const frame = await editorRef.value?.captureCurrentFrame();
+    if (!frame) {
+      ElMessage.warning("当前没有可截图的画面");
+      return;
+    }
+    const url = URL.createObjectURL(frame.blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `截图-${frame.timeSec.toFixed(3)}s.png`;
+    try {
+      document.body.appendChild(link);
+      link.click();
+    } finally {
+      link.remove();
+      globalThis.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+  } catch (error: unknown) {
+    ElMessage.error(error instanceof Error ? `截图失败：${error.message}` : "截图失败");
+  } finally {
+    capturingFrame.value = false;
+  }
+}
 
 /** 批量探测 demo 音效时长并写回侧栏种子 */
 async function probeDemoSfxDurations(): Promise<void> {
@@ -195,7 +236,6 @@ function onTextTemplateUploaded(payload: ComposeCatalogUploadPayload<TextTemplat
 
 /**
  * 合成：validate → exportComposePayload。
- * demo 未挂 ref；宿主集成时对 VideoComposeEditor 取 ref 调用即可。
  */
 function onCompose(): void {
   ElMessage.info("暂无（宿主：validate() 后 exportComposePayload()）");

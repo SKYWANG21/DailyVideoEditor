@@ -125,12 +125,14 @@
         </template>
       </div>
     </template>
-    <div v-else class="grid min-h-0 flex-1 place-items-center px-10 text-center">
-      <div>
-        <SlidersHorizontal :size="32" class="mx-auto text-[var(--compose-fg-3)]" />
-        <p class="mt-3 text-[13px] leading-relaxed text-[var(--compose-fg-3)]">选择下方轨道或片段后，在此设置参数</p>
+    <slot v-else name="inspector-empty">
+      <div class="grid min-h-0 flex-1 place-items-center px-10 text-center">
+        <div>
+          <SlidersHorizontal :size="32" class="mx-auto text-[var(--compose-fg-3)]" />
+          <p class="mt-3 text-[13px] leading-relaxed text-[var(--compose-fg-3)]">选择下方轨道或片段后，在此设置参数</p>
+        </div>
       </div>
-    </div>
+    </slot>
   </aside>
 </template>
 

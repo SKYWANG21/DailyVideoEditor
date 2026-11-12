@@ -291,8 +291,8 @@ const emit = defineEmits<{
 /** 分类操作插槽名。外壳没传时不转发，面板保留默认上传按钮 */
 const actionSlotNames = ["video-actions", "audio-actions", "subtitle-actions", "fancy-actions", "sfx-actions"] as const;
 
-/** 侧栏「应用到全局」前的插槽，供宿主插入自定义控件 */
-const sidebarSlotNames = ["before-apply-video", "before-apply-audio", "before-apply-subtitle", "before-apply-text"] as const;
+/** 参数侧栏的扩展控件与空态插槽 */
+const sidebarSlotNames = ["before-apply-video", "before-apply-audio", "before-apply-subtitle", "before-apply-text", "inspector-empty"] as const;
 
 /**
  * 时间轴插槽名（透传 clip-track 已有具名 slot）。
@@ -328,6 +328,7 @@ const {
   requestUploadClip,
   getEditingClip,
   getSelectedClips,
+  captureCurrentFrame,
   shellRef,
   shellGridStyle,
   topGridStyle,
@@ -448,6 +449,7 @@ defineExpose({
   requestUploadClip,
   getEditingClip,
   getSelectedClips,
+  captureCurrentFrame,
 });
 
 /** 面板花字上传：宿主回调或内置选文件结果 */

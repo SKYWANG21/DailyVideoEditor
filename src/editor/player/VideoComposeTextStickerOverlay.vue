@@ -1,8 +1,5 @@
 <template>
-  <div
-    ref="layerRef"
-    class="pointer-events-none absolute inset-0 z-[15]"
-  >
+  <div ref="layerRef" data-frame-capture-layer class="pointer-events-none absolute inset-0 z-[15]">
     <div
       v-for="clip in clips"
       :key="clip.id"
@@ -19,17 +16,20 @@
       />
       <template v-if="clip.id === selectedId && isClipVisible(clip.id)">
         <div
+          data-frame-capture-skip
           class="absolute left-1/2 z-10 h-3 w-3 -translate-x-1/2 cursor-grab rounded-full border-2 border-white"
           :style="{ top: '-22px', background: accent }"
           @mousedown.stop="startDrag($event, clip, 'rotate')"
         />
         <div
+          data-frame-capture-skip
           class="pointer-events-none absolute left-1/2 w-px -translate-x-1/2"
           :style="{ top: '-16px', height: '16px', background: accent }"
         />
         <div
           v-for="handle in cornerHandles"
           :key="handle.mode"
+          data-frame-capture-skip
           class="absolute z-10 cursor-nwse-resize rounded-[1px] border border-white"
           :style="handleStyle(handle)"
           @mousedown.stop="startDrag($event, clip, handle.mode)"

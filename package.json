@@ -1,7 +1,7 @@
 {
   "name": "daily-video-editor",
   "private": false,
-  "version": "0.1.7",
+  "version": "0.1.9",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -30,23 +30,23 @@
     "vue": "^3.5.0"
   },
   "dependencies": {
-    "@lucide/vue": "^1.58.0",
+    "@lucide/vue": "^1.71.0",
     "@mediapipe/tasks-vision": "1.1.1",
     "@webav/av-cliper": "^1.2.8",
-    "element-plus": "^2.14.7",
+    "element-plus": "^2.14.8",
     "pinia": "^2.3.1"
   },
   "devDependencies": {
-    "@tailwindcss/vite": "^4.3.3",
+    "@tailwindcss/vite": "^4.3.5",
     "@vitejs/plugin-vue": "^5.2.4",
     "prettier": "^3.9.10",
-    "sass-embedded": "^1.105.2",
-    "tailwindcss": "^4.3.3",
+    "sass-embedded": "^1.108.2",
+    "tailwindcss": "^4.3.5",
     "typescript": "^5.9.3",
-    "vite": "^6.4.4",
+    "vite": "^6.4.6",
     "vite-plugin-dts": "4.5.4",
     "vitest": "^3.2.7",
-    "vue": "^3.5.44",
-    "vue-tsc": "^3.3.13"
+    "vue": "^3.5.45",
+    "vue-tsc": "^3.3.14"
   }
 }

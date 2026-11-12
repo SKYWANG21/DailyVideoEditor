@@ -1,5 +1,7 @@
 import "./style";
 
+export type { ComposeFrameCapture } from "./types/frameCapture";
+
 export type {
   ComposeTransition,
   TransitionAlgorithm,

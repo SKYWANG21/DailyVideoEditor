@@ -1,6 +1,7 @@
 import { computed, inject, onUnmounted, ref, type Ref } from "vue";
 import { readBeautyParams } from "@/types/composeMedia";
 import type { PreviewVideoSize } from "@/types/beautyPreview";
+import type { ComposeFrameCapture, PresentedComposeFrame } from "@/types/frameCapture";
 import type { ComposeTrack, VideoClipItem, VideoFrameTransform } from "@/types/videoCompose";
 import type { DecodedPreviewFrame, PreparedPreviewFrame, PreviewFrameRenderer, PreviewRenderRequest } from "@/types/previewPlayback";
 import { COMPOSE_ALGORITHM_BASE, useComposeTransitionRegistry } from "@/editor/composeRuntime";
@@ -25,6 +26,8 @@ interface UseComposePreviewFrameOptions {
   frame: Ref<VideoFrameTransform | null | undefined>;
   /** 美颜预热状态只用于显示与测试，不接管播放时钟。 */
   beautyReady: Ref<boolean>;
+  /** 当前展示时钟的来源，供截图识别素材时间和工程时间。 */
+  captureSource?: Readonly<Ref<ComposeFrameCapture["source"]>>;
 }
 
 /** 原生、美颜与转场共享处理链，只有 present 能写入屏幕画布。 */
@@ -42,6 +45,7 @@ export function useComposePreviewFrame(options: UseComposePreviewFrameOptions) {
   let processor: ComposeFrameProcessor | null = null;
   let processorCanvas: HTMLCanvasElement | null = null;
   let blank: OffscreenCanvas | null = null;
+  let presentedFrame: PresentedComposeFrame | null = null;
   let disposed = false;
   let revision = 0;
 
@@ -173,8 +177,16 @@ export function useComposePreviewFrame(options: UseComposePreviewFrameOptions) {
     if (target.height !== frame.bitmap.height) target.height = frame.bitmap.height;
     ctx.clearRect(0, 0, target.width, target.height);
     ctx.drawImage(frame.bitmap, 0, 0);
+    presentedFrame = { canvas: target, timeSec: frame.time, source: options.captureSource?.value ?? "timeline" };
     videoSize.value = options.canvasSize.value ?? frame.sourceSize ?? { width: target.width, height: target.height };
     frameReady.value = true;
+  }
+
+  /** 定位期间旧画面仍可取图；换画布或切换预览来源时等待相应首帧。 */
+  function getPresentedFrame(): PresentedComposeFrame | null {
+    const source = options.captureSource?.value ?? "timeline";
+    if (!presentedFrame || presentedFrame.canvas !== options.canvas.value || presentedFrame.source !== source) return null;
+    return presentedFrame;
   }
 
   function reset(): void {
@@ -191,7 +203,8 @@ export function useComposePreviewFrame(options: UseComposePreviewFrameOptions) {
     processor?.dispose();
     layers.clear();
     blank = null;
+    presentedFrame = null;
     options.beautyReady.value = false;
   });
-  return { renderer, videoSize, frameReady, previewError };
+  return { renderer, videoSize, frameReady, previewError, getPresentedFrame };
 }

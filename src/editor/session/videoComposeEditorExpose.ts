@@ -1,4 +1,5 @@
 import type { ComposeClip, ComposeExportPayload, VideoClipItem, VideoComposeEditorModel } from "@/types/videoCompose";
+import type { ComposeFrameCapture } from "@/types/frameCapture";
 
 /**
  * `VideoComposeEditor` 通过组件 ref 暴露的方法。
@@ -23,4 +24,6 @@ export interface VideoComposeEditorExpose {
   getEditingClip: () => ComposeClip | null;
   /** 当前时间轴多选解析后的 clip 列表 */
   getSelectedClips: () => ComposeClip[];
+  /** 合成当前已显示的视频、字幕和花字；尚无画面时返回 null。 */
+  captureCurrentFrame: () => Promise<ComposeFrameCapture | null>;
 }

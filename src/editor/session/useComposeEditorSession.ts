@@ -1,5 +1,6 @@
 import { onBeforeUnmount, onMounted } from "vue";
 import type { ComposeClip } from "@/types/videoCompose";
+import type { ComposeFrameCapture } from "@/types/frameCapture";
 import { loadTextTemplateCatalog, setHostTextTemplates } from "../shared/textTemplateCatalog";
 import type { ComposeEditorEmit, ComposeEditorProps } from "./createComposeEditorState";
 import { createComposeEditorState } from "./createComposeEditorState";
@@ -92,6 +93,8 @@ export function useComposeEditorSession(props: ComposeEditorProps, emit: Compose
     },
     getEditingClip,
     getSelectedClips,
+    /** 截图读取播放器当前画面，不影响工程时间轴。 */
+    captureCurrentFrame: (): Promise<ComposeFrameCapture | null> => state.playerRef.value?.captureCurrentFrame() ?? Promise.resolve(null),
   };
 
   return {

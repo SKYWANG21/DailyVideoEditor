@@ -64,6 +64,7 @@
           <div
             v-for="sub in passivePreviewSubtitles"
             :key="sub.id"
+            data-frame-capture-layer
             class="pointer-events-none absolute overflow-hidden"
             :class="editingSubtitleId === sub.id ? 'z-[20]' : 'z-[5]'"
             :style="subtitleLayerStyle(sub)"
@@ -96,6 +97,7 @@
           <div class="pointer-events-none absolute z-[6]" :style="centerLineStyle" />
           <div
             class="absolute z-[6] flex cursor-move flex-col items-center justify-end select-none"
+            data-frame-capture-layer
             :style="draftBoxStyle"
             @mousedown="startBoxDrag($event, 'move')"
           >
@@ -121,11 +123,20 @@
                 </div>
               </template>
             </div>
-            <div class="absolute top-0 bottom-0 -left-1 w-2 cursor-ew-resize" @mousedown.stop="startBoxDrag($event, 'left')" />
-            <div class="absolute top-0 -right-1 bottom-0 w-2 cursor-ew-resize" @mousedown.stop="startBoxDrag($event, 'right')" />
+            <div
+              data-frame-capture-skip
+              class="absolute top-0 bottom-0 -left-1 w-2 cursor-ew-resize"
+              @mousedown.stop="startBoxDrag($event, 'left')"
+            />
+            <div
+              data-frame-capture-skip
+              class="absolute top-0 -right-1 bottom-0 w-2 cursor-ew-resize"
+              @mousedown.stop="startBoxDrag($event, 'right')"
+            />
             <button
               v-for="handle in subtitleCornerHandles"
               :key="handle.mode"
+              data-frame-capture-skip
               type="button"
               class="absolute z-10 size-2 -translate-x-1/2 -translate-y-1/2 rounded-[1px] border border-white p-0"
               :style="{ left: handle.left, top: handle.top, cursor: handle.cursor, background: SUBTITLE_ADJUST_ACCENT }"
@@ -231,6 +242,7 @@ import type {
   VideoFrameTransform,
 } from "@/types/videoCompose";
 import type { PreviewVideoSize } from "@/types/beautyPreview";
+import type { ComposeFrameCapture } from "@/types/frameCapture";
 import type { PreviewFrameRenderer, PreviewPlaybackClock } from "@/types/previewPlayback";
 import { createPreviewPlaybackClock } from "@/hooks/previewPlaybackClock";
 import { useVideoComposePreview } from "@/hooks/useVideoComposePreview";
@@ -245,6 +257,7 @@ import {
 } from "@/hooks/useVideoComposeSubtitleAdjust";
 import VideoComposeTextStickerOverlay from "./VideoComposeTextStickerOverlay.vue";
 import VideoComposeFrameBox from "./VideoComposeFrameBox.vue";
+import { useComposeFrameCapture } from "./useComposeFrameCapture";
 import { containFrameStage, frameBoxStyle } from "../shared/videoFrame";
 import type { RectConfig } from "@/clip-track";
 
@@ -452,7 +465,9 @@ function fmtClock(sec: number): string {
   return hours > 0 ? `${hours}:${mm}:${ss}` : `${minutes}:${ss}`;
 }
 
-const { renderer, videoSize, previewError: frameError } = useComposePreviewFrame({
+/** 截图时间与播放器当前使用的时钟来源一致。 */
+const captureSource = computed<ComposeFrameCapture["source"]>(() => (props.catalogPreviewActive ? "catalog" : "timeline"));
+const { renderer, videoSize, previewError: frameError, getPresentedFrame } = useComposePreviewFrame({
   canvas: previewCanvasRef,
   gpuCanvas: gpuCanvasRef,
   transitionTrack: transitionTrackRef,
@@ -460,8 +475,12 @@ const { renderer, videoSize, previewError: frameError } = useComposePreviewFrame
   frame: fallbackVideoFrame,
   clips: effectiveClips,
   beautyReady,
+  captureSource,
 });
 frameRendererRef.value = renderer;
+
+/** 取画布和可见字幕、花字的合成快照。 */
+const captureCurrentFrame = useComposeFrameCapture(getPresentedFrame, () => canvasHostRef.value);
 
 /** 加载、取帧和算法降级错误统一显示 */
 const previewError = computed<string>(() => playbackError.value || frameError.value);
@@ -841,5 +860,6 @@ defineExpose({
   isAdjusting,
   videoReady,
   getVideoSize,
+  captureCurrentFrame,
 });
 </script>

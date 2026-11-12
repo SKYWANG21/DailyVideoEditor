@@ -4,7 +4,6 @@
       v-for="seam in seams"
       :key="seam.key"
       class="transition-handles__target"
-      :class="{ 'is-drag-over': dragKey === seam.key }"
       :style="{ left: `${seam.cut * pixelsPerSecond}px` }"
       @pointerdown.stop
       @mousedown.stop
@@ -24,7 +23,10 @@
           <button
             type="button"
             class="transition-handles__badge"
-            :class="{ 'is-active': seam.transition || selectedKey === seam.key || openKey === seam.key }"
+            :class="{
+              'has-transition': seam.transition,
+              'is-active': selectedKey === seam.key || openKey === seam.key || dragKey === seam.key,
+            }"
             :disabled="disabled"
             :title="seam.transition ? `${effectName(seam)} · ${seam.transition.durationSec.toFixed(2)} 秒` : '添加转场'"
             :aria-label="seam.transition ? '编辑接缝转场' : '添加接缝转场'"
@@ -202,8 +204,11 @@ function onDrop(event: DragEvent, seam: TransitionSeam): void {
   cursor: pointer;
   pointer-events: auto;
 }
-.transition-handles__badge.is-active,
-.is-drag-over .transition-handles__badge {
+.transition-handles__badge.has-transition:not(.is-active) {
+  background: var(--compose-accent);
+  color: var(--el-color-white);
+}
+.transition-handles__badge.is-active {
   outline: 2px solid var(--compose-accent);
   outline-offset: 2px;
 }
