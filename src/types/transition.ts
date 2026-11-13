@@ -93,6 +93,8 @@ export type TransitionBackend = "canvas" | "wasm";
 
 /** 创建后固定内置后端与效果列表，避免同一效果的加载缓存混用。 */
 export interface TransitionRegistryOptions {
+  /** 导出可注入同一 Worker 内运行的 WASM 内核加载器。 */
+  loadWasm?: (url: URL) => Promise<TransitionAlgorithm>;
   /** 全部内置效果默认使用 Canvas，选择 wasm 后按需加载各自的独立内核。 */
   backend?: TransitionBackend;
   /** 按传入顺序追加的宿主效果；重复 ID 报错，具体实现由各自的 load 决定。 */

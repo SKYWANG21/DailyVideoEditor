@@ -81,6 +81,8 @@ export interface ComposeEditorProps {
   transitionBackend?: TransitionBackend;
   /** 追加宿主转场，挂载时注册；列表变更时需重新挂载。 */
   transitionEffects?: readonly TransitionEffectDefinition[];
+  /** 自定义导出 Worker 入口，模型和转场实现由该入口登记。 */
+  exportWorkerFactory?: () => Worker;
   /**
    * 各轨道类型数量上限；未传则使用 clip-track 组件默认。
    * 某类型未出现在配置中视为不限制。

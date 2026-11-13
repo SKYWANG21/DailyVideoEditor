@@ -20,3 +20,10 @@ declare module "@/algorithm/wasm/gpupixel.js" {
   const createGpuPixelModule: unknown;
   export default createGpuPixelModule;
 }
+declare module "virtual:compose-worker-gpupixel" {
+  /** 为导出任务绑定独立的美颜画布。 */
+  export function createWorkerGpuPixel(
+    canvas: OffscreenCanvas,
+    options: { locateFile(file: string): string },
+  ): Promise<import("./src/utils/beauty/gpuPixelPreview").GpuPixelModule>;
+}

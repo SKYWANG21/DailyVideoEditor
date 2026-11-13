@@ -84,19 +84,20 @@ const canvasDefinitions: readonly TransitionEffectDefinition[] = [
 
 /** 固定内置后端并追加宿主效果；算法按需加载，实例之间不共享可变注册状态。 */
 export function createTransitionRegistry(options: TransitionRegistryOptions = {}): TransitionRegistry {
-  const wasm = options.backend === "wasm" ? new WasmTransitionWorkerClient() : undefined;
+  const wasm = options.backend === "wasm" && !options.loadWasm ? new WasmTransitionWorkerClient() : undefined;
+  const loadWasm = options.loadWasm ?? ((url: URL) => wasm!.load(url));
   const registry = new TransitionRegistry(() => wasm?.dispose());
   registry.register(
     options.backend === "wasm"
       ? {
           ...crossfadeDefinition,
-          load: () => wasm!.load(new URL("./wasm/crossfade.wasm", import.meta.url)),
+          load: () => loadWasm(new URL("./wasm/crossfade.wasm", import.meta.url)),
         }
       : crossfadeDefinition,
   );
   for (const effect of canvasDefinitions) {
     registry.register(
-      options.backend === "wasm" ? { ...effect, load: () => wasm!.load(new URL(`./wasm/${effect.id}.wasm`, import.meta.url)) } : effect,
+      options.backend === "wasm" ? { ...effect, load: () => loadWasm(new URL(`./wasm/${effect.id}.wasm`, import.meta.url)) } : effect,
     );
   }
   for (const effect of options.effects ?? []) registry.register(effect);

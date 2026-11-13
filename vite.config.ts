@@ -1,4 +1,4 @@
-import { cpSync, mkdirSync, readdirSync } from "node:fs";
+import { cpSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath, URL } from "node:url";
 import { defineConfig, type Plugin } from "vite";
@@ -8,12 +8,41 @@ import dts from "vite-plugin-dts";
 
 const rootDir = fileURLToPath(new URL(".", import.meta.url));
 
+/** 给 GPUPixel 的 Emscripten 胶水提供当前任务的 OffscreenCanvas，不改写预览用的经典脚本。 */
+function workerGpuPixel(): Plugin {
+  const id = "virtual:compose-worker-gpupixel";
+  return {
+    name: "compose-worker-gpupixel",
+    resolveId(source) {
+      return source === id ? "\0" + id : undefined;
+    },
+    load(source) {
+      if (source !== "\0" + id) return;
+      const path = resolve(rootDir, "src/algorithm/wasm/gpupixel.js");
+      this.addWatchFile(path);
+      return `
+export function createWorkerGpuPixel(canvas, options) {
+  const document = { querySelector: (selector) => selector === "#compose-export-beauty" ? canvas : null };
+  const window = undefined;
+  ${readFileSync(path, "utf8")}
+  return createGpuPixelModule(options);
+}
+`;
+    },
+  };
+}
+
 /** 库构建把美颜模型拷到 dist/algorithm，宿主可放到自己的静态目录 */
 function copyAlgorithmAssets(): Plugin {
+  let write = true;
   return {
     name: "copy-algorithm-assets",
     apply: "build",
+    configResolved(config) {
+      write = config.build.write;
+    },
     closeBundle() {
+      if (!write) return;
       const dest = resolve(rootDir, "dist/algorithm");
       mkdirSync(dest, { recursive: true });
       cpSync(resolve(rootDir, "public/algorithm/face_landmarker.task"), resolve(dest, "face_landmarker.task"));
@@ -130,6 +159,7 @@ export default defineConfig(({ mode }) => {
     plugins: [
       vue(),
       tailwindcss(),
+      workerGpuPixel(),
       ...(lib
         ? [
             dropConsoleLog(),
@@ -156,18 +186,23 @@ export default defineConfig(({ mode }) => {
     publicDir: lib ? false : "public",
     worker: {
       format: "es" as const,
+      plugins: () => [workerGpuPixel()],
     },
     optimizeDeps: {
       exclude: ["@mediapipe/tasks-vision"],
+      include: ["mediabunny", "@mediabunny/aac-encoder"],
     },
     build: lib
       ? {
           emptyOutDir: true,
           cssCodeSplit: false,
           lib: {
-            entry: fileURLToPath(new URL("./src/index.ts", import.meta.url)),
+            entry: {
+              index: fileURLToPath(new URL("./src/index.ts", import.meta.url)),
+              "export-worker": fileURLToPath(new URL("./src/export-worker.ts", import.meta.url)),
+            },
             formats: ["es"],
-            fileName: "index",
+            fileName: (_format, entryName) => `${entryName}.js`,
           },
           rollupOptions: {
             external: (id) => id === "vue" || id.startsWith("vue/") || id.startsWith("@vue/"),

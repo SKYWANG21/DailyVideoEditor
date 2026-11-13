@@ -46,8 +46,9 @@ export class FacePass {
    * 检测一个视频快照。时间回退时清缓存，检测时间戳保持单调。
    * @param frame 当前视频帧，不会被关闭
    * @param sourceTimeUs 源时间（微秒），用作 VIDEO 模式时间戳
+   * @param cacheClockMs 关键点缓存时钟，离线导出传入源时间而非运行耗时
    */
-  async detect(frame: ImageBitmap, sourceTimeUs: number): Promise<Float32Array<ArrayBufferLike>> {
+  async detect(frame: ImageBitmap, sourceTimeUs: number, cacheClockMs = performance.now()): Promise<Float32Array<ArrayBufferLike>> {
     if (!this.landmarker) return this.lastLandmarks;
     let timestamp = Math.max(0, Math.round(sourceTimeUs / 1000));
     let forceDetect = false;
@@ -57,8 +58,7 @@ export class FacePass {
     }
     this.lastSourceTimestamp = timestamp;
     if (timestamp <= this.lastTimestamp) timestamp = this.lastTimestamp + 1;
-    const now = performance.now();
-    if (!forceDetect && this.lastLandmarks.length > 0 && now - this.lastDetectAt < DETECT_INTERVAL_MS) {
+    if (!forceDetect && this.lastLandmarks.length > 0 && cacheClockMs - this.lastDetectAt < DETECT_INTERVAL_MS) {
       this.lastTimestamp = timestamp;
       return this.lastLandmarks;
     }
@@ -66,7 +66,7 @@ export class FacePass {
     try {
       const result = this.landmarker.detectForVideo(bitmap, timestamp);
       this.lastTimestamp = timestamp;
-      this.lastDetectAt = now;
+      this.lastDetectAt = cacheClockMs;
       this.lastLandmarks = flattenLandmarks(result);
       return this.lastLandmarks;
     } finally {

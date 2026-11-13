@@ -6,12 +6,27 @@
         <button
           type="button"
           class="h-9 rounded-md border border-border px-4 text-sm hover:bg-muted disabled:cursor-wait disabled:opacity-60"
-          :disabled="capturingFrame"
+          :disabled="capturingFrame || exportingVideo"
           @click="onCaptureFrame"
         >
           {{ capturingFrame ? "截图中…" : "截图" }}
         </button>
-        <button type="button" class="h-9 rounded-md bg-primary px-4 text-sm text-primary-foreground" @click="onCompose">合成</button>
+        <button
+          type="button"
+          class="h-9 rounded-md border border-border px-4 text-sm hover:bg-muted disabled:opacity-60"
+          :disabled="exportingVideo"
+          @click="onCompose"
+        >
+          合成
+        </button>
+        <button
+          type="button"
+          class="h-9 rounded-md bg-primary px-4 text-sm text-primary-foreground disabled:opacity-60"
+          :disabled="exportingVideo"
+          @click="onExportVideo()"
+        >
+          导出视频
+        </button>
       </div>
     </header>
     <div class="min-h-0 flex-1">
@@ -38,8 +53,10 @@
 
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
-import { ElMessage } from "element-plus";
+import { ElMessage, ElMessageBox } from "element-plus";
 import { VideoComposeEditor, type VideoComposeEditorExpose } from "@/editor";
+import { ComposeVideoExportError } from "@/editor/export/useComposeVideoExport";
+import type { ComposeVideoExportResolution } from "@/types/videoExport";
 import type { ComposeCatalogUploadPayload } from "@/editor/session/createComposeEditorState";
 import VideoClipUploadModal, { type UploadedComposeClip } from "@/editor/modals/VideoClipUploadModal.vue";
 import { createTextTemplateItem, type TextTemplateItem } from "@/editor/shared/textTemplateCatalog";
@@ -138,6 +155,39 @@ const textTemplates = ref<TextTemplateItem[]>(
 
 const uploadClipOpen = ref(false);
 const editorRef = ref<VideoComposeEditorExpose | null>(null);
+const exportingVideo = ref(false);
+
+/** 导出组件封装好的 MP4，取消时结束操作，增强放大失败时可选择素材档重试。 */
+async function onExportVideo(resolution?: ComposeVideoExportResolution): Promise<void> {
+  const editor = editorRef.value;
+  if (!editor || exportingVideo.value) return;
+  exportingVideo.value = true;
+  let retry = false;
+  try {
+    const result = await editor.exportVideo({ resolution });
+    const url = URL.createObjectURL(result.blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = result.fileName;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+    ElMessage.success("视频已导出");
+  } catch (error: unknown) {
+    if (error instanceof DOMException && error.name === "AbortError") return;
+    if (error instanceof ComposeVideoExportError && error.retryAtSource) {
+      retry = await ElMessageBox.confirm(error.message, "增强放大失败", {
+        confirmButtonText: "按素材分辨率重新导出",
+        cancelButtonText: "关闭",
+        type: "warning",
+      }).then(() => true, () => false);
+    } else ElMessage.error(error instanceof Error ? error.message : "视频导出失败");
+  } finally {
+    exportingVideo.value = false;
+  }
+  if (retry) await onExportVideo("source");
+}
 const capturingFrame = ref(false);
 
 /** 使用浏览器下载保存当前预览的 PNG。 */

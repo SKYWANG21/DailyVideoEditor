@@ -22,6 +22,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./export-worker": {
+      "types": "./dist/export-worker.d.ts",
+      "import": "./dist/export-worker.js"
+    },
     "./style.css": "./dist/style.css",
     "./transitions/crossfade.wasm": "./dist/algorithm/transitions/crossfade.wasm",
     "./transitions/*.wasm": "./dist/algorithm/transitions/*.wasm"
@@ -31,9 +35,12 @@
   },
   "dependencies": {
     "@lucide/vue": "^1.71.0",
+    "@mediabunny/aac-encoder": "^1.65.2",
     "@mediapipe/tasks-vision": "1.1.1",
     "@webav/av-cliper": "^1.2.8",
+    "@webgpu/types": "^0.1.74",
     "element-plus": "^2.14.8",
+    "mediabunny": "^1.65.2",
     "pinia": "^2.3.1"
   },
   "devDependencies": {

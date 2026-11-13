@@ -1,5 +1,5 @@
 import type { MediaClip, RectConfig, SubtitleClip, TextClip, TrackType } from "@/clip-track";
-import { generateId } from "@/clip-track";
+import { generateId } from "@/clip-track/utils/helpers";
 import type { BeautyParams, ComposeConfig, PreviewAudioClip, SubtitleItem, SubtitleStyleConfig, VideoClipItem } from "@/types/composeMedia";
 import { createDefaultComposeConfig, createDefaultSubtitleStyle, readBeautyParams } from "@/types/composeMedia";
 import { clampGain } from "@/editor/volumeDb";

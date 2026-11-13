@@ -1,6 +1,18 @@
 import "./style";
 
 export type { ComposeFrameCapture } from "./types/frameCapture";
+export type {
+  ComposeVideoExportOptions,
+  ComposeVideoExportProgress,
+  ComposeVideoExportResolution,
+  ComposeVideoExportResult,
+  ComposeVideoExportStage,
+  VideoLayerSize,
+  VideoLayerUpscaler,
+  VideoLayerUpscalerFactory,
+  VideoLayerUpscaleRequest,
+} from "./types/videoExport";
+export { ComposeVideoExportError } from "./editor/export/useComposeVideoExport";
 
 export type {
   ComposeTransition,

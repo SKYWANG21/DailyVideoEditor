@@ -24,7 +24,7 @@ interface GpuPixelPipeline {
 }
 
 /** createGpuPixelModule 返回的运行时 */
-interface GpuPixelModule {
+export interface GpuPixelModule {
   /** 在已有 canvas 上创建 WebGL2。参数是 id 或 CSS 选择器 */
   create(canvasId: string): GpuPixelPipeline;
   /** 在 WASM 堆上分配字节 */
@@ -39,7 +39,7 @@ interface GpuPixelModule {
 type CreateGpuPixelModule = (options?: { locateFile?: (file: string) => string }) => Promise<GpuPixelModule>;
 
 /** 把 .wasm / .data 指到 Vite 产出的地址 */
-function locateGpuPixelFile(file: string): string {
+export function locateGpuPixelFile(file: string): string {
   if (file.endsWith(".wasm")) return wasmUrl;
   if (file.endsWith(".data")) return dataUrl;
   return file;
@@ -94,7 +94,7 @@ function landmarksForGpuPixel(landmarks: Float32Array<ArrayBufferLike>): number[
 }
 
 /**
- * 主线程美颜绘制。
+ * 美颜绘制。预览和导出使用不同的画布与模块加载方式。
  * 模块的 WebGL 上下文只会绑到第一次 create 的那块 canvas。
  */
 export class GpuPixelPreview {
@@ -105,7 +105,10 @@ export class GpuPixelPreview {
   private loading: Promise<void> | null = null;
   private disposed = false;
 
-  constructor(private readonly canvas: HTMLCanvasElement) {}
+  constructor(
+    private readonly canvas: HTMLCanvasElement | OffscreenCanvas,
+    private readonly loadModule: () => Promise<{ module: GpuPixelModule; selector: string }>,
+  ) {}
 
   /** 加载 wasm 并在当前 canvas 上创建滤镜链 */
   init(): Promise<void> {
@@ -149,13 +152,10 @@ export class GpuPixelPreview {
   /** 加载查找表并创建管道。失败时下次 init 可以重试 */
   private async load(): Promise<void> {
     try {
-      if (!this.canvas.id) this.canvas.id = `gpupixel_preview_${++canvasSequence}`;
-      const createGpuPixelModule = await loadCreateGpuPixelModule();
-      if (this.disposed) return;
-      const module = await createGpuPixelModule({ locateFile: locateGpuPixelFile });
+      const { module, selector } = await this.loadModule();
       if (this.disposed) return;
       this.module = module;
-      this.pipeline = module.create(`#${this.canvas.id}`);
+      this.pipeline = module.create(selector);
     } catch (error) {
       this.loading = null;
       throw error;
@@ -176,5 +176,9 @@ export class GpuPixelPreview {
 
 /** 每个播放器持有自己的实例；只共享脚本加载器 */
 export function acquireGpuPixelPreview(canvas: HTMLCanvasElement): GpuPixelPreview {
-  return new GpuPixelPreview(canvas);
+  return new GpuPixelPreview(canvas, async () => {
+    if (!canvas.id) canvas.id = `gpupixel_preview_${++canvasSequence}`;
+    const createModule = await loadCreateGpuPixelModule();
+    return { module: await createModule({ locateFile: locateGpuPixelFile }), selector: `#${canvas.id}` };
+  });
 }

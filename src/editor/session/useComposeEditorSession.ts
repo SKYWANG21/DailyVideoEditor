@@ -82,7 +82,7 @@ export function useComposeEditorSession(props: ComposeEditorProps, emit: Compose
   }
 
   /** 宿主 ref 方法，签名与 VideoComposeEditorExpose 一致；由外壳 defineExpose */
-  const exposed: VideoComposeEditorExpose = {
+  const exposed: Omit<VideoComposeEditorExpose, "exportVideo"> = {
     validate: project.validate,
     flush: project.flush,
     reload: project.reload,

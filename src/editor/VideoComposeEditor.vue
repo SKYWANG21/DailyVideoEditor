@@ -1,6 +1,6 @@
 <template>
   <div ref="shellRef" class="compose-shell relative isolate h-full w-full min-h-0 overflow-hidden">
-    <div class="grid h-full w-full min-h-0 overflow-hidden" :style="shellGridStyle">
+    <div class="grid h-full w-full min-h-0 overflow-hidden" :style="shellGridStyle" :inert="Boolean(exportCover)">
       <div class="grid min-h-0 overflow-hidden" :style="topGridStyle">
         <VideoComposeAssetPanel
           v-if="!readonly"
@@ -161,6 +161,8 @@
       </VideoComposeTimeline>
     </div>
 
+    <ComposeVideoExportCover v-if="exportCover" :state="exportCover" @cancel="cancelExport" @select="selectResolution" />
+
     <BgmUploadModal v-model:open="uploadAudioModalOpen" :submitting="false" @uploaded="onAudioUploaded" />
 
     <BgmUploadModal
@@ -197,6 +199,8 @@ import BgmUploadModal from "./modals/BgmUploadModal.vue";
 import SubtitleFontPopover from "./sidebar/SubtitleFontPopover.vue";
 import type { TextTemplateItem } from "./shared/textTemplateCatalog";
 import { useComposeEditorSession } from "./session/useComposeEditorSession";
+import ComposeVideoExportCover from "./export/ComposeVideoExportCover.vue";
+import { useComposeVideoExport } from "./export/useComposeVideoExport";
 import type { ComposeCatalogUploadPayload, ComposeUploadAdapter } from "./session/createComposeEditorState";
 import { installComposeElementPlus } from "./installComposeElementPlus";
 import { COMPOSE_ALGORITHM_BASE, COMPOSE_TRANSITION_REGISTRY } from "./composeRuntime";
@@ -240,6 +244,8 @@ const props = withDefaults(
     transitionBackend?: TransitionBackend;
     /** 追加宿主转场，挂载时注册；列表变更时需重新挂载编辑器。 */
     transitionEffects?: readonly TransitionEffectDefinition[];
+    /** 自定义导出 Worker 入口，用于登记模型超分或自定义转场。 */
+    exportWorkerFactory?: () => Worker;
     /**
      * 各轨道类型数量上限；未传则使用 clip-track 组件默认。
      * 某类型未出现在配置中视为不限制。
@@ -439,6 +445,21 @@ const {
   onVideoSourceSize,
 } = useComposeEditorSession(props, emit);
 
+const { cover: exportCover, exportVideo, cancelExport, selectResolution } = useComposeVideoExport({
+  tracks: () => timelineRef.value?.exportTracks() ?? tracks.value,
+  pause: () => {
+    playerRef.value?.pause();
+    uploadAudioModalOpen.value = false;
+    uploadSfxModalOpen.value = false;
+    fontPopoverOpen.value = null;
+  },
+  root: () => shellRef.value,
+  algorithmBase: () => algorithmBase.value,
+  transitionBackend: () => props.transitionBackend,
+  resolveMediaUrl: () => props.resolveMediaUrl,
+  createWorker: () => props.exportWorkerFactory,
+});
+
 /** 宿主通过组件 ref 调用的公开方法（须在本 SFC 的 script setup 内 defineExpose） */
 defineExpose({
   validate,
@@ -450,6 +471,7 @@ defineExpose({
   getEditingClip,
   getSelectedClips,
   captureCurrentFrame,
+  exportVideo,
 });
 
 /** 面板花字上传：宿主回调或内置选文件结果 */

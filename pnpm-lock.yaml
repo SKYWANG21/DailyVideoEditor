@@ -11,15 +11,24 @@ importers:
       '@lucide/vue':
         specifier: ^1.71.0
         version: 1.71.0(vue@3.5.45(typescript@5.9.3))
+      '@mediabunny/aac-encoder':
+        specifier: ^1.65.2
+        version: 1.65.2(mediabunny@1.65.2)
       '@mediapipe/tasks-vision':
         specifier: 1.1.1
         version: 1.1.1
       '@webav/av-cliper':
         specifier: ^1.2.8
         version: 1.2.8
+      '@webgpu/types':
+        specifier: ^0.1.74
+        version: 0.1.74
       element-plus:
         specifier: ^2.14.8
         version: 2.14.8(vue@3.5.45(typescript@5.9.3))
+      mediabunny:
+        specifier: ^1.65.2
+        version: 1.65.2
       pinia:
         specifier: ^2.3.1
         version: 2.3.1(typescript@5.9.3)(vue@3.5.45(typescript@5.9.3))
@@ -274,6 +283,11 @@ packages:
     resolution: {integrity: sha512-R64tQ5dJMvLjAOEIhF+vOunHm/wUI3VP6NhJEaigwpLVaAEL3O2251byH2IBEeBofLunvOiTGh4lkzDfIpgKcQ==}
     peerDependencies:
       vue: '>=3.0.1'
+
+  '@mediabunny/aac-encoder@1.65.2':
+    resolution: {integrity: sha512-HsDmtqRf26PwSDl1IYCPz5hHtj3js5u6O1VGdOIPKrln5E0slaPyGue84CWpbbeJ54wrLDJdd/esp17Ot+xh3A==}
+    peerDependencies:
+      mediabunny: ^1.0.0
 
   '@mediapipe/tasks-vision@1.1.1':
     resolution: {integrity: sha512-jwntgT5tzDrKOkqg6xNDNpRcTUnGvmylZE5DFnzPXossiWOIDdZX+C81LI75hlXhsG58YZW+lGzcmjH1qrQE/Q==}
@@ -666,6 +680,12 @@ packages:
   '@types/deep-eql@4.0.2':
     resolution: {integrity: sha512-c9h9dVVMigMPc4bwTvC5dxqtqJZwQPePsWjPlpSOnojbor6pGqdk541lfA7AqFQr5pB1BRdq0juY9db81BwyFw==}
 
+  '@types/dom-mediacapture-transform@0.1.12':
+    resolution: {integrity: sha512-d7/QsLRwF864A5mgIM/YrfiglHoYn7zgCcAoJgW404r+2DwnNr7EBbLnCWpmOMgH8y0te73L1AV6H1bmauaWFw==}
+
+  '@types/dom-webcodecs@0.1.13':
+    resolution: {integrity: sha512-O5hkiFIcjjszPIYyUSyvScyvrBoV3NOEEZx/pMlsu44TKzWNkLVBBxnxJz42in5n3QIolYOcBYFCPZZ0h8SkwQ==}
+
   '@types/estree@1.0.10':
     resolution: {integrity: sha512-lTyOMnOcmRBzdCv6/4zUZCrEhV0xrqQiUZBZtVcbmLHBXKLnN8q89v/wKRF/Q0HbwVsqbIG3o5HDoFl9sduM+g==}
 
@@ -826,6 +846,9 @@ packages:
 
   '@webav/mp4box.js@0.5.7':
     resolution: {integrity: sha512-KgScEtDpiLnWvj1Rj8Ri9fDWxTjfdNr7cmY/PT88EmttHh6cLxMAeyD/W8Vydes4z7qV/c5VDAaP4cTlaO0E9g==}
+
+  '@webgpu/types@0.1.74':
+    resolution: {integrity: sha512-lgiI4hbuLcI9unnm2cL/tvCaQU45dp0xcLWJh5uB/9MBGvIA4F8XIk7nSiBeg+K4xWGYwgZKn80LmERI5CxoTA==}
 
   acorn@8.19.0:
     resolution: {integrity: sha512-oJlA3XiRm7Cyk6qFD2Jn8ak9B7jSy0qy00ADO3+8dpT0LSjFihQYv4C02LFCSYJV3Q37xYwwRy5m+IpIiUzqWw==}
@@ -1159,6 +1182,9 @@ packages:
 
   magic-string@1.4.5:
     resolution: {integrity: sha512-oLLC2+YvQUfAa+vxoufE/yc1icb87M9iXIRqAoR/2EhE/8cb3SF/+Gi0c2By1B+5Vz2e2vQtUvHiu1+63Znh+w==}
+
+  mediabunny@1.65.2:
+    resolution: {integrity: sha512-goZpibvo/5hkc/56WVNm93Ini+o7K4y8aXA20c/BN1B+m3L5aHQa8MTvO+S1APg/YI8kMILtrX6QCqUtxLW7bA==}
 
   memoize-one@6.0.0:
     resolution: {integrity: sha512-rkpe71W0N0c0Xz6QD0eJETuWAJGnJ9afsl1srmwPrI+yBCkge5EycXXbYRyvL29zZVUWQCY7InPRCv3GDXuZNw==}
@@ -1754,6 +1780,10 @@ snapshots:
     dependencies:
       vue: 3.5.45(typescript@5.9.3)
 
+  '@mediabunny/aac-encoder@1.65.2(mediabunny@1.65.2)':
+    dependencies:
+      mediabunny: 1.65.2
+
   '@mediapipe/tasks-vision@1.1.1': {}
 
   '@microsoft/api-extractor-model@7.33.16':
@@ -2046,6 +2076,12 @@ snapshots:
 
   '@types/deep-eql@4.0.2': {}
 
+  '@types/dom-mediacapture-transform@0.1.12':
+    dependencies:
+      '@types/dom-webcodecs': 0.1.13
+
+  '@types/dom-webcodecs@0.1.13': {}
+
   '@types/estree@1.0.10': {}
 
   '@types/lodash-es@4.17.12':
@@ -2260,6 +2296,8 @@ snapshots:
       '@webav/mp4box.js': 0.5.7
 
   '@webav/mp4box.js@0.5.7': {}
+
+  '@webgpu/types@0.1.74': {}
 
   acorn@8.19.0: {}
 
@@ -2556,6 +2594,11 @@ snapshots:
   magic-string@1.4.5:
     dependencies:
       '@jridgewell/sourcemap-codec': 1.6.0
+
+  mediabunny@1.65.2:
+    dependencies:
+      '@types/dom-mediacapture-transform': 0.1.12
+      '@types/dom-webcodecs': 0.1.13
 
   memoize-one@6.0.0: {}
 
