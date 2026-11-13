@@ -21,6 +21,8 @@ export interface ExportCoverState {
 
 /** 编辑器拥有媒体和当前时间轴，导出会话只通过这些入口访问。 */
 interface ExportSessionOptions {
+  /** 编辑器会话保留的原始文件，不属于公开导出参数。 */
+  localMediaFiles: ReadonlyMap<string, File>;
   tracks(): ComposeTrack[];
   pause(): void;
   root(): HTMLElement | null;
@@ -179,6 +181,7 @@ export function useComposeVideoExport(session: ExportSessionOptions) {
   async function prepare(task: ActiveExport): Promise<void> {
     try {
       const snapshot = await buildExportSnapshot(session.tracks(), {
+        localMediaFiles: new Map(session.localMediaFiles),
         algorithmBaseUrl: session.algorithmBase(),
         transitionBackend: session.transitionBackend(),
         resolveMediaUrl: session.resolveMediaUrl(),

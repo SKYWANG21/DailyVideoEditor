@@ -351,6 +351,8 @@ export interface ComposeSegmentClipAssets {
   segmentTitle: string;
   /** 可播放视频 URL */
   url: string;
+  /** 与 URL 内容一致的原始文件，仅用于当前编辑会话，不写入工程或拖拽 JSON。 */
+  file?: File;
   /** 视频生成任务 ID（宿主业务） */
   taskId?: string;
   /** 展示标签，如「生成 1」 */

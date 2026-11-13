@@ -335,6 +335,7 @@ const {
   getEditingClip,
   getSelectedClips,
   captureCurrentFrame,
+  localMediaFiles,
   shellRef,
   shellGridStyle,
   topGridStyle,
@@ -445,7 +446,13 @@ const {
   onVideoSourceSize,
 } = useComposeEditorSession(props, emit);
 
-const { cover: exportCover, exportVideo, cancelExport, selectResolution } = useComposeVideoExport({
+const {
+  cover: exportCover,
+  exportVideo,
+  cancelExport,
+  selectResolution,
+} = useComposeVideoExport({
+  localMediaFiles,
   tracks: () => timelineRef.value?.exportTracks() ?? tracks.value,
   pause: () => {
     playerRef.value?.pause();

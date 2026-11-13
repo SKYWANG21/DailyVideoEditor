@@ -45,7 +45,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { onBeforeUnmount, ref, watch } from "vue";
 import { UploadCloud, X } from "@lucide/vue";
 
 /** 本地选择后回传给合成编辑器的片段 */
@@ -54,6 +54,8 @@ export interface UploadedComposeClip {
   name: string;
   /** 浏览器内存中的可播放地址 */
   url: string;
+  /** 原始文件，供编辑器直接读取，避免通过 Blob URL 再次 fetch。 */
+  file: File;
   /** 时长（秒） */
   durationSec: number;
   /** 本地上传没有素材库 id */
@@ -71,6 +73,8 @@ const emit = defineEmits<{
 }>();
 
 interface PendingClip {
+  /** 确认后随素材交给宿主的原始文件。 */
+  file: File;
   /** 文件名 */
   name: string;
   /** blob URL，确认后交给时间轴，取消时释放 */
@@ -112,22 +116,28 @@ function readVideoDuration(url: string): Promise<number> {
   });
 }
 
+/** 同时保留原始文件与预览地址，未确认的地址由弹窗释放。 */
 function onPickFiles(event: Event): void {
   const input = event.target as HTMLInputElement;
   const files = Array.from(input.files || []);
   if (!files.length) return;
   releasePending();
   pending.value = files.map((file) => ({
+    file,
     name: file.name.replace(/\.[^/.]+$/, "") || file.name,
     url: URL.createObjectURL(file),
   }));
 }
 
+/** 确认后把文件和 URL 的生命周期交给宿主。 */
 async function confirm(): Promise<void> {
+  const batch = pending.value;
   const clips: UploadedComposeClip[] = [];
-  for (const item of pending.value) {
+  for (const item of batch) {
     const durationSec = await readVideoDuration(item.url);
-    clips.push({ name: item.name, url: item.url, durationSec });
+    // 关闭弹窗或重新选择文件后，不能提交已经释放 URL 的旧批次。
+    if (pending.value !== batch) return;
+    clips.push({ name: item.name, url: item.url, file: item.file, durationSec });
   }
   pending.value = [];
   emit("uploaded", clips);
@@ -140,4 +150,6 @@ watch(
     if (!isOpen) releasePending();
   },
 );
+
+onBeforeUnmount(releasePending);
 </script>

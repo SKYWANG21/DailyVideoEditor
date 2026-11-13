@@ -15,6 +15,8 @@ import type { ComposeExportSnapshot, ExportAudioClip, ExportInterval, ExportVide
 
 /** 快照资源在页面端解析，渲染 Worker 只收到可读取的地址和数据。 */
 interface SnapshotOptions {
+  /** 本次任务固定的素材文件引用，按轨道中的源 URL 查找。 */
+  localMediaFiles: ReadonlyMap<string, File>;
   algorithmBaseUrl: string;
   transitionBackend: ComposeExportSnapshot["transitionBackend"];
   resolveMediaUrl?: ResolveMediaUrl;
@@ -55,10 +57,12 @@ function videoTrack(track: ComposeTrack, end: number): ExportVideoTrack {
   return { clips, transitions };
 }
 
-/** 同源和普通 CORS 地址交给 Worker 按需读取，页面 Blob 固定为任务持有的数据。 */
+/** 优先读取原始文件，只有未提供文件的素材才解析 URL；Worker 直接消费 File/Blob。 */
 async function resolveAsset(url: string, options: SnapshotOptions): Promise<string | Blob> {
   if (!url.trim()) throw new Error("存在没有媒体地址的片段");
   options.signal.throwIfAborted();
+  const file = options.localMediaFiles.get(url.trim());
+  if (file) return file;
   const resolved = !isPassthroughMediaUrl(url) && options.resolveMediaUrl ? await options.resolveMediaUrl(url) : url;
   options.signal.throwIfAborted();
   if (!resolved?.trim()) throw new Error("宿主没有返回可读取的媒体地址");

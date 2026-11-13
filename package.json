@@ -34,7 +34,7 @@
     "vue": "^3.5.0"
   },
   "dependencies": {
-    "@lucide/vue": "^1.71.0",
+    "@lucide/vue": "^1.72.0",
     "@mediabunny/aac-encoder": "^1.65.2",
     "@mediapipe/tasks-vision": "1.1.1",
     "@webav/av-cliper": "^1.2.8",
@@ -46,7 +46,7 @@
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.5",
     "@vitejs/plugin-vue": "^5.2.4",
-    "prettier": "^3.9.10",
+    "prettier": "^3.10.0",
     "sass-embedded": "^1.108.2",
     "tailwindcss": "^4.3.5",
     "typescript": "^5.9.3",

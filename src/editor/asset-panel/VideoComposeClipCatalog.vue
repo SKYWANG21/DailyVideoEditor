@@ -158,12 +158,12 @@ function onToggleLike(variant: ComposeSegmentClipAssets): void {
   emit("toggle-like", variant);
 }
 
-/** 开始拖拽：写入素材库版本 payload */
+/** 开始拖拽：只传递素材信息，原始 File 保留在编辑器会话中。 */
 function onVariantDragStart(event: DragEvent, variant: ComposeSegmentClipAssets): void {
   if (!canDrag(variant) || !event.dataTransfer) return;
   suppressNextClick = true;
   draggingVariantId.value = variant.id;
-  event.dataTransfer.setData(COMPOSE_SEGMENT_CLIP_DRAG_MIME, JSON.stringify(variant));
+  event.dataTransfer.setData(COMPOSE_SEGMENT_CLIP_DRAG_MIME, JSON.stringify({ ...variant, file: undefined }));
   event.dataTransfer.effectAllowed = "copy";
 }
 

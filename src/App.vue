@@ -52,7 +52,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { onMounted, onUnmounted, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { VideoComposeEditor, type VideoComposeEditorExpose } from "@/editor";
 import { ComposeVideoExportError } from "@/editor/export/useComposeVideoExport";
@@ -142,6 +142,8 @@ const model = ref<VideoComposeEditorModel>(
 
 /** 侧栏四类素材种子（上传后 Editor 内部维护；emit 带回全量时可回写） */
 const videoAssets = ref<ComposeSegmentClipAssets[]>([]);
+/** 宿主拥有的本地视频地址，保留到会话结束以支持删除后的撤销恢复。 */
+const uploadedVideoUrls = new Set<string>();
 const audioAssets = ref<BgmItem[]>([]);
 const sfxAssets = ref<BgmItem[]>(
   DEMO_SFX_NAMES.flatMap((name) => {
@@ -237,16 +239,25 @@ onMounted(() => {
   void probeDemoSfxDurations();
 });
 
-/** 内置上传弹窗结果写入 videoAssets 种子 */
+/** 子编辑器结束后释放宿主创建的地址与文件引用。 */
+onUnmounted((): void => {
+  for (const url of uploadedVideoUrls) URL.revokeObjectURL(url);
+  uploadedVideoUrls.clear();
+  videoAssets.value = [];
+});
+
+/** 上传结果连同原始 File 写入素材种子，导出调用无需另行提供文件。 */
 function onVideoUploaded(clips: UploadedComposeClip[]): void {
   if (!clips.length) return;
   for (const clip of clips) {
     if (!clip.url?.trim()) continue;
+    uploadedVideoUrls.add(clip.url.trim());
     videoAssets.value.push({
       id: `upload-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       segmentIndex: 0,
       segmentTitle: "上传片段",
       url: clip.url.trim(),
+      file: clip.file,
       label: clip.name?.trim() || "上传片段",
       mediaId: clip.mediaId,
     });

@@ -7,6 +7,7 @@ import { createComposeEditorState } from "./createComposeEditorState";
 import { createComposeEditorPorts } from "./ports";
 import { findClipById } from "./trackLookup";
 import { useComposeCatalog } from "./useComposeCatalog";
+import { useComposeMediaFiles } from "./useComposeMediaFiles";
 import { useComposeInspector } from "./useComposeInspector";
 import { useComposePlaybackBridge } from "./useComposePlaybackBridge";
 import { useComposeProject } from "./useComposeProject";
@@ -22,6 +23,7 @@ import type { VideoComposeEditorExpose } from "./videoComposeEditorExpose";
  */
 export function useComposeEditorSession(props: ComposeEditorProps, emit: ComposeEditorEmit) {
   const state = createComposeEditorState(props);
+  const localMediaFiles = useComposeMediaFiles(() => state.videoAssets.value);
   const ports = createComposeEditorPorts();
 
   setHostTextTemplates(state.textTemplates.value);
@@ -99,6 +101,7 @@ export function useComposeEditorSession(props: ComposeEditorProps, emit: Compose
 
   return {
     ...exposed,
+    localMediaFiles,
     shellRef: layout.shellRef,
     shellGridStyle: layout.shellGridStyle,
     topGridStyle: layout.topGridStyle,
