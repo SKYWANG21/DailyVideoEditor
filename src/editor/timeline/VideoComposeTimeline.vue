@@ -53,8 +53,13 @@
       <!-- 工具栏外壳前后：透传宿主插槽 -->
       <template #track-overlay="{ track, pixelsPerSecond }">
         <ComposeTransitionHandles
-          :track="track" :pixels-per-second="pixelsPerSecond" :readonly="readonly" :selected-key="selectedSeamKey"
-          @select="selectedSeamKey = $event" @apply="applyTransition" @remove="removeTransition"
+          :track="track"
+          :pixels-per-second="pixelsPerSecond"
+          :readonly="readonly"
+          :selected-key="selectedSeamKey"
+          @select="selectedSeamKey = $event"
+          @apply="applyTransition"
+          @remove="removeTransition"
         />
       </template>
       <template #toolbar-before>
@@ -189,6 +194,7 @@ import {
   COMPOSE_TEXT_TEMPLATE_DRAG_MIME,
   readClipConfig,
   TEXT_TEMPLATE_TRACK_TYPE,
+  getStickerSamplingKind,
   TEXT_TEMPLATE_TRACK_NAME,
   DEFAULT_TEXT_CLIP_DURATION_SEC,
   createDefaultTextClipRect,
@@ -305,8 +311,15 @@ const emit = defineEmits<{
 }>();
 
 const videoTrackRef = ref<VideoTrackExpose | null>(null);
-const { selectedSeamKey, apply: applyTransition, remove: removeTransition } = useTimelineTransitions(
-  videoTrackRef, computed(() => props.readonly), onDataChanged, () => emit("transition-applied"),
+const {
+  selectedSeamKey,
+  apply: applyTransition,
+  remove: removeTransition,
+} = useTimelineTransitions(
+  videoTrackRef,
+  computed(() => props.readonly),
+  onDataChanged,
+  () => emit("transition-applied"),
 );
 /** 时间轴根节点：用于拖放命中与坐标换算 */
 const timelineRootRef = ref<HTMLElement | null>(null);
@@ -447,11 +460,9 @@ let themeObserver: MutationObserver | null = null;
 const hScrollbarControlWidthPx = ref(TIMELINE_TRACK_CONTROL_WIDTH);
 
 /** 根节点 CSS 变量，缩放条左缘与轨道头对齐 */
-const hScrollbarAlignStyle = computed(
-  (): Record<string, string> => ({
-    "--timeline-track-control-width": `${hScrollbarControlWidthPx.value}px`,
-  }),
-);
+const hScrollbarAlignStyle = computed((): Record<string, string> => ({
+  "--timeline-track-control-width": `${hScrollbarControlWidthPx.value}px`,
+}));
 
 /** 控制栏单元格尺寸变化时更新假横向条左缘 */
 let hScrollbarAlignResizeObserver: ResizeObserver | null = null;
@@ -624,13 +635,13 @@ function mapLibClipToCompose(clip: Track["clips"][number]): ComposeClip | null {
 
 /** 库 Track → ComposeTrack */
 function mapLibTrackToCompose(track: Track): ComposeTrack | null {
-  if (track.type !== "video" && track.type !== "audio" && track.type !== "subtitle" && track.type !== TEXT_TEMPLATE_TRACK_TYPE) {
+  if (track.type !== "video" && track.type !== "audio" && track.type !== "subtitle" && !getStickerSamplingKind(track.type)) {
     return null;
   }
   const clips = (track.clips || []).map((c) => mapLibClipToCompose(c)).filter((c): c is ComposeClip => Boolean(c));
   return {
     id: track.id,
-    type: track.type,
+    type: getStickerSamplingKind(track.type) ? TEXT_TEMPLATE_TRACK_TYPE : track.type,
     name: track.name,
     isMain: track.isMain,
     visible: track.visible !== false,
@@ -1185,7 +1196,7 @@ function patchClipsByType(type: PatchableClipType, patch: Record<string, unknown
   if (!api) return;
   const matchedTracks = api.getTracks().filter((t) => {
     if (type === "video") return Boolean(t.isMain) || t.type === "video";
-    if (type === "text") return t.type === TEXT_TEMPLATE_TRACK_TYPE || t.type === "text";
+    if (type === "text") return Boolean(getStickerSamplingKind(t.type));
     return t.type === type;
   });
 
@@ -1230,7 +1241,7 @@ function onTrackAdded(track: Track): void {
     }
   } else if (track.type === "subtitle" && track.name !== "字幕") {
     api.updateTrack(track.id, { name: "字幕" });
-  } else if (track.type === TEXT_TEMPLATE_TRACK_TYPE && track.name !== TEXT_TEMPLATE_TRACK_NAME) {
+  } else if (getStickerSamplingKind(track.type) && track.name !== TEXT_TEMPLATE_TRACK_NAME) {
     api.updateTrack(track.id, { name: TEXT_TEMPLATE_TRACK_NAME });
   }
 }
@@ -1285,7 +1296,7 @@ function clipCoversTime(clip: { startTime: number; endTime: number }, timeSec: n
  */
 function ensureStickerTrackAtTime(timeSec: number): Track {
   const api = videoTrackRef.value!;
-  const stickers = api.getTracks().filter((t) => t.type === TEXT_TEMPLATE_TRACK_TYPE);
+  const stickers = api.getTracks().filter((t) => getStickerSamplingKind(t.type));
   const free = stickers.find((t) => !t.clips.some((c) => clipCoversTime(c, timeSec)));
   if (free) return free;
   const n = stickers.length + 1;
@@ -1872,7 +1883,7 @@ function importTracks(tracks: ComposeTrack[]): void {
     const projectTracks: Track[] = tracks.map((t, order) => {
       const row: TrackWithMute = {
         id: t.id,
-        type: t.type,
+        type: getStickerSamplingKind(t.type) ? TEXT_TEMPLATE_TRACK_TYPE : t.type,
         name: t.name,
         isMain: t.isMain,
         visible: t.visible !== false,

@@ -16,7 +16,7 @@ interface MediaSource {
   input: Input;
   start: number;
   audio: InputAudioTrack | null;
-  video: { track: InputVideoTrack; size: VideoLayerSize; end: number } | null;
+  video: { track: InputVideoTrack; size: VideoLayerSize; first: number; end: number } | null;
 }
 
 /** 导出素材按 URL 去重，结束时中止读取并释放解码器。 */
@@ -50,8 +50,10 @@ export class ExportMedia {
           if (!video || !(await video.canDecode())) throw new Error("当前浏览器无法解码视频轨");
           const width = await video.getDisplayWidth();
           const height = await video.getDisplayHeight();
+          const first = await video.getFirstTimestamp();
           const end = (await video.getDurationFromMetadata()) ?? (await video.computeDuration());
-          source.video = { track: video, size: { width, height }, end };
+          if (!Number.isFinite(first) || !Number.isFinite(end) || end <= first) throw new Error("视频轨没有有效的时间范围");
+          source.video = { track: video, size: { width, height }, first, end };
         }
         const audio = snapshot.audio.filter((clip) => clip.url === url);
         if (audio.some((clip) => !clip.embedded) && !source.audio) throw new Error("素材没有可用音轨");
@@ -74,7 +76,7 @@ export class ExportMedia {
     const source = this.get(clip.url);
     const video = this.video(clip);
     // Canvas 池属于 Sink。相同媒体同时出现在转场两侧时，各游标需有独立的池。
-    return new ExportVideoCursor(new CanvasSink(video.track, { poolSize: 2 }), source.start, video.end);
+    return new ExportVideoCursor(new CanvasSink(video.track, { poolSize: 2 }), source.start, video.first, video.end);
   }
 
   /** 取得音轨和素材时间原点，纯视频的内嵌原声返回空。 */
@@ -113,12 +115,14 @@ export class ExportVideoCursor {
   constructor(
     private readonly sink: CanvasSink,
     private readonly start: number,
+    private readonly first: number,
     private readonly end: number,
   ) {}
 
   /** 选取实际 PTS 覆盖源时间的帧，容许素材首尾解码时间和项目时间不同。 */
   async at(seconds: number): Promise<WrappedCanvas | null> {
-    const time = Math.min(this.start + seconds, this.end - 0.000001);
+    // 转场预卷可能早于视频首帧；只保持边界画面，保留音视频共同时间原点。
+    const time = Math.max(this.first, Math.min(this.start + seconds, this.end - 0.000001));
     if (!this.iterator) {
       this.iterator = this.sink.canvases(time);
       this.next = (await this.iterator.next()).value ?? null;

@@ -9,7 +9,7 @@ import { ExportBeauty } from "./exportBeauty";
 import { clipFrame, layerUpscaleSize } from "./exportGeometry";
 import type { ExportMedia, ExportVideoCursor } from "./exportMedia";
 import { ExportOverlays } from "./exportOverlays";
-import type { ComposeExportSnapshot, ExportVideoClip, ExportVideoTrack } from "./exportProtocol";
+import type { ComposeExportSnapshot, ExportVideoClip, ExportVideoTrack, SampleExportSticker } from "./exportProtocol";
 import { loadExportWasmTransition } from "./exportTransition";
 
 /** 与编辑器预览一致的输出采样帧率。 */
@@ -35,6 +35,7 @@ interface RendererOptions {
   upscaler: VideoLayerUpscaler | null;
   transitionEffects: readonly TransitionEffectDefinition[];
   signal: AbortSignal;
+  sampleSticker: SampleExportSticker;
 }
 
 /** 每次合成一帧，输入帧、转场和叠层均留在导出 Worker。 */
@@ -93,7 +94,7 @@ export class ExportRenderer {
     this.ctx.fillStyle = "#000";
     this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
     for (const track of this.tracks) await this.drawTrack(track, time, frameIndex);
-    this.overlays.draw(this.ctx, time);
+    await this.overlays.draw(this.ctx, time, this.options.sampleSticker);
     for (const [id, active] of this.active) {
       if (active.frameIndex === frameIndex) continue;
       active.cursor.close();
@@ -150,8 +151,9 @@ export class ExportRenderer {
     }
     const resetHistory = active.frameIndex !== frameIndex - 1;
     active.frameIndex = frameIndex;
-    const decoded = await active.cursor.at(previewSeekTimeSec([clip], 0, time));
-    if (!decoded) return;
+    const sourceTime = previewSeekTimeSec([clip], 0, time);
+    const decoded = await active.cursor.at(sourceTime);
+    if (!decoded) throw new Error(`素材「${clip.title}」在源时间 ${sourceTime.toFixed(3)} 秒无法取得视频帧`);
     const source = media.size(clip);
     const frame = clipFrame(clip, base, source);
     const target = upscaler ? layerUpscaleSize(frame, source, base, size) : null;

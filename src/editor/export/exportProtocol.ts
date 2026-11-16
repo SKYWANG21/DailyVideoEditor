@@ -51,11 +51,30 @@ export interface ExportSubtitle extends ExportInterval, SubtitleStyleConfig {
   text: string;
 }
 
-/** 在页面端栅格化的静态花字，Worker 按输出像素绘制。 */
-export interface ExportSticker extends ComposeTextOverlayClip {
-  image: Blob;
-  aspect: number;
+/** 花字保留 SVG 逐帧采样，静态贴图只解码一次。 */
+export type ExportSticker = ComposeTextOverlayClip & { aspect: number } & (
+    { kind: "animated"; svg: string } | { kind: "static"; image: Blob }
+  );
+
+/** Worker 请求页面端采样一张花字位图，时间为片段局部秒数。 */
+export interface ExportStickerFrameRequest extends VideoLayerSize {
+  type: "sticker-frame-request";
+  jobId: number;
+  requestId: number;
+  clipId: string;
+  time: number;
 }
+
+/** 位图所有权随消息转移给 Worker，由绘制方释放。 */
+export interface ExportStickerFrameResponse {
+  type: "sticker-frame";
+  jobId: number;
+  requestId: number;
+  bitmap: ImageBitmap;
+}
+
+/** 逐帧按需采样，调用方负责释放结果。 */
+export type SampleExportSticker = (clipId: string, time: number, width: number, height: number) => Promise<ImageBitmap>;
 
 /** 与编辑器状态隔离的导出工程。 */
 export interface ComposeExportSnapshot {
@@ -78,12 +97,14 @@ export interface ExportResolutionChoice extends VideoLayerSize {
 
 /** 同一任务先准备，收到所选档位后再编码。 */
 export type ExportWorkerCommand =
+  | ExportStickerFrameResponse
   | { type: "prepare"; jobId: number; snapshot: ComposeExportSnapshot; upscalerId: string; sourceOnly: boolean }
   | { type: "render"; jobId: number; resolution: ComposeVideoExportResolution }
   | { type: "cancel"; jobId: number };
 
 /** 事件携带任务 ID，避免迟到的结果覆盖新任务。 */
 export type ExportWorkerEvent =
+  | ExportStickerFrameRequest
   | { type: "ready"; jobId: number; choices: ExportResolutionChoice[]; notice?: string; modelFallback?: boolean }
   | { type: "progress"; jobId: number; progress: ComposeVideoExportProgress }
   | { type: "complete"; jobId: number; result: Omit<ComposeVideoExportResult, "fileName"> }

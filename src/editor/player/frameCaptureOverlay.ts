@@ -320,6 +320,42 @@ export async function rasterizeFrameOverlay(
   ]);
   signal.throwIfAborted();
 
+  return rasterizeSvg(svg, width, height, signal);
+}
+
+/** 冻结独立 SVG 当前动画状态，导出任务共享外部图片和字体缓存。 */
+export async function rasterizeSvgFrame(
+  source: SVGSVGElement,
+  width: number,
+  height: number,
+  signal: AbortSignal,
+  loads: Map<string, Promise<string>>,
+): Promise<ImageBitmap> {
+  signal.throwIfAborted();
+  const resources: OverlayResources = { fonts: new Set(), images: [] };
+  const svg = cloneLayer(source, resources) as SVGSVGElement;
+  svg.setAttribute("width", String(width));
+  svg.setAttribute("height", String(height));
+  svg.style.width = `${width}px`;
+  svg.style.height = `${height}px`;
+  /** 同一导出任务的资源只读取一次。 */
+  function load(url: string): Promise<string> {
+    const cached = loads.get(url) ?? inlineResource(url, signal);
+    loads.set(url, cached);
+    return cached;
+  }
+  await Promise.all([
+    embedFonts(svg, resources.fonts, load),
+    ...resources.images.map(async ({ node, attribute, url }): Promise<void> => {
+      node.setAttribute(attribute, await load(url));
+    }),
+  ]);
+  signal.throwIfAborted();
+  return rasterizeSvg(svg, width, height, signal);
+}
+
+/** 已冻结且资源自包含的 SVG 转为可传输位图。 */
+async function rasterizeSvg(svg: SVGSVGElement, width: number, height: number, signal: AbortSignal): Promise<ImageBitmap> {
   const image = new Image();
   const abort = (): void => image.removeAttribute("src");
   signal.addEventListener("abort", abort, { once: true });

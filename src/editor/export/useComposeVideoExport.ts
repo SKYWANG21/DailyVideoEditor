@@ -8,8 +8,15 @@ import type {
   ComposeVideoExportResult,
 } from "@/types/videoExport";
 import ExportWorker from "@/workers/composeExport.worker.ts?worker";
-import type { ComposeExportSnapshot, ExportResolutionChoice, ExportWorkerCommand, ExportWorkerEvent } from "./exportProtocol";
+import type {
+  ComposeExportSnapshot,
+  ExportResolutionChoice,
+  ExportStickerFrameRequest,
+  ExportWorkerCommand,
+  ExportWorkerEvent,
+} from "./exportProtocol";
 import { buildExportSnapshot } from "./exportSnapshot";
+import { ExportStickerSampler } from "./exportStickerSampler";
 
 /** 组件端只读的遮罩状态。 */
 export interface ExportCoverState {
@@ -38,6 +45,7 @@ interface ActiveExport {
   options: ComposeVideoExportOptions;
   controller: AbortController;
   worker?: Worker;
+  stickers?: ExportStickerSampler;
   timeout?: ReturnType<typeof setTimeout>;
   onExternalAbort: () => void;
   resolve: (result: ComposeVideoExportResult) => void;
@@ -82,6 +90,8 @@ export function useComposeVideoExport(session: ExportSessionOptions) {
   function finish(task: ActiveExport, value: ComposeVideoExportResult | Error, restoreFocus = true): void {
     if (active !== task) return;
     active = null;
+    task.controller.abort();
+    task.stickers?.dispose();
     if (task.timeout !== undefined) clearTimeout(task.timeout);
     task.worker?.terminate();
     task.options.signal?.removeEventListener("abort", task.onExternalAbort);
@@ -157,6 +167,9 @@ export function useComposeVideoExport(session: ExportSessionOptions) {
       return;
     }
     switch (event.type) {
+      case "sticker-frame-request":
+        void sampleSticker(task, event);
+        break;
       case "ready": {
         const requested = task.options.resolution;
         const sourceOnly = event.choices.length === 1 && event.choices[0].resolution === "source";
@@ -177,6 +190,26 @@ export function useComposeVideoExport(session: ExportSessionOptions) {
     }
   }
 
+  /** 位图转移后归 Worker 所有，取消和发送失败时由页面释放。 */
+  async function sampleSticker(task: ActiveExport, request: ExportStickerFrameRequest): Promise<void> {
+    let bitmap: ImageBitmap | undefined;
+    try {
+      if (!task.stickers) throw new Error("花字采样器尚未准备");
+      bitmap = await task.stickers.sample(request);
+      if (active !== task || task.controller.signal.aborted) return;
+      if (!task.worker) throw new Error("导出 Worker 已关闭");
+      task.worker.postMessage(
+        { type: "sticker-frame", jobId: task.id, requestId: request.requestId, bitmap } satisfies ExportWorkerCommand,
+        [bitmap],
+      );
+      bitmap = undefined;
+    } catch (error: unknown) {
+      finish(task, error instanceof Error ? error : new Error("花字动画采样失败"));
+    } finally {
+      bitmap?.close();
+    }
+  }
+
   /** 准备完成前不创建 Worker。迟到的资源解析不得重新启动已取消的任务。 */
   async function prepare(task: ActiveExport): Promise<void> {
     try {
@@ -188,6 +221,7 @@ export function useComposeVideoExport(session: ExportSessionOptions) {
         signal: task.controller.signal,
       });
       if (active !== task) return;
+      task.stickers = new ExportStickerSampler(snapshot.stickers, task.controller.signal);
       const createWorker = session.createWorker();
       const worker = createWorker ? createWorker() : new ExportWorker({ name: "compose-video-export" });
       task.worker = worker;

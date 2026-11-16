@@ -1,13 +1,15 @@
 import { computeScreenFontSize, DEFAULT_SUBTITLE_SCREEN_FONT_PX } from "@/types/composeMedia";
 import { createDefaultTextClipRect } from "@/types/videoCompose";
 import type { VideoLayerSize } from "@/types/videoExport";
-import type { ExportSticker, ExportSubtitle } from "./exportProtocol";
+import type { ExportSticker, ExportSubtitle, SampleExportSticker } from "./exportProtocol";
 
-/** 花字已经按选定的输出像素生成位图，复用到所在区间结束。 */
+/** 静态位图复用，动态花字按目标尺寸逐帧请求。 */
 interface PreparedSticker {
   clip: ExportSticker;
   rect: NonNullable<ExportSticker["rect"]>;
-  bitmap: ImageBitmap;
+  bitmap: ImageBitmap | null;
+  width: number;
+  height: number;
 }
 
 /** 绘制于视频层和转场之后的字幕与花字。 */
@@ -21,30 +23,36 @@ export class ExportOverlays {
     private readonly output: VideoLayerSize,
   ) {}
 
-  /** 花字由页面应用模板样式和栅格化，Worker 按输出像素缩放。 */
+  /** 准备排版与静态位图，动态花字由页面按需采样。 */
   async prepare(stickers: ExportSticker[], signal: AbortSignal): Promise<void> {
     for (const clip of stickers) {
       signal.throwIfAborted();
       const rect = clip.rect ?? createDefaultTextClipRect(this.base.width, this.base.height, clip.aspect);
       const resizeWidth = Math.max(1, Math.round((rect.w * this.output.width) / this.base.width));
       const resizeHeight = Math.max(1, Math.round((rect.h * this.output.height) / this.base.height));
-      const bitmap = await createImageBitmap(clip.image, { resizeWidth, resizeHeight, resizeQuality: "high" });
-      this.stickers.push({ clip, rect, bitmap });
+      const bitmap =
+        clip.kind === "static" ? await createImageBitmap(clip.image, { resizeWidth, resizeHeight, resizeQuality: "high" }) : null;
+      this.stickers.push({ clip, rect, bitmap, width: resizeWidth, height: resizeHeight });
     }
   }
 
   /** 以项目像素排版，通过上下文缩放匹配最终输出。 */
-  draw(ctx: OffscreenCanvasRenderingContext2D, time: number): void {
+  async draw(ctx: OffscreenCanvasRenderingContext2D, time: number, sample: SampleExportSticker): Promise<void> {
     ctx.save();
     ctx.scale(this.output.width / this.base.width, this.output.height / this.base.height);
     try {
-      for (const { clip, bitmap, rect } of this.stickers) {
+      for (const { clip, bitmap, rect, width, height } of this.stickers) {
         if (time < clip.startTime || time >= clip.endTime) continue;
+        const image = bitmap ?? (await sample(clip.id, time - clip.startTime, width, height));
         ctx.save();
-        ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
-        ctx.rotate(rect.angle ?? 0);
-        ctx.drawImage(bitmap, -rect.w / 2, -rect.h / 2, rect.w, rect.h);
-        ctx.restore();
+        try {
+          ctx.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
+          ctx.rotate(rect.angle ?? 0);
+          ctx.drawImage(image, -rect.w / 2, -rect.h / 2, rect.w, rect.h);
+        } finally {
+          ctx.restore();
+          if (!bitmap) image.close();
+        }
       }
       for (const sub of this.subtitles) {
         if (time >= sub.startTime && time < sub.endTime) this.drawSubtitle(ctx, sub);
@@ -85,7 +93,7 @@ export class ExportOverlays {
 
   /** 释放花字位图。 */
   dispose(): void {
-    for (const item of this.stickers) item.bitmap.close();
+    for (const item of this.stickers) item.bitmap?.close();
     this.stickers.length = 0;
   }
 }

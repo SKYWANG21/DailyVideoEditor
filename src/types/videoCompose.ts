@@ -142,7 +142,13 @@ export type ComposeSubtitleClip = SubtitleClip & SubtitleAssExtras;
 export type ComposeClip = MediaClip | ComposeSubtitleClip | TextClip;
 
 /** 贴图轨类型（vue-clip-track TrackType，展示名「贴图」） */
-export const TEXT_TEMPLATE_TRACK_TYPE = "text";
+export const TEXT_TEMPLATE_TRACK_TYPE = "sticker";
+
+/** 按轨道类型匹配花字的逐帧采样方式，未知类型不作为花字处理。 */
+export function getStickerSamplingKind(trackType: string): "animated" | undefined {
+  // TODO(2026-12-13) !!! 花字轨类型已改为 sticker，暂兼容 text 旧值；一个月后移除 text 兼容。
+  if (trackType === TEXT_TEMPLATE_TRACK_TYPE || trackType === "text") return "animated";
+}
 
 /** 贴图轨默认展示名 */
 export const TEXT_TEMPLATE_TRACK_NAME = "贴图";
@@ -318,7 +324,7 @@ export interface ComposeTrack {
 export function mapTracksToTextOverlayClips(tracks: ComposeTrack[]): ComposeTextOverlayClip[] {
   const items: ComposeTextOverlayClip[] = [];
   const stickerTracks = [...tracks]
-    .filter((t) => t.type === TEXT_TEMPLATE_TRACK_TYPE && t.visible !== false)
+    .filter((t) => getStickerSamplingKind(t.type) === "animated" && t.visible !== false)
     .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
   for (const track of stickerTracks) {
     for (const clip of track.clips) {

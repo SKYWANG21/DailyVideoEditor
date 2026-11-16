@@ -4,7 +4,7 @@ import type { VideoLayerSize, VideoLayerUpscaler, VideoLayerUpscalerFactory } fr
 import { EXPORT_AUDIO, ExportAudioMixer } from "./exportAudio";
 import { clipFrame, layerUpscaleSize, outputSizes, projectSize } from "./exportGeometry";
 import { ExportMedia } from "./exportMedia";
-import type { ExportResolutionChoice, ExportWorkerCommand, ExportWorkerEvent } from "./exportProtocol";
+import type { ExportResolutionChoice, ExportStickerFrameResponse, ExportWorkerCommand, ExportWorkerEvent } from "./exportProtocol";
 import { EXPORT_FPS, ExportRenderer, ExportUpscaleError } from "./exportRenderer";
 import { capMp4MovieDuration } from "./mp4Duration";
 import { OpenReelUpscaler } from "./openReelUpscaler";
@@ -45,7 +45,10 @@ export function installComposeExportWorker(options: ComposeExportWorkerOptions =
       void job.prepare();
     } else if (job?.id === data.jobId) {
       if (data.type === "cancel") job.cancel();
+      else if (data.type === "sticker-frame") job.receiveSticker(data);
       else void job.render(data.resolution);
+    } else if (data.type === "sticker-frame") {
+      data.bitmap.close();
     }
   };
 }
@@ -58,6 +61,8 @@ class ExportJob {
   private upscaler: VideoLayerUpscaler | null = null;
   private choices: ExportResolutionChoice[] = [];
   private phase: "preparing" | "ready" | "rendering" | "ended" = "preparing";
+  private nextStickerRequest = 0;
+  private pendingSticker: { id: number; resolve: (bitmap: ImageBitmap) => void; reject: (reason: unknown) => void } | null = null;
 
   constructor(
     private readonly request: Extract<ExportWorkerCommand, { type: "prepare" }>,
@@ -167,6 +172,7 @@ class ExportJob {
         upscaler: resolution === "source" ? null : this.upscaler,
         transitionEffects: this.options.transitionEffects ?? [],
         signal,
+        sampleSticker: (clipId, time, width, height) => this.sampleSticker(clipId, time, width, height),
       });
       await renderer.prepare();
       signal.throwIfAborted();
@@ -208,8 +214,31 @@ class ExportJob {
   /** 关闭输入以中断待处理的媒体读取，等待中的任务直接结束。 */
   cancel(): void {
     this.controller.abort();
+    this.pendingSticker?.reject(this.controller.signal.reason);
+    this.pendingSticker = null;
     this.media.dispose();
     if (this.phase === "ready") void this.fail(this.controller.signal.reason);
+  }
+
+  /** 串行采样为消息建立背压，只允许一张待接收位图。 */
+  private sampleSticker(clipId: string, time: number, width: number, height: number): Promise<ImageBitmap> {
+    this.controller.signal.throwIfAborted();
+    const requestId = ++this.nextStickerRequest;
+    return new Promise((resolve, reject) => {
+      this.pendingSticker = { id: requestId, resolve, reject };
+      this.post({ type: "sticker-frame-request", jobId: this.id, requestId, clipId, time, width, height });
+    });
+  }
+
+  /** 迟到或已取消的响应立即释放，不能交给另一个任务。 */
+  receiveSticker(response: ExportStickerFrameResponse): void {
+    const pending = this.pendingSticker;
+    if (!pending || pending.id !== response.requestId || this.controller.signal.aborted) {
+      response.bitmap.close();
+      return;
+    }
+    this.pendingSticker = null;
+    pending.resolve(response.bitmap);
   }
 
   /** 转场和绘制同样按输出帧递增，同步提交同窗口的音频。 */

@@ -1,5 +1,5 @@
 import type { ComposeTrack } from "@/types/videoCompose";
-import { readClipConfig } from "@/types/videoCompose";
+import { getStickerSamplingKind, readClipConfig } from "@/types/videoCompose";
 import type { ComposeInspectorKind } from "../sidebar/VideoComposeSidebar.vue";
 
 /** 能在右栏编辑的片段类型 */
@@ -15,7 +15,7 @@ export function inspectorKindFromClipType(clipType: string): ComposeInspectorKin
 /** 轨道类型对应的右栏。贴图轨在库里叫 sticker */
 export function inspectorKindFromTrackType(trackType: string): ComposeInspectorKind | null {
   if (trackType === "video" || trackType === "audio" || trackType === "subtitle") return trackType;
-  if (trackType === "sticker" || trackType === "text") return "text";
+  if (getStickerSamplingKind(trackType)) return "text";
   return null;
 }
 
@@ -54,7 +54,7 @@ export function findTrackIdByClipId(tracks: ComposeTrack[], clipId: string | und
 export function firstClipOfType(tracks: ComposeTrack[], type: SelectableClipKind): ComposeTrack["clips"][number] | undefined {
   for (const track of tracks) {
     if (type === "video" && !(track.isMain || track.type === "video")) continue;
-    if (type === "text" && track.type !== "sticker" && track.type !== "text") continue;
+    if (type === "text" && !getStickerSamplingKind(track.type)) continue;
     if (type !== "video" && type !== "text" && track.type !== type) continue;
     const clip = track.clips.find((item) => item.type === type);
     if (clip) return clip;

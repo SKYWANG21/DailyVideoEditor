@@ -73,7 +73,7 @@ async function resolveAsset(url: string, options: SnapshotOptions): Promise<stri
   return response.blob();
 }
 
-/** 在第一个异步步骤前复制工程数据，随后依次准备素材和静态花字。 */
+/** 在第一个异步步骤前复制工程数据，随后依次准备素材和花字 SVG。 */
 export async function buildExportSnapshot(tracks: ComposeTrack[], options: SnapshotOptions): Promise<ComposeExportSnapshot> {
   const main = tracks.find((track) => track.isMain && track.type === "video") ?? tracks.find((track) => track.type === "video");
   if (!main) throw new Error("请先在主轨添加视频");
@@ -133,7 +133,7 @@ export async function buildExportSnapshot(tracks: ComposeTrack[], options: Snaps
     }
     const styled = applyTextTemplateSvg(raw, { text: clip.text, color: clip.color, fontSize: clip.fontSize, idPrefix: clip.id });
     const aspect = parseSvgAspect(raw);
-    overlays.push({ ...clip, aspect, image: await rasterizeSticker(styled, aspect, options.signal) });
+    overlays.push({ ...clip, aspect, kind: "animated", svg: styled });
   }
   return {
     mainClips: mainTrack.clips,
@@ -147,36 +147,6 @@ export async function buildExportSnapshot(tracks: ComposeTrack[], options: Snaps
     algorithmBaseUrl: new URL(options.algorithmBaseUrl, document.baseURI).href,
     transitionBackend: options.transitionBackend,
   };
-}
-
-/** 在页面端栅格化静态 SVG，Worker 只接收浏览器通用的 PNG。 */
-async function rasterizeSticker(raw: string, aspect: number, signal: AbortSignal): Promise<Blob> {
-  const svgDocument = new DOMParser().parseFromString(raw, "image/svg+xml");
-  const svg = svgDocument.documentElement;
-  if (svg.localName !== "svg") throw new Error("花字模板的 SVG 无法解析");
-  const style = svgDocument.createElementNS("http://www.w3.org/2000/svg", "style");
-  style.textContent = "* { animation: none !important; transition: none !important; }";
-  svg.append(style);
-  const width = Math.max(1, Math.round(Math.min(2048, 2048 * aspect)));
-  const height = Math.max(1, Math.round(Math.min(2048, 2048 / aspect)));
-  if (svg.hasAttribute("viewBox")) {
-    svg.setAttribute("width", String(width));
-    svg.setAttribute("height", String(height));
-  }
-  const url = URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(svgDocument)], { type: "image/svg+xml" }));
-  try {
-    const image = new Image();
-    image.src = url;
-    await image.decode();
-    signal.throwIfAborted();
-    const canvas = new OffscreenCanvas(width, height);
-    const ctx = canvas.getContext("2d");
-    if (!ctx) throw new Error("花字导出画布不可用");
-    ctx.drawImage(image, 0, 0, width, height);
-    return await canvas.convertToBlob({ type: "image/png" });
-  } finally {
-    URL.revokeObjectURL(url);
-  }
 }
 
 /** 参与混音的独立音轨和未分离的内嵌原声，共用主轨的裁剪边界。 */
