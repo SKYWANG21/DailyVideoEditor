@@ -134,6 +134,26 @@ describe("连续生产与画面提交时钟", () => {
     await tick(0);
   }
 
+  it("修改片段调色会重建代次并重新处理当前位置", async () => {
+    await preview.seek(1);
+    const generation = preview.renderGeneration.value;
+    videoClips.value[0].adjustments = {
+      temperature: 30,
+      tint: 0,
+      saturation: 0,
+      brightness: 0,
+      contrast: 0,
+      highlights: 0,
+      shadows: 0,
+      sharpen: 0,
+      grain: 0,
+    };
+    await flush();
+    expect(preview.renderGeneration.value).toBeGreaterThan(generation);
+    expect(preview.globalTime.value).toBe(1);
+    expect(renderer.reset).toHaveBeenCalledTimes(2);
+  });
+
   it("处理可提前六帧，但游标只在可见画面提交后推进，原声不使用 video 播放", async () => {
     await start();
     expect(preview.previewStats.maxQueued).toBe(6);

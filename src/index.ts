@@ -1,5 +1,7 @@
 import "./style";
 
+export type { VideoAdjustments } from "./types/videoAdjustments";
+
 export type { ComposeFrameCapture } from "./types/frameCapture";
 export type {
   ComposeVideoExportOptions,

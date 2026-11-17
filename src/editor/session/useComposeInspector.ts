@@ -10,6 +10,7 @@ import { getTextTemplateAspect, type TextTemplateItem } from "../shared/textTemp
 import type { ComposeApplyGlobalScope, SubtitleTextEditPayload } from "../sidebar/VideoComposeSidebar.vue";
 import type { ComposeEditorProps, ComposeEditorState } from "./createComposeEditorState";
 import type { ComposeEditorPorts } from "./ports";
+import { readVideoAdjustments, type VideoAdjustments } from "@/types/videoAdjustments";
 import { findClipById, firstClipOfType, inspectorKindFromClipType, inspectorKindFromTrackType } from "./trackLookup";
 import type { SubtitleAdjustCommit } from "@/hooks/useVideoComposeSubtitleAdjust";
 
@@ -70,6 +71,19 @@ export function useComposeInspector(props: ComposeEditorProps, state: ComposeEdi
   function onBeautyChange(next: BeautyParams): void {
     state.beauty.value = next;
     patchClips("video", { config: { beauty: { ...next } } }, state.activeVideoId.value);
+  }
+
+  /** 调色只读取选中视频片段，派生值随撤销和工程加载同步。 */
+  const adjustmentClipId = computed(() => state.activeVideoId.value || "");
+  const videoAdjustments = computed<VideoAdjustments>(() => {
+    const clip = findClipById(state.tracks.value, adjustmentClipId.value);
+    return readVideoAdjustments(readClipConfig(clip?.config).adjustments);
+  });
+
+  /** 提交完整调色参数到选中片段。 */
+  function onVideoAdjustmentsChange(value: VideoAdjustments): void {
+    if (props.readonly || !adjustmentClipId.value) return;
+    patchClips("video", { config: { adjustments: readVideoAdjustments(value) } }, adjustmentClipId.value);
   }
 
   /** 侧栏音轨分贝写回当前音频 clip 的线性增益 */
@@ -165,7 +179,10 @@ export function useComposeInspector(props: ComposeEditorProps, state: ComposeEdi
     if (scope === "video") {
       patchClips("video", {
         volume: dbToGain(state.videoVolume.value),
-        config: { beauty: { ...state.beauty.value } },
+        config: {
+          beauty: { ...state.beauty.value },
+          ...(adjustmentClipId.value ? { adjustments: { ...videoAdjustments.value } } : {}),
+        },
       });
       writePlaybackRate("video", state.videoPlaybackRate.value);
       return;
@@ -317,6 +334,9 @@ export function useComposeInspector(props: ComposeEditorProps, state: ComposeEdi
   ports.onAddTextTemplate = onAddTextTemplate;
 
   return {
+    adjustmentClipId,
+    videoAdjustments,
+    onVideoAdjustmentsChange,
     onVideoVolumeChange,
     onBeautyChange,
     onBgmVolumeChange,

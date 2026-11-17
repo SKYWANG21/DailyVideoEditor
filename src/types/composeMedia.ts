@@ -1,5 +1,7 @@
 /** 预览与字幕样式。从主工程 step4 类型中摘出，不含向导字段。 */
 
+import type { VideoAdjustments } from "./videoAdjustments";
+
 /** 视频片段（时间轴上的一个轨道块） */
 export interface VideoClipItem {
   /** 片段唯一 id */
@@ -30,6 +32,8 @@ export interface VideoClipItem {
   audioDetached?: boolean;
   /** 预览美颜。缺省为关闭 */
   beauty?: BeautyParams;
+  /** 片段调色。旧工程缺省为中性值。 */
+  adjustments?: VideoAdjustments;
 }
 
 /** 预览美颜参数。关闭时四项强度仍保留，方便再次打开 */

@@ -4,6 +4,7 @@ import type { BeautyParams, ComposeConfig, PreviewAudioClip, SubtitleItem, Subti
 import { createDefaultComposeConfig, createDefaultSubtitleStyle, readBeautyParams } from "@/types/composeMedia";
 import { clampGain } from "@/editor/volumeDb";
 import type { ComposeTransition } from "./transition";
+import { readVideoAdjustments, type VideoAdjustments } from "./videoAdjustments";
 
 /** 媒体业务类型（本地声明，不请求签名接口） */
 export type MediaBizType =
@@ -113,6 +114,8 @@ export type ComposeMediaClipConfig = DetachAudioConfig & {
   taskId?: string;
   /** 预览美颜。只对视频 clip 有意义 */
   beauty?: BeautyParams;
+  /** 片段调色，缺省时使用中性值。 */
+  adjustments?: VideoAdjustments;
   /** 视频画面变换。没有则按当前画布等比适配，不写入 */
   frame?: VideoFrameTransform;
   /** 该片段视频原始宽度，供原画适配 */
@@ -620,6 +623,7 @@ export function mapMediaClipToVideoClipItem(c: MediaClip, index: number): VideoC
     endTime: c.endTime,
     audioDetached: config.audioDetached === true,
     beauty: readBeautyParams(config.beauty),
+    adjustments: readVideoAdjustments(config.adjustments),
   };
 }
 

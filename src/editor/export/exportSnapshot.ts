@@ -11,6 +11,7 @@ import {
   pickSubtitleStyleFromClip,
   type ComposeTrack,
 } from "@/types/videoCompose";
+import { readVideoAdjustments } from "@/types/videoAdjustments";
 import type { ComposeExportSnapshot, ExportAudioClip, ExportInterval, ExportVideoClip, ExportVideoTrack } from "./exportProtocol";
 
 /** 快照资源在页面端解析，渲染 Worker 只收到可读取的地址和数据。 */
@@ -45,6 +46,7 @@ function videoTrack(track: ComposeTrack, end: number): ExportVideoTrack {
           visible: track.visible !== false && clip.visible !== false,
           frame: readVideoFrameTransform(clip.config),
           beauty: readBeautyParams(item.beauty),
+          adjustments: readVideoAdjustments(item.adjustments),
           volume: track.muted ? 0 : item.volume,
         },
       ];

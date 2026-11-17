@@ -582,6 +582,7 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
           clip.trimEnd,
           clip.playbackRate,
           clip.beauty,
+          clip.adjustments,
         ]),
         options.transitionTrack.value?.transitions,
         options.transitionTrack.value?.clips.map((clip) => [clip.id, readVideoFrameTransform(clip.config)]),

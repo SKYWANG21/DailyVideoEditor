@@ -27,6 +27,13 @@
             <PlaybackRateControl :rate="videoPlaybackRate" @update:rate="emit('update:videoPlaybackRate', $event)" />
           </div>
           <VideoComposeBeautyControls :beauty="beauty" @update:beauty="emit('update:beauty', $event)" />
+          <VideoComposeColorAdjustments
+            :key="adjustmentClipId"
+            :adjustments="videoAdjustments"
+            :clip-id="adjustmentClipId"
+            :disabled="!adjustmentClipId"
+            @change="emit('update:adjustments', $event)"
+          />
           <slot name="before-apply-video" />
           <button type="button" :class="applyClass" @click="onApplyGlobal('video')">应用到全局</button>
         </template>
@@ -141,6 +148,8 @@ import { computed, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
 import { ChevronDown, SlidersHorizontal } from "@lucide/vue";
 import type { BeautyParams, ComposeFrameAspect, SubtitleStyleConfig, VideoFrameTransform } from "@/types/videoCompose";
+import VideoComposeColorAdjustments from "./VideoComposeColorAdjustments.vue";
+import type { VideoAdjustments } from "@/types/videoAdjustments";
 import VideoComposeBeautyControls from "./VideoComposeBeautyControls.vue";
 import VideoComposeTextTemplateProps from "./VideoComposeTextTemplateProps.vue";
 import VideoComposeTransformPanel from "./VideoComposeTransformPanel.vue";
@@ -177,6 +186,10 @@ const props = defineProps<{
   videoVolume: number | null;
   /** 当前视频片段的美颜参数 */
   beauty: BeautyParams;
+  /** 选中片段调色参数。 */
+  videoAdjustments: VideoAdjustments;
+  /** 可写入调色的选中片段。 */
+  adjustmentClipId: string;
   /** 视频音量文案 */
   videoVolumeLabel?: string;
   /** 音轨音量文案 */
@@ -217,6 +230,8 @@ const emit = defineEmits<{
   "update:videoVolume": [value: number | null];
   /** 美颜开关或滑杆变化 */
   "update:beauty": [value: BeautyParams];
+  /** 九项调色操作提交。 */
+  "update:adjustments": [value: VideoAdjustments];
   "update:bgmVolume": [value: number | null];
   "update:videoPlaybackRate": [value: number];
   "update:audioPlaybackRate": [value: number];

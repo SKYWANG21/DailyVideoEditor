@@ -91,6 +91,8 @@
           class="h-full min-h-0 w-full min-w-0"
           :video-volume="videoVolume"
           :beauty="beauty"
+          :video-adjustments="videoAdjustments"
+          :adjustment-clip-id="adjustmentClipId"
           :video-volume-label="videoVolumeLabel"
           :audio-volume-label="audioVolumeLabel"
           :bgm-volume="bgmVolume"
@@ -110,6 +112,7 @@
           :has-selected-subtitle="Boolean(activeSubtitleId)"
           @update:video-volume="onVideoVolumeChange"
           @update:beauty="onBeautyChange"
+          @update:adjustments="onVideoAdjustmentsChange"
           @update:bgm-volume="onBgmVolumeChange"
           @update:video-playback-rate="onVideoPlaybackRateChange"
           @update:audio-playback-rate="onAudioPlaybackRateChange"
@@ -355,6 +358,8 @@ const {
   subtitleStyle,
   videoVolume,
   beauty,
+  videoAdjustments,
+  adjustmentClipId,
   bgmVolume,
   videoPlaybackRate,
   audioPlaybackRate,
@@ -377,6 +382,7 @@ const {
   onTimelineCommand,
   onVideoVolumeChange,
   onBeautyChange,
+  onVideoAdjustmentsChange,
   onBgmVolumeChange,
   onVideoPlaybackRateChange,
   onAudioPlaybackRateChange,

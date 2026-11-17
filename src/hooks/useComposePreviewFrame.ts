@@ -7,6 +7,8 @@ import type { DecodedPreviewFrame, PreparedPreviewFrame, PreviewFrameRenderer, P
 import { COMPOSE_ALGORITHM_BASE, useComposeTransitionRegistry } from "@/editor/composeRuntime";
 import { readVideoFrameTransform } from "@/editor/shared/videoFrame";
 import { TransitionEngine } from "@/transitions/engine";
+import { hasVideoAdjustments, readVideoAdjustments } from "@/types/videoAdjustments";
+import { VideoAdjustmentWorkerClient } from "./videoAdjustmentWorkerClient";
 import { ComposeFrameProcessor } from "./composeFrameProcessor";
 import { drawPreviewCanvasFrame, previewCanvasSize } from "./previewCanvasFrame";
 
@@ -38,6 +40,7 @@ export function useComposePreviewFrame(options: UseComposePreviewFrameOptions) {
   );
   const registry = useComposeTransitionRegistry();
   const engine = new TransitionEngine(registry);
+  const adjustmentsWorker = new VideoAdjustmentWorkerClient();
   const videoSize = ref<PreviewVideoSize | null>(null);
   const frameReady = ref(false);
   const previewError = ref("");
@@ -87,7 +90,8 @@ export function useComposePreviewFrame(options: UseComposePreviewFrameOptions) {
     const trackClip = options.transitionTrack.value?.clips.find((item) => item.id === clip.id);
     const frame = trackClip ? readVideoFrameTransform(trackClip.config) : options.frame.value;
     const beauty = readBeautyParams(clip.beauty);
-    const key = JSON.stringify([request.identity.generation, source.sourceTimeUs, size, project, frame, beauty]);
+    const adjustments = readVideoAdjustments(clip.adjustments);
+    const key = JSON.stringify([request.identity.generation, source.sourceTimeUs, size, project, frame, beauty, adjustments]);
     const cached = layers.get(clip.id);
     if (cached?.key === key) return cached.canvas;
     const prepared =
@@ -108,11 +112,30 @@ export function useComposePreviewFrame(options: UseComposePreviewFrameOptions) {
         : new OffscreenCanvas(size.width, size.height);
     const ctx = canvas.getContext("2d");
     if (!ctx) throw new Error("预览画布不可用");
+    // 覆盖复用画布前先移除旧键，避免调色取消或失败后旧键命中新画面。
+    if (cached?.canvas === canvas) layers.delete(clip.id);
     ctx.clearRect(0, 0, size.width, size.height);
     ctx.save();
     ctx.scale(size.width / project.width, size.height / project.height);
     drawPreviewCanvasFrame(ctx, prepared, source.sourceSize.width, source.sourceSize.height, project.width, project.height, frame);
     ctx.restore();
+    if (hasVideoAdjustments(adjustments)) {
+      const adjusted = await adjustmentsWorker.render(
+        canvas,
+        adjustments,
+        { clipId: clip.id, sourceTimeUs: source.sourceTimeUs },
+        request.identity.generation,
+        signal,
+      );
+      try {
+        signal.throwIfAborted();
+        ctx.clearRect(0, 0, size.width, size.height);
+        ctx.drawImage(adjusted, 0, 0);
+      } finally {
+        adjusted.close();
+      }
+    }
+    signal.throwIfAborted();
     layers.delete(clip.id);
     layers.set(clip.id, { key, canvas });
     while (layers.size > 2) layers.delete(layers.keys().next().value!);
@@ -191,6 +214,7 @@ export function useComposePreviewFrame(options: UseComposePreviewFrameOptions) {
 
   function reset(): void {
     revision += 1;
+    adjustmentsWorker.reset();
     layers.clear();
     processor?.resetFailure();
     options.beautyReady.value = false;
@@ -200,6 +224,7 @@ export function useComposePreviewFrame(options: UseComposePreviewFrameOptions) {
   const renderer: PreviewFrameRenderer = { warmup, render, present, reset };
   onUnmounted(() => {
     disposed = true;
+    adjustmentsWorker.dispose();
     processor?.dispose();
     layers.clear();
     blank = null;

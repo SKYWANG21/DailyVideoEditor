@@ -1,3 +1,5 @@
+import { hasVideoAdjustments, readVideoAdjustments } from "@/types/videoAdjustments";
+import { VideoAdjustmentEngine } from "@/utils/videoAdjustmentEngine";
 import { drawPreviewCanvasFrame } from "@/hooks/previewCanvasFrame";
 import { previewSeekTimeSec } from "@/hooks/previewSourceTime";
 import { createTransitionRegistry } from "@/transitions/catalog";
@@ -48,6 +50,7 @@ export class ExportRenderer {
   private readonly overlays: ExportOverlays;
   private readonly beauty: ExportBeauty | null;
   private readonly tracks;
+  private readonly adjustmentEngine = new VideoAdjustmentEngine();
   private readonly active = new Map<string, ActiveClip>();
 
   constructor(private readonly options: RendererOptions) {
@@ -164,13 +167,20 @@ export class ExportRenderer {
       active.enhanced = await this.enhance(decoded.canvas, clip, target, sourceTimeUs, resetHistory || sourceTimeUs < active.sourceTimeUs);
       active.sourceTimeUs = sourceTimeUs;
     }
-    ctx.save();
-    ctx.scale(size.width / base.width, size.height / base.height);
+    const adjustments = readVideoAdjustments(clip.adjustments);
+    const adjusted = hasVideoAdjustments(adjustments);
+    // 普通帧用独立透明画布；转场已经持有两侧独立画布。
+    const targetCtx = adjusted && ctx === this.ctx ? this.layers[0] : ctx;
+    if (targetCtx !== ctx) targetCtx.clearRect(0, 0, size.width, size.height);
+    targetCtx.save();
+    targetCtx.scale(size.width / base.width, size.height / base.height);
     try {
-      drawPreviewCanvasFrame(ctx, active.enhanced ?? decoded.canvas, source.width, source.height, base.width, base.height, frame);
+      drawPreviewCanvasFrame(targetCtx, active.enhanced ?? decoded.canvas, source.width, source.height, base.width, base.height, frame);
     } finally {
-      ctx.restore();
+      targetCtx.restore();
     }
+    if (adjusted) this.adjustmentEngine.apply(targetCtx, adjustments, { clipId: clip.id, sourceTimeUs });
+    if (targetCtx !== ctx) ctx.drawImage(targetCtx.canvas, 0, 0);
   }
 
   /** 美颜和模型之间只保留一个所有权明确的位图。 */

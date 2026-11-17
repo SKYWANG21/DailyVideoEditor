@@ -90,6 +90,62 @@ try {
       const { createApp, h, ref } = await import('/node_modules/.vite/deps/vue.js');
       const bunny = await import('/node_modules/.vite/deps/mediabunny.js');
       const ensure = (condition, message) => { if (!condition) throw new Error(message); };
+      // 真正的专用调色 Worker 与导出共用算法，逐像素对比同尺寸结果。
+      const { VideoAdjustmentEngine } = await import('/src/utils/videoAdjustmentEngine.ts');
+      const { VideoAdjustmentWorkerClient } = await import('/src/hooks/videoAdjustmentWorkerClient.ts');
+      const { readVideoAdjustments } = await import('/src/types/videoAdjustments.ts');
+      const gradeSource = new OffscreenCanvas(32, 32), gradeCtx = gradeSource.getContext('2d');
+      gradeCtx.fillStyle = '#748ab2'; gradeCtx.fillRect(4, 4, 24, 24);
+      const gradeParams = readVideoAdjustments({ temperature: 20, tint: -12, saturation: 18, brightness: 5,
+        contrast: 10, highlights: -20, shadows: 30, sharpen: 40, grain: 50 });
+      const gradeFrame = { clipId: 'grade', sourceTimeUs: 33333 };
+      const gradeClient = new VideoAdjustmentWorkerClient();
+      try {
+        const bitmap = await gradeClient.render(gradeSource, gradeParams, gradeFrame, 1, new AbortController().signal);
+        const actualCanvas = new OffscreenCanvas(32, 32), actualCtx = actualCanvas.getContext('2d');
+        actualCtx.drawImage(bitmap, 0, 0); bitmap.close();
+        new VideoAdjustmentEngine().apply(gradeCtx, gradeParams, gradeFrame);
+        const expected = gradeCtx.getImageData(0, 0, 32, 32).data;
+        const actual = actualCtx.getImageData(0, 0, 32, 32).data;
+        ensure(expected.every((value, index) => value === actual[index]), 'Worker 调色与共享算法像素不一致');
+        const abort = new AbortController();
+        const cancelledFrame = gradeClient.render(gradeSource, gradeParams, gradeFrame, 2, abort.signal);
+        abort.abort();
+        let stopped = false;
+        try { await cancelledFrame; } catch (error) { stopped = error.name === 'AbortError'; }
+        ensure(stopped, '取消调色后仍交付画面');
+      } finally { gradeClient.dispose(); }
+      // 真实预览 Hook 调用专用 Worker；同一源 PTS 修改参数也必须废弃缓存。
+      const { useComposePreviewFrame } = await import('/src/hooks/useComposePreviewFrame.ts');
+      const previewSource = new OffscreenCanvas(32, 32), previewSourceCtx = previewSource.getContext('2d');
+      previewSourceCtx.fillStyle = 'blue'; previewSourceCtx.fillRect(0, 0, 32, 32);
+      const sourceBitmap = await createImageBitmap(previewSource);
+      const previewRoot = document.createElement('div'); document.body.append(previewRoot);
+      const previewCanvas = document.createElement('canvas');
+      const previewClips = ref([{ id: 'preview-grade', title: 'grade', url: '', durationSec: 1,
+        adjustments: readVideoAdjustments({ saturation: -100 }) }]);
+      let previewRenderer;
+      const previewApp = createApp({ setup() {
+        previewRenderer = useComposePreviewFrame({ canvas: ref(previewCanvas), gpuCanvas: ref(null), clips: previewClips,
+          transitionTrack: ref(undefined), canvasSize: ref({ width: 32, height: 32 }), frame: ref(null), beautyReady: ref(false) }).renderer;
+        return () => null;
+      } });
+      previewApp.mount(previewRoot);
+      const previewRequest = { identity: { generation: 1, requestId: 1, clipId: 'preview-grade', sourceTimeUs: 0 },
+        time: 0, duration: 1 / 30, clipIndex: 0,
+        outgoing: { bitmap: sourceBitmap, sourceTimeUs: 0, sourceSize: { width: 32, height: 32 } } };
+      try {
+        const graded = await previewRenderer.render(previewRequest, new AbortController().signal);
+        previewRenderer.present(graded); graded.bitmap.close();
+        const gray = [...previewCanvas.getContext('2d').getImageData(16, 16, 1, 1).data];
+        ensure(Math.abs(gray[0] - gray[2]) < 2, '预览未接入调色 Worker');
+        previewClips.value[0].adjustments = readVideoAdjustments();
+        const neutral = await previewRenderer.render(previewRequest, new AbortController().signal);
+        previewRenderer.present(neutral); neutral.bitmap.close();
+        const blue = [...previewCanvas.getContext('2d').getImageData(16, 16, 1, 1).data];
+        ensure(blue[2] === 255 && blue[0] === 0, '同 PTS 参数修改仍使用旧缓存');
+        ensure(sourceBitmap.width === 32, '借用的解码帧被调色关闭或转移');
+      } finally { previewApp.unmount(); previewRoot.remove(); sourceBitmap.close(); }
       const controller = new AbortController();
       const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><style>@keyframes fade{from{opacity:0.2}to{opacity:1}}rect{animation:fade 1s linear infinite alternate}</style><rect width="64" height="64" fill="red"/></svg>';
       const clip = { id: 'flower', sourceUrl: '', text: '', color: null, fontSize: 32, startTime: 0, endTime: 2, aspect: 1, kind: 'animated', svg };
@@ -202,7 +258,35 @@ try {
         }
         input.dispose(); transitionResults.push(effectId);
       }
-      tracks[0].clips.pop(); tracks[0].transitions = []; tracks.push(flowerTrack);
+      // 带调色的两侧先独立处理再转场，普通帧和转场共享同一效果。
+      tracks[0].clips[0].config = { adjustments: { saturation: -100 } };
+      const gradedResult = await session.exportVideo({ resolution: 'source' });
+      const gradedInput = new bunny.Input({ formats: bunny.ALL_FORMATS, source: new bunny.BlobSource(gradedResult.blob) });
+      const gradedSink = new bunny.CanvasSink(await gradedInput.getPrimaryVideoTrack());
+      const gradeSamples = [];
+      for (const time of [0.2, 1, 1.8]) {
+        const frame = await gradedSink.getCanvas(time);
+        gradeSamples.push([...frame.canvas.getContext('2d').getImageData(48, 48, 1, 1).data]);
+      }
+      gradedInput.dispose();
+      ensure(Math.abs(gradeSamples[0][0] - gradeSamples[0][2]) < 8, '普通帧灰度调色未写入成片');
+      ensure(gradeSamples[2][2] > 220, '后一片段被前一片段调色污染');
+      ensure(gradeSamples[1][2] > gradeSamples[0][2] + 40 && gradeSamples[1][2] < gradeSamples[2][2] - 40,
+        '转场两侧未使用各自调色参数');
+      tracks[0].clips[0].config = {};
+      tracks[0].clips.pop(); tracks[0].transitions = [];
+      tracks.push({ id: 'upper', type: 'video', order: 1, visible: true, clips: [{ ...firstClip, id: 'upper-clip',
+        config: { adjustments: { saturation: -100 }, frame: { x: 24, y: 0, w: 48, h: 96, scale: 100, rotate: 0 } } }] });
+      const layered = await session.exportVideo({ resolution: 'source' });
+      const layeredInput = new bunny.Input({ formats: bunny.ALL_FORMATS, source: new bunny.BlobSource(layered.blob) });
+      const layeredSink = new bunny.CanvasSink(await layeredInput.getPrimaryVideoTrack());
+      const layeredFrame = await layeredSink.getCanvas(0.2), layeredCtx = layeredFrame.canvas.getContext('2d');
+      const leftPixel = [...layeredCtx.getImageData(24, 48, 1, 1).data];
+      const rightPixel = [...layeredCtx.getImageData(72, 48, 1, 1).data];
+      ensure(leftPixel[2] > 220 && leftPixel[0] < 15, '上层调色覆盖了下层轨道');
+      ensure(Math.abs(rightPixel[0] - rightPixel[2]) < 8, '上层片段未应用灰度');
+      layeredInput.dispose(); tracks.pop(); tracks.push(flowerTrack);
+
       const exportPromise = session.exportVideo({ resolution: 'source', onProgress(update) { if (update.stage === 'rendering') session.cancelExport(); } });
       let cancelled = false;
       try { await exportPromise; } catch (error) { cancelled = error.name === 'AbortError'; }
@@ -229,7 +313,7 @@ try {
       await editor.value.reload(updated);
       const reloadedBytes = await verifyAnimation(await editor.value.exportVideo({ resolution: 'source' }));
       editorApp.unmount(); editorRoot.remove(); URL.revokeObjectURL(url);
-      return { first, middle, templates: templateResults, sourceFirst, videoFirst, transitionResults,
+      return { first, middle, templates: templateResults, sourceFirst, videoFirst, transitionResults, gradeSamples, leftPixel, rightPixel,
         newTrackBytes, legacyTrackBytes, componentBytes, reloadedBytes, cancelled };
     })()
   `,
