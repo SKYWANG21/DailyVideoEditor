@@ -105,7 +105,7 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
   let controller = new AbortController();
   let productionController: AbortController | null = null;
   let firstPending = false;
-  let settleSeek: (() => void) | null = null;
+  let settleSeek: ((presented: boolean) => void) | null = null;
   let produceTime = 0;
   let requestId = 0;
   let busy = false;
@@ -364,7 +364,7 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
         if (firstPending) {
           firstPending = false;
           present(frame);
-          settleSeek?.();
+          settleSeek?.(true);
           settleSeek = null;
           playbackWaiting.value = isPlaying.value;
           playbackState.value = isPlaying.value ? "preparing" : "paused";
@@ -453,16 +453,16 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
     raf = requestAnimationFrame(loop);
   }
 
-  /** 定位保留旧画面和游标，直到目标帧真正提交；旧 Promise 取消后也能结束。 */
-  async function seek(timeSec: number, releasedAt?: number): Promise<void> {
-    if (disposed) return;
+  /** 保留旧画面和游标，仅当本次定位的目标帧成功提交时返回 true。 */
+  async function seek(timeSec: number, releasedAt?: number): Promise<boolean> {
+    if (disposed) return false;
     if (settleSeek && options.benchmark) options.benchmark.coalescedSeeks++;
     options.benchmark?.breakInterval();
     scrubStart = releasedAt;
     transportVersion += 1;
     controller.abort();
     controller = new AbortController();
-    settleSeek?.();
+    settleSeek?.(false);
     renderGeneration.value += 1;
     audioMixer.pauseAll(options.bgmEl.value);
     decoder?.reset();
@@ -475,15 +475,15 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
     playbackWaiting.value = true;
     playbackState.value = "seeking";
     playbackError.value = "";
-    const ready = new Promise<void>((resolve) => {
+    const ready = new Promise<boolean>((resolve) => {
       settleSeek = resolve;
     });
     void pump();
     if (isPlaying.value) startLoop();
-    await ready;
+    return ready;
   }
 
-  /** 续播复用队列，不重新定位已就绪的两个 video。 */
+  /** 续播复用就绪的队列；需要定位时等待首帧成功提交再启动播放。 */
   async function play(): Promise<void> {
     primePreviewAudioContext();
     if (disposed || isPlaying.value || totalDurationSec.value <= 0) return;
@@ -491,8 +491,10 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
     playbackWaiting.value = true;
     playbackState.value = "preparing";
     transportVersion += 1;
-    if (!mediaReady.value || controller.signal.aborted || globalTime.value >= totalDurationSec.value - 1e-6)
-      await seek(globalTime.value >= totalDurationSec.value - 1e-6 ? 0 : globalTime.value);
+    if (!mediaReady.value || controller.signal.aborted || globalTime.value >= totalDurationSec.value - 1e-6) {
+      const target = globalTime.value >= totalDurationSec.value - 1e-6 ? 0 : globalTime.value;
+      if (!(await seek(target))) return;
+    }
     decoder?.setRunning(!producerBackpressured && !scheduler.productionEnded);
     void pump();
     startLoop();
@@ -526,7 +528,7 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
     pause();
     controller.abort();
     firstPending = false;
-    settleSeek?.();
+    settleSeek?.(false);
     settleSeek = null;
     playbackState.value = "error";
     playbackError.value = message;
@@ -549,9 +551,9 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
     void seek(globalTime.value);
   }
 
-  /** 工程配置变化后保持已展示位置重建代次。 */
-  async function resync(time = globalTime.value, releasedAt?: number): Promise<void> {
-    await seek(time, releasedAt);
+  /** 工程配置变化后按目标位置重建代次，返回定位帧是否成功提交。 */
+  async function resync(time = globalTime.value, releasedAt?: number): Promise<boolean> {
+    return seek(time, releasedAt);
   }
 
   /** 仅刷新音量、静音与音轨结构，不废弃视频队列。 */
@@ -575,7 +577,7 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
     scheduler.reset(globalTime.value, globalPlaybackRate.value);
     decoder?.dispose();
     decoder = null;
-    settleSeek?.();
+    settleSeek?.(false);
     settleSeek = null;
     audioMixer.destroy(options.bgmEl.value);
   }

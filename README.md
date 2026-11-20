@@ -303,4 +303,4 @@ const hostWasmTransition: TransitionEffectDefinition = {
 - 自行部署库产物时，运行 `npm run build`，将 `dist/algorithm/` 部署到宿主静态目录，默认地址为 `/algorithm/`。目录中的 `face_landmarker.task` 和 `mediapipe/` 用于美颜。可通过 `algorithmBaseUrl` 指定部署路径。
 - 跨域素材需允许 CORS。预览或导出报素材读取失败时，可通过 `resolveMediaUrl` 返回浏览器可读的同源代理地址或 Blob URL。例如 `<VideoComposeEditor v-model="model" :resolve-media-url="proxyToBlob" />`。
 - 宿主可用 `transition-backend="wasm"` 启用内置 WASM 转场，通过 `:transition-effects="hostTransitions"` 注册自定义效果。配置在挂载时读取，变更后需重新挂载。浏览器导出自定义转场时，还需在 `exportWorkerFactory` 创建的 Worker 中注册同 ID 的效果。
-- 完整接入类型以包中的 `dist/index.d.ts` 为准。转场算法、工程数据与渲染流程见 [功能原理](./FEATURE-PRINCIPLES.md)。
+- 完整接入类型以包中的 `dist/index.d.ts` 为准。

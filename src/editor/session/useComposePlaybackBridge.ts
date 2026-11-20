@@ -6,7 +6,7 @@ import type { ComposeEditorPorts } from "./ports";
 /** 只转发用户控制意图；展示时间由协调器直接写入共享时钟。 */
 export function useComposePlaybackBridge(state: ComposeEditorState, ports: ComposeEditorPorts) {
   const { clock } = state;
-  let pendingSeek: Promise<void> = Promise.resolve();
+  let pendingSeek: Promise<boolean> | undefined;
 
   /** 素材库与工程播放器共用控制入口，但各自保存展示时间。 */
   function isPlayerPlaying(): boolean {
@@ -40,7 +40,7 @@ export function useComposePlaybackBridge(state: ComposeEditorState, ports: Compo
     if (!hasPlayableTimelineMedia()) resetTimelinePlaybackWhenEmpty();
   }
 
-  /** 控制命令共享取消代次，定位完成后才按最新意图恢复播放。 */
+  /** 控制命令共享取消代次，定位请求结束后按最新播放意图执行。 */
   function requestPlayback(timeSec: number | undefined, resume: boolean, releasedAt?: number): void {
     const seq = ++clock.playSeq;
     clock.playInFlight = resume;
@@ -50,13 +50,15 @@ export function useComposePlaybackBridge(state: ComposeEditorState, ports: Compo
       const target = timeSec ?? (exitedPreview ? state.globalTime.value : undefined);
       if (target !== undefined) {
         const args: [number, number?] = releasedAt === undefined ? [target] : [target, releasedAt];
-        pendingSeek = (exitedPreview ? player?.resync(...args) : player?.seek(...args)) ?? Promise.resolve();
+        pendingSeek = exitedPreview ? player?.resync(...args) : player?.seek(...args);
       }
+      const seek = pendingSeek;
       void (async (): Promise<void> => {
         try {
-          await pendingSeek;
+          await seek;
           if (seq === clock.playSeq && resume) await player?.play();
         } finally {
+          if (pendingSeek === seek) pendingSeek = undefined;
           if (seq === clock.playSeq) clock.playInFlight = false;
         }
       })();

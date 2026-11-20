@@ -47,7 +47,7 @@
               :key="effect.id"
               type="button"
               class="transition-menu__effect"
-              :class="{ 'is-selected': selectedEffect === effect.id }"
+              :class="{ 'is-selected': seam.transition?.effectId === effect.id }"
               :disabled="disabled"
               :title="effect.name"
               @click="selectEffect(seam, effect.id)"
@@ -125,29 +125,28 @@ const seams = computed(() => resolveTransitionSeams(props.track.clips, props.tra
 const openKey = ref<string | null>(null);
 const dragKey = ref<string | null>(null);
 const duration = ref(1);
-const selectedEffect = ref("crossfade");
-/** 每次打开读取最新工程状态。 */
+/** 每次打开只同步时长；效果高亮直接读接缝已保存的 effectId。 */
 function open(seam: TransitionSeam): void {
   openKey.value = seam.key;
-  selectedEffect.value = registry.get(seam.transition?.effectId ?? "")?.id ?? "crossfade";
   duration.value = Math.min(seam.maxDuration, seam.transition?.durationSec ?? 1);
 }
 /** 选择效果后立即写入当前接缝，保持弹窗打开供连续调整。 */
 function selectEffect(seam: TransitionSeam, effectId: string): void {
-  selectedEffect.value = effectId;
-  apply(seam);
+  apply(seam, effectId);
 }
-/** 滑条与数字框共用时长校验，忽略清空或无效输入。 */
+/** 滑条与数字框共用时长校验。清空、无效输入，或接缝还没有转场时不写入。 */
 function onDurationChange(seam: TransitionSeam, value: number | number[] | null | undefined): void {
   if (typeof value !== "number" || !Number.isFinite(value)) return;
   duration.value = Math.max(MIN_TRANSITION_DURATION, Math.min(seam.maxDuration, value));
-  apply(seam);
+  const effectId = seam.transition?.effectId;
+  if (!effectId) return;
+  apply(seam, effectId);
 }
 /** 参数实际变化时自动应用，避免重复选择产生无效历史。 */
-function apply(seam: TransitionSeam): void {
+function apply(seam: TransitionSeam, effectId: string): void {
   if (disabled.value) return;
-  if (seam.transition?.effectId === selectedEffect.value && seam.transition.durationSec === duration.value) return;
-  emit("apply", selectedEffect.value, seam.key, duration.value);
+  if (seam.transition?.effectId === effectId && seam.transition.durationSec === duration.value) return;
+  emit("apply", effectId, seam.key, duration.value);
 }
 /** 未知效果保留标识供用户辨认。 */
 function effectName(seam: TransitionSeam): string {

@@ -1,10 +1,19 @@
 import AdjustmentWorker from "../workers/videoAdjustment.worker.ts?worker&inline";
 import type { AdjustmentFrame, VideoAdjustments } from "@/types/videoAdjustments";
-import type { AdjustmentWorkerRequest, AdjustmentWorkerResponse, GradeWorkerMessage } from "@/types/videoAdjustmentWorker";
+import type {
+  AdjustmentRequestIdentity,
+  AdjustmentWorkerRequest,
+  AdjustmentWorkerResponse,
+  GradeWorkerMessage,
+} from "@/types/videoAdjustmentWorker";
 import { type GradeBenchmark, readGradeBenchmarkMode } from "./gradeBenchmark";
 
 /** 取消调用方的等待与释放物理计算槽分开，旧帧完成后才能发送下一帧。 */
 interface GradeJob {
+  /** 已发送和排队请求的诊断身份。 */
+  readonly identity: AdjustmentRequestIdentity;
+  /** 调用方是否已经取消等待。 */
+  cancelled: boolean;
   start(worker: Worker): void;
   reply(message: AdjustmentWorkerResponse): void;
   cancel(error: Error): void;
@@ -52,15 +61,16 @@ export class VideoAdjustmentWorkerClient {
 
   /** 已发送的旧帧保留在计算槽中；排队中已取消的请求立即移除。 */
   private send(request: AdjustmentWorkerRequest, signal: AbortSignal, start: number): Promise<ImageBitmap> {
-    const { requestId, bitmap } = request;
+    const { requestId, generation, clipId, sourceTimeUs, bitmap } = request;
     const { width, height } = bitmap;
     return new Promise((resolve, reject) => {
-      let cancelled = false;
       const abort = (): void => job.cancel(new DOMException("调色帧已过期", "AbortError"));
       const job: GradeJob = {
+        identity: { requestId, generation, clipId, sourceTimeUs },
+        cancelled: false,
         start: (worker): void => worker.postMessage(request, [bitmap]),
         cancel: (error): void => {
-          cancelled = true;
+          job.cancelled = true;
           signal.removeEventListener("abort", abort);
           if (this.active !== job) this.jobs.delete(requestId);
           reject(error);
@@ -69,7 +79,7 @@ export class VideoAdjustmentWorkerClient {
           signal.removeEventListener("abort", abort);
           if (message.type === "error") return reject(new Error(message.message));
           const stale =
-            cancelled ||
+            job.cancelled ||
             signal.aborted ||
             message.generation !== request.generation ||
             message.clipId !== request.clipId ||
@@ -96,15 +106,28 @@ export class VideoAdjustmentWorkerClient {
 
   /** 只有上一条物理请求已回复才启动下一条及其看门狗。 */
   private dispatch(): void {
-    if (this.active || !this.jobs.size) return;
-    this.active = this.jobs.values().next().value!;
+    if (this.active) return;
+    const job = this.jobs.values().next().value;
+    if (!job) return;
+    this.active = job;
     try {
       const worker = this.ensureWorker();
-      this.timeout = setTimeout(() => this.stop("timeout", new Error("调色预览处理超时")), 15000);
-      this.active.start(worker);
+      const sentAt = performance.now();
+      this.timeout = setTimeout(() => this.handleTimeout(job, sentAt), 15_000);
+      job.start(worker);
     } catch (error: unknown) {
       this.stop("sendError", error instanceof Error ? error : new Error("调色帧传输失败"));
     }
+  }
+
+  /** 记录已发送帧的超时及受影响的排队帧。 */
+  private handleTimeout(job: GradeJob, sentAt: number): void {
+    if (this.active !== job) return;
+    const elapsedMs = Math.round(performance.now() - sentAt);
+    const error = new Error(`调色预览处理超时（请求 #${job.identity.requestId}，发送后 ${elapsedMs} ms 未收到回复）`);
+    const queued = [...this.jobs.values()].filter((item) => item !== job).map((item) => item.identity);
+    console.error(error, { active: job.identity, activeCancelled: job.cancelled, queued });
+    this.stop("timeout", error);
   }
 
   /** 仅初始化一次，真实上下文故障与过期回复分别处理。 */
@@ -156,9 +179,20 @@ export class VideoAdjustmentWorkerClient {
       if (reason === "dispose" && !this.active) this.worker.postMessage({ type: "dispose" });
       else this.worker.terminate();
     }
+    const active = this.active;
     this.worker = null;
     this.active = null;
-    for (const job of this.jobs.values()) job.cancel(error);
+    for (const job of this.jobs.values()) {
+      if (reason === "timeout" && active && job !== active) {
+        job.cancel(
+          new Error(`调色请求 #${job.identity.requestId} 尚未发送，因请求 #${active.identity.requestId} 超时而取消`, {
+            cause: error,
+          }),
+        );
+        continue;
+      }
+      job.cancel(error);
+    }
   }
 
   /** 定位时取消等待和排队任务，已提交的 GL 工作自然结束。 */
