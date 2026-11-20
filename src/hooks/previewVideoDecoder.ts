@@ -61,6 +61,7 @@ class NativePreviewSource {
   constructor(
     readonly video: HTMLVideoElement,
     private readonly resolver: ComposeMediaResolver,
+    private readonly maxEdge: () => number | undefined,
   ) {
     video.muted = true;
     video.addEventListener("ended", this.onEnded);
@@ -94,7 +95,7 @@ class NativePreviewSource {
     this.video.muted = true;
     this.video.playbackRate = (clip.playbackRate || 1) * rate;
     await seekPreviewVideo(this.video, sourceSec, signal);
-    const bitmap = await capturePreviewBitmap(this.video, signal);
+    const bitmap = await capturePreviewBitmap(this.video, signal, this.maxEdge());
     if (signal.aborted) {
       bitmap.close();
       signal.throwIfAborted();
@@ -176,7 +177,7 @@ class NativePreviewSource {
     if (this.frames.length >= PREVIEW_RAW_FRAME_LIMIT) return this.updatePlayback();
     const controller = this.controller;
     this.capturing = true;
-    void capturePreviewBitmap(this.video, controller.signal)
+    void capturePreviewBitmap(this.video, controller.signal, this.maxEdge())
       .then(
         (bitmap) => {
           if (controller.signal.aborted || this.controller !== controller) return bitmap.close();
@@ -265,8 +266,8 @@ export class PreviewVideoDecoder {
   private edges = new Map<string, DecodedPreviewFrame>();
   private running = false;
 
-  constructor(videos: readonly HTMLVideoElement[], resolver: ComposeMediaResolver) {
-    this.sources = videos.map((video) => new NativePreviewSource(video, resolver));
+  constructor(videos: readonly HTMLVideoElement[], resolver: ComposeMediaResolver, maxEdge: () => number | undefined = () => undefined) {
+    this.sources = videos.map((video) => new NativePreviewSource(video, resolver, maxEdge));
   }
 
   /** 判定缓存边界，片段源地址和参数变化由调用方 generation 重置。 */

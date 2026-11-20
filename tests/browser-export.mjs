@@ -90,6 +90,8 @@ try {
       const { createApp, h, ref } = await import('/node_modules/.vite/deps/vue.js');
       const bunny = await import('/node_modules/.vite/deps/mediabunny.js');
       const ensure = (condition, message) => { if (!condition) throw new Error(message); };
+      const { verifyGradeRecovery } = await import('/tests/browser-grade.mjs');
+      const gradeRecovery = await verifyGradeRecovery();
       // 真正的专用调色 Worker 与导出共用算法，逐像素对比同尺寸结果。
       const { VideoAdjustmentEngine } = await import('/src/utils/videoAdjustmentEngine.ts');
       const { VideoAdjustmentWorkerClient } = await import('/src/hooks/videoAdjustmentWorkerClient.ts');
@@ -313,7 +315,7 @@ try {
       await editor.value.reload(updated);
       const reloadedBytes = await verifyAnimation(await editor.value.exportVideo({ resolution: 'source' }));
       editorApp.unmount(); editorRoot.remove(); URL.revokeObjectURL(url);
-      return { first, middle, templates: templateResults, sourceFirst, videoFirst, transitionResults, gradeSamples, leftPixel, rightPixel,
+      return { gradeRecovery, first, middle, templates: templateResults, sourceFirst, videoFirst, transitionResults, gradeSamples, leftPixel, rightPixel,
         newTrackBytes, legacyTrackBytes, componentBytes, reloadedBytes, cancelled };
     })()
   `,

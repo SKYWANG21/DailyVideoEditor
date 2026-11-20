@@ -247,6 +247,8 @@ import type { PreviewFrameRenderer, PreviewPlaybackClock } from "@/types/preview
 import { createPreviewPlaybackClock } from "@/hooks/previewPlaybackClock";
 import { useVideoComposePreview } from "@/hooks/useVideoComposePreview";
 import { useComposePreviewFrame } from "@/hooks/useComposePreviewFrame";
+import { GradeBenchmark, readGradeBenchmarkMode } from "@/hooks/gradeBenchmark";
+import { previewEdge } from "@/hooks/previewCanvasFrame";
 import {
   buildSubtitleOverlayStyle,
   buildSubtitleTextStyle,
@@ -294,6 +296,8 @@ const props = defineProps<{
   selectedTextClipId?: string | null;
   /** 只读模式：禁止预览区双击改字幕，也不出调整框 */
   readonly?: boolean;
+  /** 运行时预览最长边，默认 1920。 */
+  previewMaxEdge?: number;
   /** 画布宽。字幕和贴图按这个像素定位 */
   canvasWidth?: number;
   /** 画布高 */
@@ -415,6 +419,10 @@ const frameRendererRef = shallowRef<PreviewFrameRenderer | null>(null);
 const localClock = createPreviewPlaybackClock();
 const activeClock = computed(() => (props.catalogPreviewActive ? localClock : (props.playbackClock ?? localClock)));
 
+const gradeBenchmarkMode = readGradeBenchmarkMode();
+const benchmark = gradeBenchmarkMode ? new GradeBenchmark() : undefined;
+const maxEdge = computed(() => previewEdge(props.previewMaxEdge));
+
 const {
   currentIdx: playingIdx,
   globalTime,
@@ -438,6 +446,8 @@ const {
   refreshBgm,
 } = useVideoComposePreview({
   clock: activeClock,
+  benchmark,
+  maxEdge,
   transitionTrack: transitionTrackRef,
   videoA: videoARef,
   videoB: videoBRef,
@@ -449,6 +459,31 @@ const {
   renderer: frameRendererRef,
   renderConfig: computed(() => [canvasSizeRef.value, fallbackVideoFrame.value]),
 });
+
+/** 性能对照按一次播放意图统计实际展示帧数和缓冲次数，包含启动及缓冲耗时。 */
+if (benchmark) {
+  let start: { now: number; presented: number; bufferingCount: number } | null = null;
+  watch(isPlaying, (playing) => {
+    if (playing) {
+      benchmark.begin();
+      start = { now: performance.now(), ...previewStats };
+    } else if (start) {
+      const wallSeconds = (performance.now() - start.now) / 1000;
+      const presented = previewStats.presented - start.presented;
+      console.info("[grade-bench] 播放统计", {
+        requestedMode: gradeBenchmarkMode,
+        wallSeconds: Number(wallSeconds.toFixed(2)),
+        presented,
+        fps: Number((presented / wallSeconds).toFixed(2)),
+        bufferingCount: previewStats.bufferingCount - start.bufferingCount,
+        state: playbackState.value,
+        previewMaxEdge: maxEdge.value,
+        ...benchmark.summary(),
+      });
+      start = null;
+    }
+  });
+}
 
 /** 播放条两侧的次按钮 */
 const transportBtnClass =
@@ -469,6 +504,8 @@ function fmtClock(sec: number): string {
 const captureSource = computed<ComposeFrameCapture["source"]>(() => (props.catalogPreviewActive ? "catalog" : "timeline"));
 const { renderer, videoSize, previewError: frameError, getPresentedFrame } = useComposePreviewFrame({
   canvas: previewCanvasRef,
+  benchmark,
+  maxEdge,
   gpuCanvas: gpuCanvasRef,
   transitionTrack: transitionTrackRef,
   canvasSize: canvasSizeRef,

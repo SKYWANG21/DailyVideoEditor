@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readVideoAdjustments } from "../src/types/videoAdjustments";
-import type { AdjustmentWorkerRequest, AdjustmentWorkerResponse } from "../src/types/videoAdjustmentWorker";
+import type { AdjustmentWorkerRequest, GradeWorkerMessage } from "../src/types/videoAdjustmentWorker";
 
 const workers = vi.hoisted(() => ({ instances: [] as FakeWorker[] }));
 /** 可控消息时序，复现取消、迟到结果和 Worker 失败。 */
 interface FakeWorker {
-  onmessage: ((event: { data: AdjustmentWorkerResponse }) => void) | null;
+  onmessage: ((event: { data: GradeWorkerMessage }) => void) | null;
   onerror: (() => void) | null;
   terminate: ReturnType<typeof vi.fn>;
   postMessage: ReturnType<typeof vi.fn<(request: AdjustmentWorkerRequest, transfer: Transferable[]) => void>>;
@@ -29,8 +29,8 @@ function bitmap(): ImageBitmap {
 }
 /** 返回最后一次处理的有效结果。 */
 function reply(worker: FakeWorker, output: ImageBitmap): void {
-  const { bitmap: _input, adjustments: _params, ...identity } = worker.postMessage.mock.calls[0][0];
-  worker.onmessage?.({ data: { type: "frame", ...identity, bitmap: output } });
+  const { bitmap: _input, adjustments: _params, ...identity } = worker.postMessage.mock.calls.at(-1)![0];
+  worker.onmessage?.({ data: { type: "frame", ...identity, backendUsed: "gpu", bitmap: output } });
 }
 
 describe("调色 Worker 生命周期", () => {
@@ -65,7 +65,7 @@ describe("调色 Worker 生命周期", () => {
     expect(input.close).toHaveBeenCalled();
   });
 
-  it("取消终止旧线程、拒绝等待并关闭迟到输出，下一次请求可恢复", async () => {
+  it("连续定位取消等待，只发送最终目标并复用旧线程", async () => {
     const controller = new AbortController();
     const pending = client.render(canvas, readVideoAdjustments(), frame, 1, controller.signal);
     const cancelled = expect(pending).rejects.toMatchObject({ name: "AbortError" });
@@ -73,15 +73,23 @@ describe("调色 Worker 生命周期", () => {
     const old = workers.instances[0];
     controller.abort();
     await cancelled;
-    expect(old.terminate).toHaveBeenCalled();
+    expect(old.terminate).not.toHaveBeenCalled();
+    const middle = new AbortController();
+    const skipped = client.render(canvas, readVideoAdjustments(), frame, 2, middle.signal);
+    const dropped = expect(skipped).rejects.toMatchObject({ name: "AbortError" });
+    await Promise.resolve();
+    middle.abort();
+    await dropped;
+    const next = client.render(canvas, readVideoAdjustments(), frame, 3, new AbortController().signal);
+    await Promise.resolve();
+    expect(old.postMessage).toHaveBeenCalledTimes(1);
     const late = bitmap();
     reply(old, late);
-    expect(late.close).toHaveBeenCalled();
-    const next = client.render(canvas, readVideoAdjustments(), frame, 2, new AbortController().signal);
-    await Promise.resolve();
-    old.onerror?.();
+    expect(late.close).toHaveBeenCalledOnce();
+    expect(workers.instances).toHaveLength(1);
+    expect(old.postMessage.mock.calls.at(-1)![0].generation).toBe(3);
     const output = bitmap();
-    reply(workers.instances[1], output);
+    reply(old, output);
     expect(await next).toBe(output);
   });
 
@@ -92,6 +100,40 @@ describe("调色 Worker 生命周期", () => {
     await expect(pending).rejects.toMatchObject({ name: "AbortError" });
     expect(input.close).toHaveBeenCalled();
     expect(workers.instances).toHaveLength(0);
+  });
+
+  it("连续丢失时播放器保持 CPU，定位不会绕过保护", async () => {
+    const signal = new AbortController().signal;
+    const params = readVideoAdjustments({ brightness: 5 });
+    const first = client.render(canvas, params, frame, 1, signal);
+    await Promise.resolve();
+    const worker = workers.instances[0];
+    for (let i = 0; i < 3; i++) worker.onmessage?.({ data: { type: "context", event: "lost" } });
+    reply(worker, bitmap());
+    (await first).close();
+    client.reset();
+    const second = client.render(canvas, params, frame, 2, signal);
+    await Promise.resolve();
+    expect(worker.postMessage.mock.lastCall?.[0].cpuOnly).toBe(true);
+    expect(worker.terminate).not.toHaveBeenCalled();
+    reply(worker, bitmap());
+    (await second).close();
+  });
+
+  it("已取消帧超时仍释放物理计算槽，下一次请求可重新创建线程", async () => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    const first = client.render(canvas, readVideoAdjustments(), frame, 1, controller.signal);
+    const cancelled = expect(first).rejects.toMatchObject({ name: "AbortError" });
+    await Promise.resolve();
+    controller.abort();
+    await cancelled;
+    await vi.advanceTimersByTimeAsync(15000);
+    expect(workers.instances[0].terminate).toHaveBeenCalledOnce();
+    const next = client.render(canvas, readVideoAdjustments(), frame, 2, new AbortController().signal);
+    await Promise.resolve();
+    reply(workers.instances[1], bitmap());
+    (await next).close();
   });
 
   it("Worker 超时会拒绝等待并释放线程", async () => {

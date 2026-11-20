@@ -8,12 +8,17 @@ import { COMPOSE_ALGORITHM_BASE, useComposeTransitionRegistry } from "@/editor/c
 import { readVideoFrameTransform } from "@/editor/shared/videoFrame";
 import { TransitionEngine } from "@/transitions/engine";
 import { hasVideoAdjustments, readVideoAdjustments } from "@/types/videoAdjustments";
+import type { GradeBenchmark } from "./gradeBenchmark";
 import { VideoAdjustmentWorkerClient } from "./videoAdjustmentWorkerClient";
 import { ComposeFrameProcessor } from "./composeFrameProcessor";
 import { drawPreviewCanvasFrame, previewCanvasSize } from "./previewCanvasFrame";
 
 /** 仅处理固定快照和展示完成帧，不再持有 video、播放时钟或定位职责。 */
 interface UseComposePreviewFrameOptions {
+  /** 运行时预览最长边。 */
+  maxEdge?: Readonly<Ref<number>>;
+  /** 开发对照统计。 */
+  benchmark?: GradeBenchmark;
   /** 唯一可见画布。 */
   canvas: Ref<HTMLCanvasElement | null>;
   /** 播放器独占的 GPU 资源。 */
@@ -40,7 +45,7 @@ export function useComposePreviewFrame(options: UseComposePreviewFrameOptions) {
   );
   const registry = useComposeTransitionRegistry();
   const engine = new TransitionEngine(registry);
-  const adjustmentsWorker = new VideoAdjustmentWorkerClient();
+  const adjustmentsWorker = new VideoAdjustmentWorkerClient(options.benchmark);
   const videoSize = ref<PreviewVideoSize | null>(null);
   const frameReady = ref(false);
   const previewError = ref("");
@@ -86,7 +91,7 @@ export function useComposePreviewFrame(options: UseComposePreviewFrameOptions) {
     const clip = options.clips.value[index];
     if (!clip) throw new Error("视频片段已不存在");
     const project = options.canvasSize.value ?? source.sourceSize;
-    const size = previewCanvasSize(project.width, project.height);
+    const size = previewCanvasSize(project.width, project.height, options.maxEdge?.value);
     const trackClip = options.transitionTrack.value?.clips.find((item) => item.id === clip.id);
     const frame = trackClip ? readVideoFrameTransform(trackClip.config) : options.frame.value;
     const beauty = readBeautyParams(clip.beauty);
@@ -104,6 +109,7 @@ export function useComposePreviewFrame(options: UseComposePreviewFrameOptions) {
           sourceTimeUs: source.sourceTimeUs,
         },
         signal,
+        options.maxEdge?.value,
       )) ?? source.bitmap;
     signal.throwIfAborted();
     const canvas =
@@ -149,7 +155,7 @@ export function useComposePreviewFrame(options: UseComposePreviewFrameOptions) {
     if (!request.outgoing) {
       if (!options.canvas.value) return { ...base, bitmap: null };
       const project = options.canvasSize.value ?? { width: 1, height: 1 };
-      const size = previewCanvasSize(project.width, project.height);
+      const size = previewCanvasSize(project.width, project.height, options.maxEdge?.value);
       if (!blank || blank.width !== size.width || blank.height !== size.height) blank = new OffscreenCanvas(size.width, size.height);
       return { ...base, bitmap: await createImageBitmap(blank) };
     }

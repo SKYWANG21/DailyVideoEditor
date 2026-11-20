@@ -39,6 +39,7 @@
         />
         <VideoComposePlayer
           ref="playerRef"
+          :preview-max-edge="previewMaxEdge"
           :playback-clock="playbackClock"
           class="h-full min-h-0 w-full min-w-0"
           :video-clips="derivedMainClips"
@@ -215,6 +216,8 @@ import type { BgmItem, ComposeClip, ComposeSegmentClipAssets, ComposeSubtitleAss
 
 const props = withDefaults(
   defineProps<{
+    /** 播放预览最长边，独立于工程和导出尺寸。 */
+    previewMaxEdge?: number;
     /** 编辑器聚合状态（轨道真相源：modelValue.tracks） */
     modelValue: VideoComposeEditorModel;
     /** 只读模式 */

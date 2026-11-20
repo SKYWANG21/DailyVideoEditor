@@ -79,10 +79,11 @@ export class ComposeFrameProcessor {
     beauty: BeautyParams,
     identity: PreviewFrameIdentity,
     signal: AbortSignal,
+    maxEdge?: number,
   ): Promise<CanvasImageSource> {
     if (!beauty.enabled || !(await this.warmup([beauty]))) return source;
     signal.throwIfAborted();
-    const bitmap = await capturePreviewBitmap(source, signal);
+    const bitmap = await capturePreviewBitmap(source, signal, maxEdge);
     if (signal.aborted) {
       bitmap.close();
       signal.throwIfAborted();

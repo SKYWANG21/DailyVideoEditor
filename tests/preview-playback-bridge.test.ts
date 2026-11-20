@@ -139,7 +139,7 @@ describe("时间轴被动显示与控制命令", () => {
     const { bridge, player } = setup();
     bridge.onTimelineCommand({ type: "scrub-end", time: 3, resume: true });
     await flush();
-    expect(player.seek).toHaveBeenCalledWith(3);
+    expect(player.seek).toHaveBeenCalledWith(3, expect.any(Number));
     expect(player.play).toHaveBeenCalledOnce();
   });
 

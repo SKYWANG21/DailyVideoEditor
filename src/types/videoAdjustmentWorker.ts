@@ -14,8 +14,16 @@ export interface AdjustmentWorkerRequest extends AdjustmentRequestIdentity {
   bitmap: ImageBitmap;
   /** 已归一化的九项参数。 */
   adjustments: VideoAdjustments;
+  /** 客户端明确指定 CPU 或当前播放会话已停用 GPU。 */
+  cpuOnly?: boolean;
 }
+
+/** 区分创建上下文、浏览器恢复和恢复后首次成功输出。 */
+export type GradeContextEvent = "created" | "createFailed" | "lost" | "restored" | "rebuilt" | "rebuildFailed";
 
 /** 完成位图归主线程所有，过期或绘制完成时关闭。 */
 export type AdjustmentWorkerResponse = AdjustmentRequestIdentity &
-  ({ type: "frame"; bitmap: ImageBitmap } | { type: "error"; message: string });
+  ({ type: "frame"; bitmap: ImageBitmap; backendUsed: "cpu" | "gpu"; fallbackReason?: string } | { type: "error"; message: string });
+
+/** Worker 的帧回复与独立于播放请求的上下文事件。 */
+export type GradeWorkerMessage = AdjustmentWorkerResponse | { type: "context"; event: GradeContextEvent };

@@ -1,14 +1,16 @@
+import { previewCanvasSize } from "./previewCanvasFrame";
+
 /** 视频加载、定位及快照等待的统一超时 */
 export const VIDEO_FRAME_TIMEOUT_MS = 8000;
 
 /** 在调用时冻结像素；取消后的迟到位图仍关闭，输入借用不被转移。 */
-export function capturePreviewBitmap(source: HTMLVideoElement | ImageBitmap, signal: AbortSignal, maxEdge = 1920): Promise<ImageBitmap> {
+export function capturePreviewBitmap(source: HTMLVideoElement | ImageBitmap, signal: AbortSignal, maxEdge?: number): Promise<ImageBitmap> {
   return new Promise((resolve, reject) => {
     let finished = false;
     const dimensions = source as { videoWidth?: number; videoHeight?: number; width?: number; height?: number };
     const width = dimensions.videoWidth ?? dimensions.width ?? 1;
     const height = dimensions.videoHeight ?? dimensions.height ?? 1;
-    const scale = Math.min(1, maxEdge / Math.max(width, height, 1));
+    const size = previewCanvasSize(width, height, maxEdge);
     /** 所有完成路径清理等待，不能关闭调用方持有的输入。 */
     const cleanup = (): void => {
       clearTimeout(timer);
@@ -28,10 +30,7 @@ export function capturePreviewBitmap(source: HTMLVideoElement | ImageBitmap, sig
     }, VIDEO_FRAME_TIMEOUT_MS);
     signal.addEventListener("abort", abort, { once: true });
     if (signal.aborted) return abort();
-    const options =
-      scale < 1
-        ? { resizeWidth: Math.max(1, Math.round(width * scale)), resizeHeight: Math.max(1, Math.round(height * scale)) }
-        : undefined;
+    const options = size.width !== width || size.height !== height ? { resizeWidth: size.width, resizeHeight: size.height } : undefined;
     void createImageBitmap(source, options).then(
       (bitmap) => {
         if (finished) return bitmap.close();

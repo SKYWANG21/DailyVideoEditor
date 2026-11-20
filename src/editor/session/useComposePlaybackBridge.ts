@@ -41,14 +41,17 @@ export function useComposePlaybackBridge(state: ComposeEditorState, ports: Compo
   }
 
   /** 控制命令共享取消代次，定位完成后才按最新意图恢复播放。 */
-  function requestPlayback(timeSec: number | undefined, resume: boolean): void {
+  function requestPlayback(timeSec: number | undefined, resume: boolean, releasedAt?: number): void {
     const seq = ++clock.playSeq;
     clock.playInFlight = resume;
     ports.afterExitCatalogPreview((exitedPreview) => {
       if (seq !== clock.playSeq) return;
       const player = state.playerRef.value;
       const target = timeSec ?? (exitedPreview ? state.globalTime.value : undefined);
-      if (target !== undefined) pendingSeek = (exitedPreview ? player?.resync(target) : player?.seek(target)) ?? Promise.resolve();
+      if (target !== undefined) {
+        const args: [number, number?] = releasedAt === undefined ? [target] : [target, releasedAt];
+        pendingSeek = (exitedPreview ? player?.resync(...args) : player?.seek(...args)) ?? Promise.resolve();
+      }
       void (async (): Promise<void> => {
         try {
           await pendingSeek;
@@ -91,7 +94,7 @@ export function useComposePlaybackBridge(state: ComposeEditorState, ports: Compo
         onTimelineSeek(command.time);
         break;
       case "scrub-end":
-        onTimelineSeek(command.time, command.resume);
+        requestPlayback(command.time, command.resume, performance.now());
         break;
       case "rate":
         state.playerRef.value?.setPlaybackRate(command.rate);

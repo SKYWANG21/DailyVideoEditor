@@ -73,12 +73,15 @@ function request(sourceTimeUs: number, requestId: number, size = 8): PreviewRend
 
 describe("预览图层缓存与画面一致性", () => {
   let renderer: PreviewFrameRenderer;
+  const maxEdge = ref(1920);
 
   beforeEach(() => {
     vi.stubGlobal("OffscreenCanvas", FakeCanvas);
     vi.stubGlobal("createImageBitmap", async (canvas: FakeCanvas) => bitmap(canvas.pixels, canvas.width, canvas.height));
     mocks.render.mockReset().mockImplementation(async (_canvas, _adjustments, frame) => bitmap(`graded-${frame.sourceTimeUs}`));
+    maxEdge.value = 1920;
     ({ renderer } = useComposePreviewFrame({
+      maxEdge,
       canvas: ref(null),
       gpuCanvas: ref(null),
       clips: ref([{ id: "clip", title: "Clip", url: "clip.mp4", durationSec: 5, adjustments: readVideoAdjustments({ brightness: 10 }) }]),
@@ -106,6 +109,18 @@ describe("预览图层缓存与画面一致性", () => {
     const nextCached = await renderer.render(request(2000, 4), new AbortController().signal);
     expect(nextCached.bitmap).toMatchObject({ pixels: "graded-2000" });
     expect(mocks.render).toHaveBeenCalledTimes(2);
+  });
+
+  it("运行时切换画质改变调色输入和输出，旧尺寸图层不会命中", async () => {
+    const signal = new AbortController().signal;
+    for (const edge of [1920, 1280, 1920]) {
+      maxEdge.value = edge;
+      const result = await renderer.render(request(1000, edge, 1920), signal);
+      expect(mocks.render.mock.lastCall?.[0]).toMatchObject({ width: edge, height: edge });
+      expect(result.bitmap).toMatchObject({ width: edge, height: edge });
+      result.bitmap?.close();
+    }
+    expect(mocks.render).toHaveBeenCalledTimes(3);
   });
 
   it.each(["取消拒绝", "取消后迟到结果", "处理失败"] as const)("%s后重新请求旧帧必须重新调色", async (mode) => {

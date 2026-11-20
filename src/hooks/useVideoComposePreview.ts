@@ -18,6 +18,7 @@ import { normalizeTrackTransitions, resolveTransitionAtTime, resolveTransitionSe
 import { readVideoFrameTransform } from "@/editor/shared/videoFrame";
 import { PreviewVideoDecoder } from "./previewVideoDecoder";
 import { PREVIEW_FPS, PREVIEW_RESUME_FRAMES, PreviewFrameScheduler } from "./previewFrameScheduler";
+import type { GradeBenchmark } from "./gradeBenchmark";
 import { createPreviewPlaybackClock } from "./previewPlaybackClock";
 
 /**
@@ -31,6 +32,10 @@ import { createPreviewPlaybackClock } from "./previewPlaybackClock";
 
 /** 原生解码、完成帧展示与音频的协调输入，不把逐帧任务交给 Vue watch。 */
 interface UseVideoComposePreviewOptions {
+  /** 预览像素最长边，随播放器配置变化。 */
+  maxEdge?: Readonly<Ref<number>>;
+  /** 开发对照模式记录实际画面提交时间。 */
+  benchmark?: GradeBenchmark;
   /** 当前预览的展示时钟；工程和素材预览使用不同对象。 */
   clock?: Ref<PreviewPlaybackClock>;
   /** 素材库单片预览为空。 */
@@ -94,6 +99,7 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
   const inGap = ref(false);
   const presentedSourceSize = ref<PreviewVideoSize | null>(null);
   const previewStats = { produced: 0, presented: 0, bufferingCount: 0, maxQueued: 0 };
+  let scrubStart: number | undefined;
   let decoder: PreviewVideoDecoder | null = null;
   let decoderVideos: HTMLVideoElement[] = [];
   let controller = new AbortController();
@@ -184,7 +190,7 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
     if (videos.length !== 2) return null;
     if (!decoder || videos.some((video, index) => video !== decoderVideos[index])) {
       decoder?.dispose();
-      decoder = new PreviewVideoDecoder(videos, mediaResolver);
+      decoder = new PreviewVideoDecoder(videos, mediaResolver, () => options.maxEdge?.value);
       decoderVideos = videos;
     }
     return decoder;
@@ -252,6 +258,8 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
       globalTime.value = frame.time;
       clock.value.revision += 1;
       previewStats.presented += 1;
+      if (frame.bitmap) options.benchmark?.present(isPlaying.value, scrubStart);
+      scrubStart = undefined;
     } finally {
       frame.bitmap?.close();
     }
@@ -446,8 +454,11 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
   }
 
   /** 定位保留旧画面和游标，直到目标帧真正提交；旧 Promise 取消后也能结束。 */
-  async function seek(timeSec: number): Promise<void> {
+  async function seek(timeSec: number, releasedAt?: number): Promise<void> {
     if (disposed) return;
+    if (settleSeek && options.benchmark) options.benchmark.coalescedSeeks++;
+    options.benchmark?.breakInterval();
+    scrubStart = releasedAt;
     transportVersion += 1;
     controller.abort();
     controller = new AbortController();
@@ -490,6 +501,7 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
   /** 用户暂停保持队列，但所有迟到 play/prepare 都必须核对播放意图。 */
   function pause(): void {
     transportVersion += 1;
+    options.benchmark?.breakInterval();
     productionController?.abort();
     audioPreparation?.abort();
     scheduler.freeze(performance.now());
@@ -538,8 +550,8 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
   }
 
   /** 工程配置变化后保持已展示位置重建代次。 */
-  async function resync(time = globalTime.value): Promise<void> {
-    await seek(time);
+  async function resync(time = globalTime.value, releasedAt?: number): Promise<void> {
+    await seek(time, releasedAt);
   }
 
   /** 仅刷新音量、静音与音轨结构，不废弃视频队列。 */
@@ -587,6 +599,7 @@ export function useVideoComposePreview(options: UseVideoComposePreviewOptions) {
         options.transitionTrack.value?.transitions,
         options.transitionTrack.value?.clips.map((clip) => [clip.id, readVideoFrameTransform(clip.config)]),
         options.renderConfig?.value,
+        options.maxEdge?.value,
       ]),
     () => {
       if (!disposed) void resync();

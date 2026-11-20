@@ -12,7 +12,7 @@ function smooth(value: number): number {
 }
 
 /** 七项颜色和明暗运算融合为一次遍历，保留原始 Alpha。 */
-function adjustColors(data: Uint8ClampedArray, params: VideoAdjustments): void {
+export function adjustColors(data: Uint8ClampedArray, params: VideoAdjustments): void {
   const warm = params.temperature / 100;
   const tint = params.tint / 100;
   const gain = 1 + params.brightness / 100;
@@ -61,11 +61,17 @@ function sharpenPixels(data: Uint8ClampedArray, source: Uint8ClampedArray, width
   }
 }
 
+/** CPU 和 GPU 对同一片段、源帧时间使用相同的颗粒。 */
+export function grainSeed(clipId: string, sourceTimeUs: number): number {
+  let seed = 2166136261;
+  const identity = `${clipId}:${sourceTimeUs}`;
+  for (let i = 0; i < identity.length; i++) seed = Math.imul(seed ^ identity.charCodeAt(i), 16777619);
+  return seed >>> 0;
+}
+
 /** 基于片段与源 PTS 固定随机种子，停帧重绘不会闪烁。 */
 function addGrain(data: Uint8ClampedArray, amount: number, frame: AdjustmentFrame): void {
-  let seed = 2166136261;
-  const identity = `${frame.clipId}:${frame.sourceTimeUs}`;
-  for (let i = 0; i < identity.length; i++) seed = Math.imul(seed ^ identity.charCodeAt(i), 16777619);
+  let seed = grainSeed(frame.clipId, frame.sourceTimeUs);
   for (let i = 0; i < data.length; i += 4) {
     seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
     if (data[i + 3] === 0) continue;
