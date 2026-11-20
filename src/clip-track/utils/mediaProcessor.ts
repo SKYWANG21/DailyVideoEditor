@@ -16,7 +16,8 @@ async function fetchMediaBody(url: string, resolve?: ResolveMediaUrl): Promise<R
 }
 
 // 缓存已处理的媒体数据
-const thumbnailCache = new Map<string, string[]>();
+const thumbnailCache = new Map<string, ThumbnailResult>();
+const pendingThumbnails = new Map<string, Promise<ThumbnailResult>>();
 const waveformCache = new Map<string, number[]>();
 const durationCache = new Map<string, number>();
 
@@ -24,7 +25,8 @@ const durationCache = new Map<string, number>();
  * 视频缩略图提取结果
  */
 export interface ThumbnailResult {
-  thumbnails: string[]; // Base64 URL 列表
+  /** 可供多个 Clip 独立创建展示 URL 的原始图片。 */
+  frames: readonly Blob[];
   duration: number; // 视频时长（秒）
 }
 
@@ -37,7 +39,7 @@ export interface WaveformResult {
 }
 
 /**
- * 从视频中提取缩略图
+ * 按素材和抽帧规格复用结果，同一规格的并发请求只解码一次。
  * @param videoUrl 视频 URL
  * @param options 配置选项
  * @returns 缩略图结果
@@ -45,63 +47,54 @@ export interface WaveformResult {
 export async function extractVideoThumbnails(
   videoUrl: string,
   options: {
-    count?: number; // 提取的缩略图数量
-    width?: number; // 缩略图宽度
+    /** 提取的缩略图数量 */
+    count?: number;
+    /** 缩略图宽度 */
+    width?: number;
     /** 跨域地址先解析成可 fetch 的 URL */
     resolve?: ResolveMediaUrl;
-  } = {}
+  } = {},
 ): Promise<ThumbnailResult> {
   const { count = 10, width = 120, resolve } = options;
-
-  // 检查缓存
   const cacheKey = `${videoUrl}_${count}_${width}`;
-  if (thumbnailCache.has(cacheKey)) {
-    return {
-      thumbnails: thumbnailCache.get(cacheKey)!,
-      duration: durationCache.get(videoUrl) || 0,
-    };
-  }
+  const cached = thumbnailCache.get(cacheKey);
+  if (cached) return cached;
 
+  const pending = pendingThumbnails.get(cacheKey);
+  if (pending) return pending;
+
+  const request = decodeVideoThumbnails(videoUrl, count, width, resolve).catch((error: unknown): ThumbnailResult => {
+    console.error("Error extracting thumbnails:", error);
+    return { frames: [], duration: 0 };
+  });
+  pendingThumbnails.set(cacheKey, request);
   try {
-    const body = await fetchMediaBody(videoUrl, resolve);
-
-    // 创建 MP4Clip 实例
-    const clip = new MP4Clip(body);
-    await clip.ready;
-
-    // 获取视频时长（微秒转秒）
-    const duration = clip.meta.duration / 1e6;
-
-    // 计算缩略图的时间间隔
-    const step = (duration * 1e6) / count;
-
-    // 提取缩略图
-    const thumbnailResults = await clip.thumbnails(width, {
-      start: 0,
-      end: duration * 1e6,
-      step: Math.max(step, 100000), // 至少 0.1 秒间隔
-    });
-
-    // 转换为 Base64 URL
-    const thumbnails: string[] = [];
-    for (const thumb of thumbnailResults) {
-      if (thumb.img) {
-        const url = URL.createObjectURL(thumb.img);
-        thumbnails.push(url);
-      }
+    const result = await request;
+    if (pendingThumbnails.get(cacheKey) === request && result.frames.length > 0) {
+      thumbnailCache.set(cacheKey, result);
+      durationCache.set(videoUrl, result.duration);
     }
+    return result;
+  } finally {
+    if (pendingThumbnails.get(cacheKey) === request) pendingThumbnails.delete(cacheKey);
+  }
+}
 
-    // 销毁 clip
+/** 对完整视频抽帧，结果不依赖某个时间轴 Clip 的裁剪区间。 */
+async function decodeVideoThumbnails(videoUrl: string, count: number, width: number, resolve?: ResolveMediaUrl): Promise<ThumbnailResult> {
+  const body = await fetchMediaBody(videoUrl, resolve);
+  const clip = new MP4Clip(body);
+  try {
+    await clip.ready;
+    const durationUs = clip.meta.duration;
+    const thumbnails = await clip.thumbnails(width, {
+      start: 0,
+      end: durationUs,
+      step: Math.max(durationUs / count, 100_000),
+    });
+    return { frames: thumbnails.map((thumbnail) => thumbnail.img), duration: durationUs / 1e6 };
+  } finally {
     clip.destroy();
-
-    // 缓存结果
-    thumbnailCache.set(cacheKey, thumbnails);
-    durationCache.set(videoUrl, duration);
-
-    return { thumbnails, duration };
-  } catch (error) {
-    console.error('Error extracting thumbnails:', error);
-    return { thumbnails: [], duration: 0 };
   }
 }
 
@@ -322,18 +315,11 @@ export async function getMediaDuration(
 }
 
 /**
- * 清除缓存
+ * 清除共享媒体结果，展示用 URL 仍由各 Clip 负责释放。
  */
-export function clearMediaCache() {
-  // 释放所有 blob URL
-  for (const thumbnails of thumbnailCache.values()) {
-    for (const url of thumbnails) {
-      if (url.startsWith('blob:')) {
-        URL.revokeObjectURL(url);
-      }
-    }
-  }
+export function clearMediaCache(): void {
   thumbnailCache.clear();
+  pendingThumbnails.clear();
   waveformCache.clear();
   durationCache.clear();
 }

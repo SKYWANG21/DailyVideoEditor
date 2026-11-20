@@ -6,6 +6,8 @@ import { useClipTrackPinia } from '../stores/clipTrackPinia';
 import { normalizeTime } from '../utils/helpers';
 import type { Clip, MediaClip, TransitionClip } from '../types';
 
+const MIN_RESIZE_DURATION = 0.1;
+
 // 保存 resize 开始时的关联元素信息
 interface LinkedElement {
   id: string;
@@ -285,109 +287,69 @@ export function useResize() {
   // 保存当前的修饰键状态
   const modifierKeys = ref({ shift: false });
 
-  // 调整大小移动
-  function handleResizeMove(event: MouseEvent) {
-    if (!isResizing.value || !resizingClip.value) return;
+  /** 提交合法的拖边结果，并用最终边界更新联动片段。 */
+  function handleResizeMove(event: MouseEvent): void {
+    const clip = resizingClip.value;
+    if (!isResizing.value || !clip) return;
 
-    // 更新修饰键状态
     modifierKeys.value.shift = event.shiftKey;
-
+    const edge = resizingEdge.value;
     const deltaX = event.clientX - resizeStartX.value;
-    const deltaTime = scaleStore.pixelsToTime(deltaX);
+    const boundary = resolveResizeBoundary(clip, edge, scaleStore.pixelsToTime(deltaX));
+    if (!boundary) return;
 
-    if (resizingEdge.value === 'left') {
-      handleLeftResize(deltaTime);
+    const { time, trim } = boundary;
+    if (edge === "left") {
+      tracksStore.updateClip(clip.id, trim === undefined ? { startTime: time } : { startTime: time, trimStart: trim });
+      updateLinkedElementsLeft(time);
     } else {
-      handleRightResize(deltaTime);
+      tracksStore.updateClip(clip.id, trim === undefined ? { endTime: time } : { endTime: time, trimEnd: trim });
+      updateLinkedElementsRight(time);
     }
   }
 
-  // 左边缘调整
-  function handleLeftResize(deltaTime: number) {
-    if (!resizingClip.value) return;
+  /** 计算时间轴允许的边界，带转场的片段继续使用现有联动规则。 */
+  function getResizeTimeBounds(clip: Clip, edge: "left" | "right"): { minTime: number; maxTime: number } {
+    const isLeft = edge === "left";
+    const start = resizeStartTime.value;
+    const end = resizeStartEndTime.value;
+    let minTime = isLeft ? 0 : start + MIN_RESIZE_DURATION;
+    let maxTime = isLeft ? end - MIN_RESIZE_DURATION : Infinity;
+    const linked = isLeft ? linkedElementsLeft.value : linkedElementsRight.value;
+    if (linked[0]?.type === "transition") return { minTime, maxTime };
 
-    let newStartTime = normalizeTime(resizeStartTime.value + deltaTime);
-
-    // 限制最小时长 0.1 秒
-    const minDuration = 0.1;
-    const maxStartTime = resizeStartEndTime.value - minDuration;
-    newStartTime = Math.max(0, Math.min(newStartTime, maxStartTime));
-
-    // 使用预先收集的关联元素来判断是否有左侧转场（而不是实时检查 store 中的位置）
-    const hasLeftTransition = linkedElementsLeft.value.length > 0 &&
-      linkedElementsLeft.value[0].type === 'transition';
-
-    // 如果没有转场连接，检查左侧是否有其他 clip，限制不能重叠
-    if (!hasLeftTransition) {
-      const trackForOverlapCheck = tracksStore.tracks.find(
-        (t) => t.id === resizingClip.value!.trackId
-      );
-      if (trackForOverlapCheck) {
-        const prevClipForOverlap = trackForOverlapCheck.clips
-          .filter((c) => c.type !== 'transition' && c.id !== resizingClip.value!.id)
-          .find((c) => c.endTime <= resizeStartTime.value + 0.01 && c.endTime > newStartTime);
-
-        if (prevClipForOverlap) {
-          // 不能超过前一个 clip 的结束时间
-          newStartTime = Math.max(newStartTime, prevClipForOverlap.endTime);
-        }
-      }
+    const track = tracksStore.tracks.find((track) => track.id === clip.trackId);
+    for (const neighbor of track?.clips ?? []) {
+      if (neighbor.id === clip.id || neighbor.type === "transition") continue;
+      if (isLeft && neighbor.endTime <= start + 0.01) minTime = Math.max(minTime, neighbor.endTime);
+      if (!isLeft && neighbor.startTime >= end - 0.01) maxTime = Math.min(maxTime, neighbor.startTime);
     }
+    return { minTime, maxTime };
+  }
 
-    // 对于视频/音频 clip，检查是否超过原始时长，同时计算新的 trimStart
-    let newTrimStart = 0;
-    if (
-      resizingClip.value.type === 'video' ||
-      resizingClip.value.type === 'audio'
-    ) {
-      const mediaClip = resizingClip.value as MediaClip;
-      // 计算 trimStart 的变化量（与 startTime 变化量相同）
-      const trimDelta = newStartTime - resizeStartTime.value;
-      newTrimStart = normalizeTime(resizeStartTrimStart.value + trimDelta);
-
-      // 限制 trimStart 不能小于 0
-      if (newTrimStart < 0) {
-        newStartTime = normalizeTime(resizeStartTime.value - resizeStartTrimStart.value);
-        newTrimStart = 0;
-      }
-
-      // 限制 trimStart 不能超过 trimEnd（保持最小时长）
-      const currentTrimEnd = resizeStartTrimEnd.value;
-      if (newTrimStart > currentTrimEnd - minDuration) {
-        newTrimStart = currentTrimEnd - minDuration;
-        newStartTime = normalizeTime(resizeStartTime.value + (newTrimStart - resizeStartTrimStart.value));
-      }
+  /** 将素材裁剪限制换算到时间轴；吸附点越界时保留未吸附的合法结果。 */
+  function resolveResizeBoundary(clip: Clip, edge: "left" | "right", deltaTime: number): { time: number; trim?: number } | null {
+    const isLeft = edge === "left";
+    const originTime = isLeft ? resizeStartTime.value : resizeStartEndTime.value;
+    const originTrim = isLeft ? resizeStartTrimStart.value : resizeStartTrimEnd.value;
+    const media = clip.type === "video" || clip.type === "audio" ? clip : null;
+    const minTrim = isLeft ? 0 : resizeStartTrimStart.value + MIN_RESIZE_DURATION;
+    const maxTrim = isLeft ? resizeStartTrimEnd.value - MIN_RESIZE_DURATION : (media?.originalDuration ?? Infinity);
+    let { minTime, maxTime } = getResizeTimeBounds(clip, edge);
+    if (media) {
+      minTime = Math.max(minTime, originTime + (minTrim - originTrim));
+      maxTime = Math.min(maxTime, originTime + (maxTrim - originTrim));
     }
+    if (!(minTime <= maxTime)) return null;
 
-    // 吸附处理
-    if (scaleStore.snapEnabled) {
-      const snappedStartTime = snapToTime(newStartTime);
-      // 如果吸附后的时间变化了，同步更新 trimStart
-      if (snappedStartTime !== newStartTime && (resizingClip.value.type === 'video' || resizingClip.value.type === 'audio')) {
-        const snapDelta = snappedStartTime - newStartTime;
-        newTrimStart = normalizeTime(newTrimStart + snapDelta);
-        // 确保吸附后 trimStart 仍在有效范围内
-        if (newTrimStart < 0) {
-          newTrimStart = 0;
-        }
-      }
-      newStartTime = snappedStartTime;
-    }
+    const unsnapped = Math.min(maxTime, Math.max(minTime, normalizeTime(originTime + deltaTime)));
+    if (!Number.isFinite(unsnapped)) return null;
+    const snapped = snapToTime(unsnapped);
+    const time = snapped >= minTime && snapped <= maxTime ? snapped : unsnapped;
+    if (!media) return { time };
 
-    // 更新当前clip
-    if (resizingClip.value.type === 'video' || resizingClip.value.type === 'audio') {
-      tracksStore.updateClip(resizingClip.value.id, {
-        startTime: newStartTime,
-        trimStart: Math.max(0, newTrimStart),
-      });
-    } else {
-      tracksStore.updateClip(resizingClip.value.id, {
-        startTime: newStartTime,
-      });
-    }
-
-    // 使用预先收集的关联元素来更新左侧位置
-    updateLinkedElementsLeft(newStartTime);
+    const trim = Math.min(maxTrim, Math.max(minTrim, normalizeTime(originTrim + (time - originTime))));
+    return { time, trim };
   }
 
   // 使用预先收集的信息更新左侧关联元素
@@ -449,96 +411,6 @@ export function useResize() {
         // 左边缘调整时，前一个 clip 只改变 endTime，不需要继续链式更新
       }
     }
-  }
-
-  // 右边缘调整
-  function handleRightResize(deltaTime: number) {
-    if (!resizingClip.value) return;
-
-    let newEndTime = normalizeTime(resizeStartEndTime.value + deltaTime);
-
-    // 限制最小时长 0.1 秒
-    const minDuration = 0.1;
-    const minEndTime = resizeStartTime.value + minDuration;
-    newEndTime = Math.max(minEndTime, newEndTime);
-
-    // 使用预先收集的关联元素来判断是否有右侧转场（而不是实时检查 store 中的位置）
-    const hasRightTransition = linkedElementsRight.value.length > 0 &&
-      linkedElementsRight.value[0].type === 'transition';
-
-    // 如果没有转场连接，检查右侧是否有其他 clip，限制不能重叠
-    if (!hasRightTransition) {
-      const trackForOverlapCheck = tracksStore.tracks.find(
-        (t) => t.id === resizingClip.value!.trackId
-      );
-      if (trackForOverlapCheck) {
-        const nextClipForOverlap = trackForOverlapCheck.clips
-          .filter((c) => c.type !== 'transition' && c.id !== resizingClip.value!.id)
-          .find((c) => c.startTime >= resizeStartEndTime.value - 0.01 && c.startTime < newEndTime);
-
-        if (nextClipForOverlap) {
-          // 不能超过后一个 clip 的开始时间
-          newEndTime = Math.min(newEndTime, nextClipForOverlap.startTime);
-        }
-      }
-    }
-
-    // 对于视频/音频 clip，检查是否超过原始时长，同时计算新的 trimEnd
-    let newTrimEnd = 0;
-    if (
-      resizingClip.value.type === 'video' ||
-      resizingClip.value.type === 'audio'
-    ) {
-      const mediaClip = resizingClip.value as MediaClip;
-      // 计算 trimEnd 的变化量（与 endTime 变化量相同）
-      const trimDelta = newEndTime - resizeStartEndTime.value;
-      newTrimEnd = normalizeTime(resizeStartTrimEnd.value + trimDelta);
-
-      // 限制 trimEnd 不能超过原始时长
-      if (newTrimEnd > mediaClip.originalDuration) {
-        newTrimEnd = mediaClip.originalDuration;
-        newEndTime = normalizeTime(resizeStartEndTime.value + (newTrimEnd - resizeStartTrimEnd.value));
-      }
-
-      // 限制 trimEnd 不能小于 trimStart（保持最小时长）
-      const currentTrimStart = resizeStartTrimStart.value;
-      if (newTrimEnd < currentTrimStart + minDuration) {
-        newTrimEnd = currentTrimStart + minDuration;
-        newEndTime = normalizeTime(resizeStartEndTime.value + (newTrimEnd - resizeStartTrimEnd.value));
-      }
-    }
-
-    // 吸附处理
-    if (scaleStore.snapEnabled) {
-      const snappedEndTime = snapToTime(newEndTime);
-      // 如果吸附后的时间变化了，同步更新 trimEnd
-      if (snappedEndTime !== newEndTime && (resizingClip.value.type === 'video' || resizingClip.value.type === 'audio')) {
-        const mediaClip = resizingClip.value as MediaClip;
-        const snapDelta = snappedEndTime - newEndTime;
-        newTrimEnd = normalizeTime(newTrimEnd + snapDelta);
-        // 确保吸附后 trimEnd 仍在有效范围内
-        if (newTrimEnd > mediaClip.originalDuration) {
-          newTrimEnd = mediaClip.originalDuration;
-        }
-      }
-      newEndTime = snappedEndTime;
-    }
-
-    // 更新当前clip
-    if (resizingClip.value.type === 'video' || resizingClip.value.type === 'audio') {
-      const mediaClip = resizingClip.value as MediaClip;
-      tracksStore.updateClip(resizingClip.value.id, {
-        endTime: newEndTime,
-        trimEnd: Math.min(newTrimEnd, mediaClip.originalDuration),
-      });
-    } else {
-      tracksStore.updateClip(resizingClip.value.id, {
-        endTime: newEndTime,
-      });
-    }
-
-    // 使用预先收集的关联元素来更新位置
-    updateLinkedElementsRight(newEndTime);
   }
 
   // 使用预先收集的信息更新右侧关联元素

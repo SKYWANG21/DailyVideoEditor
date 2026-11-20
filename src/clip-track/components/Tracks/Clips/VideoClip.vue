@@ -30,12 +30,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject, ref, onMounted, watch, onUnmounted } from 'vue'
-import { useScaleStore } from '../../../stores/scale'
-import { useClipTrackPinia } from '../../../stores/clipTrackPinia'
-import { extractVideoThumbnails } from '../../../utils/mediaProcessor'
-import { COMPOSE_MEDIA_RESOLVER } from '../../../../service/resolveComposeMediaUrl'
-import type { MediaClip } from '../../../types'
+import { computed, inject, ref, watch } from "vue";
+import { useScaleStore } from "../../../stores/scale";
+import { useClipTrackPinia } from "../../../stores/clipTrackPinia";
+import { extractVideoThumbnails } from "../../../utils/mediaProcessor";
+import { COMPOSE_MEDIA_RESOLVER } from "../../../../service/resolveComposeMediaUrl";
+import type { MediaClip } from "../../../types";
 
 // Props
 interface Props {
@@ -152,51 +152,38 @@ const displayThumbnails = computed(() => {
   return result
 })
 
-// 加载缩略图
-async function loadThumbnails() {
-  // 如果已经有缩略图，不需要加载
-  if (mediaClip.value.thumbnails && mediaClip.value.thumbnails.length > 0) {
-    return
-  }
-
-  const sourceUrl = mediaClip.value.sourceUrl
-  if (!sourceUrl) return
-
-  isLoading.value = true
-  try {
-    const result = await extractVideoThumbnails(sourceUrl, {
-      count: 20,
-      width: 120,
-      resolve: mediaResolver ? (url) => mediaResolver.resolve(url) : undefined,
-    })
-    loadedThumbnails.value = result.thumbnails
-  } catch (error) {
-    console.error('Failed to load video thumbnails:', error)
-  } finally {
-    isLoading.value = false
-  }
-}
-
-// 监听 sourceUrl 变化
-watch(() => mediaClip.value.sourceUrl, () => {
-  loadedThumbnails.value = []
-  loadThumbnails()
-})
-
-// 组件挂载时加载缩略图
-onMounted(() => {
-  loadThumbnails()
-})
-
-// 组件卸载时清理
-onUnmounted(() => {
-  // 清理 blob URL
-  for (const url of loadedThumbnails.value) {
-    if (url.startsWith('blob:')) {
-      URL.revokeObjectURL(url)
+/** 仅按素材加载抽帧结果；换源或卸载时只释放当前 Clip 创建的 URL。 */
+watch(
+  [() => mediaClip.value.sourceUrl, () => Boolean(mediaClip.value.thumbnails?.length)],
+  async ([sourceUrl, hasProvidedThumbnails], _previous, onCleanup): Promise<void> => {
+    if (!sourceUrl || hasProvidedThumbnails) {
+      isLoading.value = false;
+      return;
     }
-  }
-})
+
+    let active = true;
+    onCleanup(() => {
+      active = false;
+      for (const url of loadedThumbnails.value) URL.revokeObjectURL(url);
+      loadedThumbnails.value = [];
+    });
+
+    isLoading.value = true;
+    try {
+      const { frames } = await extractVideoThumbnails(sourceUrl, {
+        count: 20,
+        width: 120,
+        resolve: mediaResolver ? (url) => mediaResolver.resolve(url) : undefined,
+      });
+      if (active && mediaClip.value.sourceUrl === sourceUrl && !mediaClip.value.thumbnails?.length) {
+        loadedThumbnails.value = frames.map((frame) => URL.createObjectURL(frame));
+      }
+    } finally {
+      if (active) isLoading.value = false;
+    }
+  },
+  { immediate: true },
+);
 </script>
 
 <style scoped>
